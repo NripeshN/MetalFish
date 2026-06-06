@@ -737,6 +737,30 @@ void test_hybrid_config() {
     EXPECT(tc, HybridMCTSRootRejectQGapOverride(
                    true, true, true, 20, 18, 0.900f, 0.750f, 311, 312, 3,
                    -VALUE_INFINITE, 394, 2, 1, 0.028f, 0.778f));
+    EXPECT(tc, HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 13, 10, 0.769f, 0.322f, 83, 83, 2,
+                   -VALUE_INFINITE, 1860, 2, 1, -0.239f, 0.083f));
+    EXPECT(tc, HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 28, 24, 0.857f, 0.774f, 766, 743, 3,
+                   -VALUE_INFINITE, 7587, 2, 3, -0.155f, 0.619f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 13, 10, 0.769f, 0.299f, 83, 83, 2,
+                   -VALUE_INFINITE, 1860, 2, 1, -0.239f, 0.083f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 13, 10, 0.769f, 0.322f, 74, 83, 2,
+                   -VALUE_INFINITE, 1860, 2, 1, -0.239f, 0.083f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 13, 10, 0.769f, 0.322f, 83, 74, 2,
+                   -VALUE_INFINITE, 1860, 2, 1, -0.239f, 0.083f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 13, 10, 0.769f, 0.322f, 83, 83, 7,
+                   -VALUE_INFINITE, 1860, 2, 1, -0.239f, 0.083f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 13, 10, 0.769f, 0.322f, 83, 83, 2,
+                   -VALUE_INFINITE, 10001, 2, 1, -0.239f, 0.083f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 13, 10, 0.769f, 0.322f, 83, 83, 2,
+                   -VALUE_INFINITE, 1860, 2, 4, -0.239f, 0.083f));
     EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
                    true, true, true, 38, 25, 0.658f, 0.899f, 298, 329, 4,
                    -VALUE_INFINITE, 4, 4, 1, -0.290f, 0.759f));
@@ -761,6 +785,12 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
                    true, true, true, 40, 11, 0.275f, 0.072f, 111, 111, 3,
                    -VALUE_INFINITE, 631, 4, 2, 0.002f, 0.356f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 18, 13, 0.722f, 0.350f, 83, 83, 2,
+                   -VALUE_INFINITE, 802, 2, 2, -0.078f, 0.272f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 18, 13, 0.699f, 0.350f, 83, 83, 2,
+                   -VALUE_INFINITE, 802, 2, 2, -0.078f, 0.272f));
   }
   {
     TestCase tc("Clock-managed MCTS root-reject Q-gap override predicate");
