@@ -316,6 +316,7 @@ def setup_metalfish(
     mcts_parallel_search: bool,
     mcts_policy_temperature: Optional[float],
     mcts_cpuct_at_root: Optional[float],
+    pure_mcts_cpuct_at_root: Optional[float],
     mcts_fpu_reduction: Optional[float],
     mcts_fpu_reduction_at_root: Optional[float],
     mcts_fpu_value: Optional[float],
@@ -343,6 +344,8 @@ def setup_metalfish(
         sess.setoption("MCTSPolicySoftmaxTemp", str(mcts_policy_temperature))
     if mcts_cpuct_at_root is not None:
         sess.setoption("MCTSCPuctAtRoot", str(mcts_cpuct_at_root))
+    if pure_mcts_cpuct_at_root is not None:
+        sess.setoption("PureMCTSCPuctAtRoot", str(pure_mcts_cpuct_at_root))
     if mcts_fpu_reduction is not None:
         sess.setoption("MCTSFpuReduction", str(mcts_fpu_reduction))
     if mcts_fpu_reduction_at_root is not None:
@@ -775,6 +778,7 @@ def write_json_report(
             "hybrid_ane_min_budget_ms": args.hybrid_ane_min_budget_ms,
             "mcts_policy_temperature": args.mcts_policy_temperature,
             "mcts_cpuct_at_root": args.mcts_cpuct_at_root,
+            "pure_mcts_cpuct_at_root": args.pure_mcts_cpuct_at_root,
             "mcts_fpu_reduction": args.mcts_fpu_reduction,
             "mcts_fpu_reduction_at_root": args.mcts_fpu_reduction_at_root,
             "mcts_fpu_value": args.mcts_fpu_value,
@@ -876,6 +880,7 @@ def run_once(
                 args.mcts_parallel_search,
                 args.mcts_policy_temperature,
                 args.mcts_cpuct_at_root,
+                args.pure_mcts_cpuct_at_root,
                 args.mcts_fpu_reduction,
                 args.mcts_fpu_reduction_at_root,
                 args.mcts_fpu_value,
@@ -1110,6 +1115,12 @@ def main() -> int:
         type=float,
         default=None,
         help="Override MCTSCPuctAtRoot for root allocation probes",
+    )
+    parser.add_argument(
+        "--pure-mcts-cpuct-at-root",
+        type=float,
+        default=None,
+        help="Override PureMCTSCPuctAtRoot for pure-MCTS strength probes",
     )
     parser.add_argument(
         "--mcts-fpu-reduction",
