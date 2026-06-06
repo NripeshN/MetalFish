@@ -2171,7 +2171,8 @@ bool HybridPawnOnlyANEMCTSOverride(
       mcts_current_best_visits >= 10 && visit_share >= 0.70f &&
       root_q_gap >= 0.70f && q_gap_to_ab >= 0.70f && mcts_cp >= 130 &&
       eval_delta >= 150 && ane_score_margin >= 1.0f && ab_mcts_visits <= 1 &&
-      std::abs(ab_average_score) <= 120 && std::abs(mcts_average_score) <= 220 &&
+      std::abs(ab_average_score) <= 120 &&
+      std::abs(mcts_average_score) <= 220 &&
       std::abs(ab_average_score - mcts_average_score) <= 160;
   if (ultra_tiny_ane_pawn_capture)
     return true;
