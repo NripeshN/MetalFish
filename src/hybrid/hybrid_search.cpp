@@ -1503,12 +1503,12 @@ bool HybridMCTSRootRejectQGapOverride(
     const bool low_ab_support_discovery =
         visit_evidence_sane && mcts_root_visits >= 24 &&
         mcts_root_visits <= 60 && mcts_best_visits >= 18 &&
-        mcts_best_visits <= 30 && visit_share >= 0.45f &&
-        root_q_gap >= 0.90f && mcts_cp >= 250 && eval_delta >= 280 &&
-        mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 8 &&
-        mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 1000 &&
-        ab_in_mcts_rank >= 3 && ab_in_mcts_rank <= 5 &&
-        ab_in_mcts_current_visits <= 2 && mcts_q - ab_in_mcts_q >= 0.90f;
+        mcts_best_visits <= 30 && visit_share >= 0.45f && root_q_gap >= 0.90f &&
+        mcts_cp >= 250 && eval_delta >= 280 && mcts_in_ab_rank >= 2 &&
+        mcts_in_ab_rank <= 8 && mcts_in_ab_score == -VALUE_INFINITE &&
+        mcts_in_ab_effort <= 1000 && ab_in_mcts_rank >= 3 &&
+        ab_in_mcts_rank <= 5 && ab_in_mcts_current_visits <= 2 &&
+        mcts_q - ab_in_mcts_q >= 0.90f;
     const bool medium_root_discovery =
         visit_evidence_sane && mcts_root_visits >= 90 &&
         mcts_root_visits <= 300 && mcts_best_visits >= 60 &&

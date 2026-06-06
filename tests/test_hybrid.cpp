@@ -738,8 +738,8 @@ void test_hybrid_config() {
                    true, true, true, 38, 25, 0.658f, 1.049f, 298, 329, 4,
                    -VALUE_INFINITE, 4, 4, 3, -0.290f, 0.759f));
     EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
-                   true, true, true, 38, 25, 0.658f, 1.049f, 298, 329, 4,
-                   -500, 4, 4, 1, -0.290f, 0.759f));
+                   true, true, true, 38, 25, 0.658f, 1.049f, 298, 329, 4, -500,
+                   4, 4, 1, -0.290f, 0.759f));
     EXPECT(tc, HybridMCTSRootRejectQGapOverride(
                    true, false, true, 2192, 2113, 0.964f, 1.149f, 336, 396, 3,
                    -VALUE_INFINITE, 1862, 2, 27, -0.341f, 0.808f));
