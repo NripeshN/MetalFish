@@ -1500,6 +1500,15 @@ bool HybridMCTSRootRejectQGapOverride(
       mcts_best_visits < 25 || mcts_best_visits > 40 || visit_share < 0.40f ||
       visit_share > 0.60f || root_q_gap < 0.60f || mcts_cp < 80 ||
       eval_delta < 150) {
+    const bool low_ab_support_discovery =
+        visit_evidence_sane && mcts_root_visits >= 24 &&
+        mcts_root_visits <= 60 && mcts_best_visits >= 18 &&
+        mcts_best_visits <= 30 && visit_share >= 0.45f &&
+        root_q_gap >= 0.90f && mcts_cp >= 250 && eval_delta >= 280 &&
+        mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 8 &&
+        mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 1000 &&
+        ab_in_mcts_rank >= 3 && ab_in_mcts_rank <= 5 &&
+        ab_in_mcts_current_visits <= 2 && mcts_q - ab_in_mcts_q >= 0.90f;
     const bool medium_root_discovery =
         visit_evidence_sane && mcts_root_visits >= 90 &&
         mcts_root_visits <= 300 && mcts_best_visits >= 60 &&
@@ -1516,7 +1525,8 @@ bool HybridMCTSRootRejectQGapOverride(
         mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 2600 &&
         ab_in_mcts_rank == 2 && ab_in_mcts_current_visits >= 20 &&
         ab_in_mcts_current_visits <= 64 && mcts_q - ab_in_mcts_q >= 1.0f;
-    return medium_root_discovery || cache_heavy_discovery;
+    return low_ab_support_discovery || medium_root_discovery ||
+           cache_heavy_discovery;
   }
 
   if ((mcts_in_ab_rank != 2 && mcts_in_ab_rank != 3) ||
