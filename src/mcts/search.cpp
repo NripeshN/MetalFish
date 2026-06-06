@@ -2597,9 +2597,9 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
           continue;
         const uint32_t cn = child->GetN();
         const float cq = child->GetWL();
-        if (!MCTSRootPawnEndgameEnPassantCandidate(
-                total_child_visits, best_n, cn, best_is_capture, true, best_q,
-                cq)) {
+        if (!MCTSRootPawnEndgameEnPassantCandidate(total_child_visits, best_n,
+                                                   cn, best_is_capture, true,
+                                                   best_q, cq)) {
           continue;
         }
         if (ep_idx < 0 || cq > ep_q ||
