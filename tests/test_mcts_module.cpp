@@ -917,6 +917,24 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(!MCTSRootAdvancedPromotionSupportCandidate(70, 43, 20, 0.224f, 0.501f,
                                                     0.333f, 0.300f),
          "weak promotion support Q gap is blocked", tc);
+  expect(MCTSRootClockLowVisitQOverrideCandidate(91, 37, 21, 0.400f, 0.475f,
+                                                 0.194f),
+         "02TvL reused-root current visits can prefer the higher-Q queen move",
+         tc);
+  Position promotion_support_duel;
+  StateInfo promotion_support_duel_st;
+  promotion_support_duel.set("2k5/p1p3q1/P4p2/2p5/Q1NP4/2P4r/"
+                             "4K1p1/6R1 b - - 1 29",
+                             false, &promotion_support_duel_st);
+  expect(MCTSIsAdvancedPromotionSupportQueenMove(
+             promotion_support_duel,
+             UCIEngine::to_move(promotion_support_duel, "g7g6")),
+         "02TvL Qg6 also supports the advanced pawn", tc);
+  expect(MCTSIsAdvancedPromotionSupportQueenMove(
+             promotion_support_duel,
+             UCIEngine::to_move(promotion_support_duel, "g7g4")),
+         "02TvL Qg4 is a competing support move, not a non-support replacement",
+         tc);
   expect(MCTSRootPawnEndgameEnPassantCandidate(54, 26, 12, false, true, 0.214f,
                                                0.180f),
          "pawn-endgame en-passant can replace quiet best when Q is near", tc);

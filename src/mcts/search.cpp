@@ -2710,6 +2710,51 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
     }
   }
 
+  const bool reused_root_current_search =
+      total_current_child_visits > 0 &&
+      total_current_child_visits < total_child_visits;
+  if (reused_root_current_search && best_idx >= 0 && !best_is_terminal_win) {
+    Position root_pos;
+    StateInfo root_state;
+    root_pos.set(tree_.RootFen(), false, &root_state);
+
+    if (MCTSIsAdvancedPromotionSupportQueenMove(root_pos,
+                                                edges[best_idx].move)) {
+      int q_idx = best_idx;
+      float q_best = best_q;
+      const uint32_t best_baseline =
+          RootVisitBaselineLocked(edges[best_idx].move);
+      uint32_t q_best_current =
+          best_n >= best_baseline ? best_n - best_baseline : 0;
+
+      for (int i = 0; i < num_edges; ++i) {
+        if (i == best_idx)
+          continue;
+        Node *child = edges[i].child.load(std::memory_order_acquire);
+        if (!child)
+          continue;
+        if (!MCTSIsAdvancedPromotionSupportQueenMove(root_pos, edges[i].move))
+          continue;
+        const uint32_t cn = child->GetN();
+        const uint32_t baseline = RootVisitBaselineLocked(edges[i].move);
+        const uint32_t current_visits = cn >= baseline ? cn - baseline : 0;
+        const float cq = child->GetWL();
+        if (MCTSRootClockLowVisitQOverrideCandidate(
+                total_current_child_visits, q_best_current, current_visits,
+                q_best, cq, edges[i].GetP())) {
+          q_idx = i;
+          q_best = cq;
+          q_best_current = current_visits;
+        }
+      }
+      if (q_idx != best_idx) {
+        best_idx = q_idx;
+        best_n = edges[best_idx].child.load(std::memory_order_acquire)->GetN();
+        best_q = q_best;
+      }
+    }
+  }
+
   if (fixed_movetime_search && best_idx >= 0 && !best_is_terminal_win &&
       total_child_visits <= 220) {
     Position root_pos;
@@ -2766,30 +2811,35 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
     root_pos.set(tree_.RootFen(), false, &root_state);
 
     const float best_policy = edges[best_idx].GetP();
+    const bool best_is_promotion_support =
+        MCTSIsAdvancedPromotionSupportQueenMove(root_pos, edges[best_idx].move);
     int support_idx = -1;
     float support_policy = 0.0f;
     float support_q = -2.0f;
-    for (int i = 0; i < num_edges; ++i) {
-      if (i == best_idx)
-        continue;
-      Node *child = edges[i].child.load(std::memory_order_acquire);
-      if (!child)
-        continue;
-      if (!MCTSIsAdvancedPromotionSupportQueenMove(root_pos, edges[i].move))
-        continue;
-      const uint32_t cn = child->GetN();
-      const float cq = child->GetWL();
-      const float policy = edges[i].GetP();
-      if (!MCTSRootAdvancedPromotionSupportCandidate(total_child_visits, best_n,
-                                                     cn, best_policy, best_q,
-                                                     policy, cq)) {
-        continue;
-      }
-      if (support_idx < 0 || policy > support_policy ||
-          (std::abs(policy - support_policy) <= 0.000001f && cq > support_q)) {
-        support_idx = i;
-        support_policy = policy;
-        support_q = cq;
+    if (!best_is_promotion_support) {
+      for (int i = 0; i < num_edges; ++i) {
+        if (i == best_idx)
+          continue;
+        Node *child = edges[i].child.load(std::memory_order_acquire);
+        if (!child)
+          continue;
+        if (!MCTSIsAdvancedPromotionSupportQueenMove(root_pos, edges[i].move))
+          continue;
+        const uint32_t cn = child->GetN();
+        const float cq = child->GetWL();
+        const float policy = edges[i].GetP();
+        if (!MCTSRootAdvancedPromotionSupportCandidate(
+                total_child_visits, best_n, cn, best_policy, best_q, policy,
+                cq)) {
+          continue;
+        }
+        if (support_idx < 0 || policy > support_policy ||
+            (std::abs(policy - support_policy) <= 0.000001f &&
+             cq > support_q)) {
+          support_idx = i;
+          support_policy = policy;
+          support_q = cq;
+        }
       }
     }
     if (support_idx >= 0) {
