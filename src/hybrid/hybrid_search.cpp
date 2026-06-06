@@ -1691,6 +1691,25 @@ bool HybridRootPawnLeverCandidate(
   return true;
 }
 
+bool HybridMCTSRootSelectorConfirmsPawnLever(
+    uint64_t root_current_visits, uint32_t best_current_visits,
+    float best_policy, float best_q, int selected_average_score,
+    int candidate_average_score, int candidate_mcts_rank,
+    uint32_t candidate_mcts_current_visits, float candidate_mcts_q,
+    float candidate_mcts_policy) {
+  if (root_current_visits > std::numeric_limits<uint32_t>::max())
+    return false;
+  if (candidate_mcts_rank <= 0 || candidate_mcts_rank > 4)
+    return false;
+  if (selected_average_score - candidate_average_score > 60)
+    return false;
+
+  return MCTSRootHighPolicyLeverCandidate(
+      static_cast<uint32_t>(root_current_visits), best_current_visits,
+      candidate_mcts_current_visits, best_policy, best_q,
+      candidate_mcts_policy, candidate_mcts_q);
+}
+
 bool HybridANERootPawnLeverCandidate(
     bool ane_root_probe, int selected_ane_rank, float selected_ane_score,
     int candidate_ane_rank, float candidate_ane_score,
@@ -3771,6 +3790,13 @@ Move ParallelHybridSearch::make_final_decision() {
           mcts_lookup.rank, mcts_lookup.current_visits, selected_mcts.rank,
           selected_mcts.q, selected_mcts.policy, best_mcts_q, mcts_lookup.q,
           mcts_lookup.policy);
+      const bool mcts_selector_confirms_lever =
+          best_mcts.rank > 0 &&
+          HybridMCTSRootSelectorConfirmsPawnLever(
+              mcts_confidence_total_nodes, mcts_confidence_visits,
+              best_mcts.policy, best_mcts_q, selected_ab.average_score,
+              candidate.average_score, mcts_lookup.rank,
+              mcts_lookup.current_visits, mcts_lookup.q, mcts_lookup.policy);
       const ANERootLookup candidate_ane = find_ane_root_move(candidate.move);
       const bool ane_confirms_lever = HybridANERootPawnLeverCandidate(
           config_.ane_root_probe, selected_ane.rank, selected_ane.score,
@@ -3778,7 +3804,8 @@ Move ParallelHybridSearch::make_final_decision() {
           candidate.average_score, candidate.effort, selected_mcts.rank,
           selected_mcts.q, selected_mcts.policy, best_mcts_q, mcts_lookup.rank,
           mcts_lookup.current_visits, mcts_lookup.q, mcts_lookup.policy);
-      if (!mcts_confirms_lever && !ane_confirms_lever)
+      if (!mcts_confirms_lever && !mcts_selector_confirms_lever &&
+          !ane_confirms_lever)
         continue;
 
       if (candidate.average_score > best_lever_average ||

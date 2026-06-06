@@ -1259,6 +1259,25 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridRootPawnLeverCandidate(-1, -1, 57350, 3, 74, 1, -0.047f,
                                              0.070f, -0.084f, -0.123f, 0.219f));
 
+    EXPECT(tc, HybridMCTSRootSelectorConfirmsPawnLever(
+                   402, 201, 0.179f, -0.434f, -530, -538, 3, 35, -0.621f,
+                   0.217f));
+    EXPECT(tc, HybridMCTSRootSelectorConfirmsPawnLever(
+                   396, 195, 0.179f, -0.432f, -479, -539, 3, 35, -0.621f,
+                   0.217f));
+    EXPECT(tc, !HybridMCTSRootSelectorConfirmsPawnLever(
+                   396, 195, 0.179f, -0.432f, -479, -540, 3, 35, -0.621f,
+                   0.217f));
+    EXPECT(tc, !HybridMCTSRootSelectorConfirmsPawnLever(
+                   402, 201, 0.179f, -0.434f, -530, -538, 5, 35, -0.621f,
+                   0.217f));
+    EXPECT(tc, !HybridMCTSRootSelectorConfirmsPawnLever(
+                   402, 201, 0.179f, -0.434f, -530, -538, 3, 35, -0.640f,
+                   0.217f));
+    EXPECT(tc, !HybridMCTSRootSelectorConfirmsPawnLever(
+                   402, 201, 0.179f, -0.434f, -530, -538, 3, 35, -0.621f,
+                   0.199f));
+
     const auto ane_lever =
         [](bool ane_root_probe, int selected_ane_rank, float selected_ane_score,
            int candidate_ane_rank, float candidate_ane_score,
