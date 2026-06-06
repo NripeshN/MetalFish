@@ -1035,17 +1035,15 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   Position quiet_queen_net_pos;
   StateInfo quiet_queen_net_st;
   quiet_queen_net_pos.set(
-      "rn2k3/pp6/2pP2pp/5rq1/2B4b/2N2N2/PPP5/R2Q1K1R b q - 0 17",
-      false, &quiet_queen_net_st);
+      "rn2k3/pp6/2pP2pp/5rq1/2B4b/2N2N2/PPP5/R2Q1K1R b q - 0 17", false,
+      &quiet_queen_net_st);
   const Move queen_net = UCIEngine::to_move(quiet_queen_net_pos, "g5e3");
   const Move queen_net_competing =
       UCIEngine::to_move(quiet_queen_net_pos, "g5g3");
-  const Move knight_develop =
-      UCIEngine::to_move(quiet_queen_net_pos, "b8d7");
+  const Move knight_develop = UCIEngine::to_move(quiet_queen_net_pos, "b8d7");
   expect(MCTSIsQuietQueenKingNetMove(quiet_queen_net_pos, queen_net),
          "01o5f Qe3 is a quiet queen king-net probe candidate", tc);
-  expect(MCTSIsQuietQueenKingNetMove(quiet_queen_net_pos,
-                                     queen_net_competing),
+  expect(MCTSIsQuietQueenKingNetMove(quiet_queen_net_pos, queen_net_competing),
          "01o5f Qg3 is also a quiet queen king-net move", tc);
   expect(!MCTSIsQuietQueenKingNetMove(quiet_queen_net_pos, knight_develop),
          "non-queen move is not a quiet queen king-net candidate", tc);

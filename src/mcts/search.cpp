@@ -680,8 +680,8 @@ bool MCTSIsQuietQueenKingNetMove(const Position &pos, Move move) {
   if (std::max(file_dist, rank_dist) > 2)
     return false;
 
-  const Bitboard occupied_after = (pos.pieces() ^ square_bb(move.from_sq())) |
-                                  square_bb(move.to_sq());
+  const Bitboard occupied_after =
+      (pos.pieces() ^ square_bb(move.from_sq())) | square_bb(move.to_sq());
   const Bitboard king_zone = attacks_bb<KING>(their_king);
   return bool(attacks_bb<QUEEN>(to, occupied_after) & king_zone);
 }
@@ -2258,8 +2258,7 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
   }
 
   if (params_.root_tactical_capture_probe && is_root && best_idx >= 0 &&
-      limits_.movetime > 0 && children_visits >= 16 &&
-      children_visits <= 180) {
+      limits_.movetime > 0 && children_visits >= 16 && children_visits <= 180) {
     int probe_idx = -1;
     float probe_policy = 0.0f;
     const int policy_rank_limit = std::min(num_edges, 8);
