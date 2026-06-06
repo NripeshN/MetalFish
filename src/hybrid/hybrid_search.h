@@ -212,7 +212,7 @@ struct ParallelHybridConfig {
   int mcts_ab_root_hint_delay_ms = 0;
   int mcts_ab_root_hint_count = 8;
   int ab_candidate_verify_ms = 120;
-  int ab_candidate_verify_count = 4;
+  int ab_candidate_verify_count = 5;
   bool root_pawn_lever_tiebreak = true;
   bool ane_root_probe = false;
   bool ane_root_hints = false;
