@@ -1045,6 +1045,35 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(!MCTSRootAdvancedPromotionSupportCandidate(70, 43, 20, 0.224f, 0.501f,
                                                     0.333f, 0.300f),
          "weak promotion support Q gap is blocked", tc);
+  Position promotion_deflection_tactic;
+  StateInfo promotion_deflection_tactic_st;
+  promotion_deflection_tactic.set("7R/bP4k1/5qp1/3p1p2/4p3/7P/"
+                                  "1Q4P1/r4N1K w - - 5 41",
+                                  false, &promotion_deflection_tactic_st);
+  const Move deflection_promotion =
+      UCIEngine::to_move(promotion_deflection_tactic, "b7b8q");
+  const Move rook_check_leader =
+      UCIEngine::to_move(promotion_deflection_tactic, "h8g8");
+  const Move underpromote_rook =
+      UCIEngine::to_move(promotion_deflection_tactic, "b7b8r");
+  expect(MCTSIsQueenPromotionDeflectionRecapture(promotion_deflection_tactic,
+                                                 deflection_promotion),
+         "02Q6Q b8=Q is a promotion deflection with queen recapture", tc);
+  expect(!MCTSIsQueenPromotionDeflectionRecapture(promotion_deflection_tactic,
+                                                  rook_check_leader),
+         "02Q6Q rook check is not a promotion deflection", tc);
+  expect(!MCTSIsQueenPromotionDeflectionRecapture(promotion_deflection_tactic,
+                                                  underpromote_rook),
+         "02Q6Q underpromotion is outside the queen-deflection override", tc);
+  expect(MCTSRootQueenPromotionDeflectionCandidate(84, 50, 3, 0.089f, -0.044f,
+                                                   true),
+         "02Q6Q traced low-visit queen promotion deflection can override", tc);
+  expect(!MCTSRootQueenPromotionDeflectionCandidate(62, 32, 1, 0.095f, -0.897f,
+                                                    true),
+         "02Q6Q first root keeps collapsed promotion candidate blocked", tc);
+  expect(!MCTSRootQueenPromotionDeflectionCandidate(84, 50, 3, 0.089f, -0.044f,
+                                                    false),
+         "promotion deflection override requires a checking visit leader", tc);
   expect(MCTSRootClockLowVisitQOverrideCandidate(91, 37, 21, 0.400f, 0.475f,
                                                  0.194f),
          "02TvL reused-root current visits can prefer the higher-Q queen move",

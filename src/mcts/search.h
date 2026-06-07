@@ -421,6 +421,7 @@ bool MCTSIsMinorQuietAttacksQueen(const Position &pos, Move move);
 bool MCTSIsMinorFifthRankQuietMove(const Position &pos, Move move);
 bool MCTSHasHeavyPieceOnSeventh(const Position &pos, Color us);
 bool MCTSIsAdvancedPromotionSupportQueenMove(const Position &pos, Move move);
+bool MCTSIsQueenPromotionDeflectionRecapture(const Position &pos, Move move);
 bool MCTSIsQuietQueenCheck(const Position &pos, Move move);
 bool MCTSIsQuietQueenKingNetMove(const Position &pos, Move move);
 bool MCTSRootHighPolicyLeverCandidate(
@@ -473,6 +474,9 @@ bool MCTSRootQuietQueenKingNetProbeCandidate(uint32_t root_visits,
 bool MCTSRootAdvancedPromotionSupportCandidate(
     uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
     float best_policy, float best_q, float candidate_policy, float candidate_q);
+bool MCTSRootQueenPromotionDeflectionCandidate(
+    uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
+    float candidate_policy, float candidate_q, bool best_gives_check);
 bool MCTSRootPawnEndgameEnPassantCandidate(uint32_t root_visits,
                                            uint32_t best_visits,
                                            uint32_t candidate_visits,
