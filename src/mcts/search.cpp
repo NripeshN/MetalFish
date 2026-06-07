@@ -768,14 +768,15 @@ bool MCTSRootLowPolicyLeverProbeCandidate(uint32_t root_visits,
          candidate_policy >= 0.035f && candidate_policy <= 0.08f;
 }
 
-bool MCTSRootTinyLowVisitQOverrideCandidate(
-    uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
-    float best_policy, float best_q, float candidate_policy,
-    float candidate_q) {
+bool MCTSRootTinyLowVisitQOverrideCandidate(uint32_t root_visits,
+                                            uint32_t best_visits,
+                                            uint32_t candidate_visits,
+                                            float best_policy, float best_q,
+                                            float candidate_policy,
+                                            float candidate_q) {
   return root_visits >= 24 && root_visits <= 32 && candidate_visits >= 4 &&
          candidate_visits * 2 >= std::max<uint32_t>(1, best_visits) &&
-         best_q < 0.65f &&
-         candidate_policy >= 0.045f &&
+         best_q < 0.65f && candidate_policy >= 0.045f &&
          candidate_policy <= best_policy * 0.65f &&
          candidate_q > best_q + 0.020f;
 }
