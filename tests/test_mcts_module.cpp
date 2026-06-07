@@ -912,10 +912,12 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
          "02I9S guard still allows a much larger Q gap", tc);
   expect(MCTSRootLowVisitQOverrideCandidate(53, 48, 0.390f, 0.412f, 0.02f),
          "02I9S near-equal visits can select the higher-Q Nf5", tc);
-  expect(!MCTSRootLowVisitQOverrideCandidate(32, 15, 0.022f, 0.662f, 0.02f,
+  expect(MCTSRootLowVisitQOverrideCandidate(32, 15, 0.022f, 0.662f, 0.02f,
+                                            0.134f, true),
+         "03cYQ 15-visit decisive Q gap can beat the original leader", tc);
+  expect(!MCTSRootLowVisitQOverrideCandidate(32, 14, 0.022f, 0.662f, 0.02f,
                                              0.134f, true),
-         "03cYQ 15 visits cannot directly beat the original 32-visit leader",
-         tc);
+         "03cYQ decisive Q gap still needs enough visits", tc);
   expect(MCTSRootLowVisitQOverrideCandidate(18, 15, 0.022f, 0.662f, 0.02f,
                                             0.134f, true),
          "03cYQ 15 visits can beat an already-promoted 18-visit candidate", tc);
@@ -937,6 +939,46 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
          "02J4S queen move is not a minor high-value capture", tc);
   expect(MCTSRootHighValueCaptureProbeCandidate(76, 3, 0.110f),
          "02J4S high-value capture probe passes", tc);
+
+  Position high_policy_bishop_capture_tactic;
+  StateInfo high_policy_bishop_capture_tactic_st;
+  high_policy_bishop_capture_tactic.set(
+      "4r1k1/p3qpp1/1bQ5/5p1p/1P5P/8/PBP2PP1/3R2K1 b - - 0 24", false,
+      &high_policy_bishop_capture_tactic_st);
+  const Move queen_visit_leader =
+      UCIEngine::to_move(high_policy_bishop_capture_tactic, "e7e2");
+  const Move bishop_takes_f2 =
+      UCIEngine::to_move(high_policy_bishop_capture_tactic, "b6f2");
+  expect(MCTSRootHighPolicyCaptureQOverrideCandidate(
+             high_policy_bishop_capture_tactic, bishop_takes_f2, 62, 46, 15,
+             0.232f, 0.887f, 0.419f),
+         "00uL7 high-policy bishop capture can override a low-Q visit leader",
+         tc);
+  expect(!MCTSRootHighPolicyCaptureQOverrideCandidate(
+             high_policy_bishop_capture_tactic, bishop_takes_f2, 62, 46, 14,
+             0.232f, 0.887f, 0.419f),
+         "high-policy capture override still needs enough visits", tc);
+  expect(!MCTSRootHighPolicyCaptureQOverrideCandidate(
+             high_policy_bishop_capture_tactic, queen_visit_leader, 62, 46, 15,
+             0.232f, 0.887f, 0.419f),
+         "high-policy capture override requires an actual capture", tc);
+  Position high_policy_sacrifice_tactic;
+  StateInfo high_policy_sacrifice_tactic_st;
+  high_policy_sacrifice_tactic.set(
+      "5rk1/2R2p2/7p/6pB/b7/2Q4P/2p2PPK/1q6 w - - 4 32", false,
+      &high_policy_sacrifice_tactic_st);
+  const Move queen_check_leader =
+      UCIEngine::to_move(high_policy_sacrifice_tactic, "c3f6");
+  const Move bishop_takes_rook_sacrifice =
+      UCIEngine::to_move(high_policy_sacrifice_tactic, "h5f7");
+  expect(MCTSRootHighPolicyCaptureQOverrideCandidate(
+             high_policy_sacrifice_tactic, bishop_takes_rook_sacrifice, 65, 48,
+             15, -0.094f, 0.759f, 0.222f),
+         "03YCu high-Q bishop capture sacrifice can override visit leader", tc);
+  expect(!MCTSRootHighPolicyCaptureQOverrideCandidate(
+             high_policy_sacrifice_tactic, queen_check_leader, 65, 48, 15,
+             -0.094f, 0.759f, 0.222f),
+         "high-policy capture override still rejects quiet queen checks", tc);
 
   Position high_policy_queen_attack_tactic;
   StateInfo high_policy_queen_attack_tactic_st;
@@ -1030,6 +1072,31 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(!MCTSRootPawnEndgameEnPassantCandidate(54, 26, 2, false, true, 0.214f,
                                                 0.100f),
          "pawn-endgame en-passant still needs near Q", tc);
+  Position pawn_zugzwang;
+  StateInfo pawn_zugzwang_st;
+  pawn_zugzwang.set("4K3/5p2/5kpp/8/7P/6P1/5P2/8 w - - 0 56", false,
+                    &pawn_zugzwang_st);
+  const Move pawn_race = UCIEngine::to_move(pawn_zugzwang, "g3g4");
+  const Move quiet_zugzwang = UCIEngine::to_move(pawn_zugzwang, "f2f3");
+  expect(MCTSRootPawnEndgameQuietQOverrideCandidate(pawn_zugzwang, pawn_race,
+                                                    quiet_zugzwang, 61, 23, 14,
+                                                    0.247f, 0.308f, 0.140f),
+         "01qsT pawn-endgame quiet zugzwang can override", tc);
+  expect(!MCTSRootPawnEndgameQuietQOverrideCandidate(pawn_zugzwang, pawn_race,
+                                                     quiet_zugzwang, 61, 23, 7,
+                                                     0.247f, 0.308f, 0.140f),
+         "pawn-endgame quiet override needs enough visits", tc);
+  Position pawn_break_endgame;
+  StateInfo pawn_break_endgame_st;
+  pawn_break_endgame.set("8/8/p3p3/3p2p1/1P1Ppk2/2P4P/5PK1/8 b - - 4 42", false,
+                         &pawn_break_endgame_st);
+  const Move pawn_push_leader = UCIEngine::to_move(pawn_break_endgame, "e4e3");
+  const Move quiet_pawn_break = UCIEngine::to_move(pawn_break_endgame, "e6e5");
+  expect(MCTSRootPawnEndgameQuietQOverrideCandidate(
+             pawn_break_endgame, pawn_push_leader, quiet_pawn_break, 68, 42, 15,
+             0.252f, 0.317f, 0.162f),
+         "01mBE quiet pawn break can override with one-third visit support",
+         tc);
 
   Position minor_pawn_endgame_recapture;
   StateInfo minor_pawn_endgame_recapture_st;

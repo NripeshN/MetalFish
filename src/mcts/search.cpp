@@ -946,6 +946,53 @@ bool MCTSRootPawnEndgameEnPassantCandidate(uint32_t root_visits,
   return best_q - candidate_q <= 0.080f;
 }
 
+bool MCTSRootPawnEndgameQuietQOverrideCandidate(
+    const Position &pos, Move best_move, Move candidate_move,
+    uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
+    float best_q, float candidate_q, float candidate_policy) {
+  if (root_visits < 24 || root_visits > 160)
+    return false;
+  if (pos.non_pawn_material() != VALUE_ZERO)
+    return false;
+  if (best_move == Move::none() || candidate_move == Move::none() ||
+      best_move.type_of() != NORMAL || candidate_move.type_of() != NORMAL) {
+    return false;
+  }
+  if (pos.capture(best_move) || pos.capture(candidate_move))
+    return false;
+  const Piece candidate_piece = pos.piece_on(candidate_move.from_sq());
+  if (candidate_piece == NO_PIECE || type_of(candidate_piece) != PAWN)
+    return false;
+  if (candidate_visits < 8)
+    return false;
+  if (static_cast<uint64_t>(candidate_visits) * 3 <
+      static_cast<uint64_t>(std::max<uint32_t>(1, best_visits))) {
+    return false;
+  }
+  return candidate_policy >= 0.050f && candidate_q > best_q + 0.045f;
+}
+
+bool MCTSRootHighPolicyCaptureQOverrideCandidate(
+    const Position &pos, Move candidate_move, uint32_t root_visits,
+    uint32_t best_visits, uint32_t candidate_visits, float best_q,
+    float candidate_q, float candidate_policy) {
+  if (root_visits < 48 || root_visits > 160)
+    return false;
+  if (candidate_move == Move::none() || !pos.capture(candidate_move))
+    return false;
+  const Piece candidate_piece = pos.piece_on(candidate_move.from_sq());
+  if (candidate_piece == NO_PIECE || type_of(candidate_piece) == PAWN)
+    return false;
+  if (candidate_visits < 15)
+    return false;
+  if (static_cast<uint64_t>(candidate_visits) * 4 <
+      static_cast<uint64_t>(std::max<uint32_t>(1, best_visits))) {
+    return false;
+  }
+  return candidate_policy >= 0.200f && candidate_q >= 0.750f &&
+         candidate_q > best_q + 0.500f;
+}
+
 bool MCTSRootMinorPawnEndgameCaptureProtected(
     const Position &pos, Move best_move, Move candidate_move, float best_policy,
     float best_q, float candidate_policy, float candidate_q) {
@@ -979,7 +1026,7 @@ bool MCTSRootLowVisitQOverrideCandidate(uint32_t best_visits,
                                             candidate_q >= 0.95f &&
                                             candidate_q > best_q + 0.50f;
   const bool strong_gap_candidate =
-      allow_strong_gap_candidate && candidate_visits >= 16 &&
+      allow_strong_gap_candidate && candidate_visits >= 15 &&
       candidate_visits * 3 >= std::max<uint32_t>(1, best_visits) &&
       candidate_policy >= 0.045f && candidate_q > best_q + 0.35f;
   if (!near_visit_candidate && !decisive_low_visit_candidate &&
@@ -2822,6 +2869,26 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
             protects_minor_pawn_endgame_capture ||
             protects_high_policy_visit_leader)
           continue;
+        if (MCTSRootPawnEndgameQuietQOverrideCandidate(
+                root_pos, edges[q_idx].move, edges[i].move, total_child_visits,
+                params_.low_visit_q_override_rescan ? q_best_visits : best_n,
+                cn, q_best, cq, edges[i].GetP())) {
+          q_idx = i;
+          q_best = cq;
+          q_best_visits = cn;
+          q_changed = true;
+          continue;
+        }
+        if (MCTSRootHighPolicyCaptureQOverrideCandidate(
+                root_pos, edges[i].move, total_child_visits,
+                params_.low_visit_q_override_rescan ? q_best_visits : best_n,
+                cn, q_best, cq, edges[i].GetP())) {
+          q_idx = i;
+          q_best = cq;
+          q_best_visits = cn;
+          q_changed = true;
+          continue;
+        }
         if (MCTSRootTinyLowVisitQOverrideCandidate(
                 total_child_visits,
                 params_.low_visit_q_override_rescan ? q_best_visits : best_n,
