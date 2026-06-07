@@ -1139,6 +1139,38 @@ bool MCTSRootHighPolicyCaptureQOverrideCandidate(
          candidate_q > best_q + 0.500f;
 }
 
+bool MCTSRootMajorQuietQOverrideCandidate(
+    const Position &pos, Move best_move, Move candidate_move,
+    uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
+    float best_policy, float best_q, float candidate_policy,
+    float candidate_q) {
+  if (root_visits < 24 || root_visits > 160)
+    return false;
+  if (best_move == Move::none() || candidate_move == Move::none() ||
+      best_move.type_of() != NORMAL || candidate_move.type_of() != NORMAL)
+    return false;
+  if (pos.capture(best_move) || pos.capture(candidate_move))
+    return false;
+
+  const Piece candidate_piece = pos.piece_on(candidate_move.from_sq());
+  if (candidate_piece == NO_PIECE)
+    return false;
+  const PieceType candidate_type = type_of(candidate_piece);
+  if (candidate_type != ROOK && candidate_type != QUEEN)
+    return false;
+
+  if (candidate_visits < 8)
+    return false;
+  if (static_cast<uint64_t>(candidate_visits) * 3 <
+      static_cast<uint64_t>(std::max<uint32_t>(1, best_visits))) {
+    return false;
+  }
+  if (candidate_policy < 0.180f || candidate_policy < best_policy + 0.100f)
+    return false;
+
+  return candidate_q > best_q + 0.350f;
+}
+
 bool MCTSRootMinorPawnEndgameCaptureProtected(
     const Position &pos, Move best_move, Move candidate_move, float best_policy,
     float best_q, float candidate_policy, float candidate_q) {
@@ -3029,6 +3061,16 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
                 root_pos, edges[i].move, total_child_visits,
                 params_.low_visit_q_override_rescan ? q_best_visits : best_n,
                 cn, q_best, cq, edges[i].GetP())) {
+          q_idx = i;
+          q_best = cq;
+          q_best_visits = cn;
+          q_changed = true;
+          continue;
+        }
+        if (MCTSRootMajorQuietQOverrideCandidate(
+                root_pos, edges[q_idx].move, edges[i].move, total_child_visits,
+                params_.low_visit_q_override_rescan ? q_best_visits : best_n,
+                cn, edges[q_idx].GetP(), q_best, edges[i].GetP(), cq)) {
           q_idx = i;
           q_best = cq;
           q_best_visits = cn;

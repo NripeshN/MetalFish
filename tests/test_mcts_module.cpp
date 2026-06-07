@@ -1122,6 +1122,36 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
              UCIEngine::to_move(queen_endgame_later_root, "c6c8"), later_passer,
              52, 24, 0, 0.255f, 0.481f, 0.012f, -0.347f),
          "02TxK later unvisited passer cannot override the queen move", tc);
+  Position high_q_major_quiet_tactic;
+  StateInfo high_q_major_quiet_tactic_st;
+  high_q_major_quiet_tactic.set("8/2r2p1p/p4Qpk/1q6/1P6/7P/"
+                                "2r3P1/4RR1K w - - 10 35",
+                                false, &high_q_major_quiet_tactic_st);
+  const Move queen_check_leader_02ti8 =
+      UCIEngine::to_move(high_q_major_quiet_tactic, "f6h4");
+  const Move rook_lift_02ti8 =
+      UCIEngine::to_move(high_q_major_quiet_tactic, "f1f4");
+  const Move lower_policy_rook_02ti8 =
+      UCIEngine::to_move(high_q_major_quiet_tactic, "e1e4");
+  expect(
+      MCTSRootMajorQuietQOverrideCandidate(
+          high_q_major_quiet_tactic, queen_check_leader_02ti8, rook_lift_02ti8,
+          35, 19, 9, 0.087f, 0.027f, 0.234f, 0.459f),
+      "02ti8 high-policy quiet rook lift can override the queen visit leader",
+      tc);
+  expect(!MCTSRootMajorQuietQOverrideCandidate(
+             high_q_major_quiet_tactic, queen_check_leader_02ti8,
+             lower_policy_rook_02ti8, 35, 19, 5, 0.087f, 0.027f, 0.110f,
+             0.514f),
+         "02ti8 lower-policy rook move remains blocked despite higher Q", tc);
+  expect(!MCTSRootMajorQuietQOverrideCandidate(
+             high_q_major_quiet_tactic, queen_check_leader_02ti8,
+             rook_lift_02ti8, 35, 19, 7, 0.087f, 0.027f, 0.234f, 0.459f),
+         "major quiet override needs enough visits", tc);
+  expect(!MCTSRootMajorQuietQOverrideCandidate(
+             high_q_major_quiet_tactic, queen_check_leader_02ti8,
+             rook_lift_02ti8, 35, 19, 9, 0.087f, 0.220f, 0.234f, 0.459f),
+         "major quiet override still requires a large Q gap", tc);
   expect(MCTSRootClockLowVisitQOverrideCandidate(91, 37, 21, 0.400f, 0.475f,
                                                  0.194f),
          "02TvL reused-root current visits can prefer the higher-Q queen move",
