@@ -1503,6 +1503,27 @@ void test_hybrid_config() {
                                                         -0.434f, -530, -538, 3,
                                                         35, -0.621f, 0.199f));
 
+    EXPECT(tc, HybridRootQuietMinorMajorAttackCandidate(
+                   102, 117, 3734, -1, 0, 0.000f, 1, 19, 0.404f, 0.135f));
+    EXPECT(tc, HybridRootQuietMinorMajorAttackCandidate(
+                   124, 73, 4212, 5, 1, -0.005f, 1, 18, 0.371f, 0.135f));
+    EXPECT(tc, HybridRootQuietMinorMajorAttackCandidate(
+                   167, 163, 1922, 1, 10, 0.357f, 2, 9, 0.118f, 0.135f));
+    EXPECT(tc, HybridRootQuietMinorMajorAttackCandidate(
+                   118, 115, 2006, 5, 1, -0.005f, 1, 15, 0.274f, 0.135f));
+    EXPECT(tc, HybridRootQuietMinorMajorAttackCandidate(
+                   96, 138, 3816, 1, 21, 0.355f, 2, 9, 0.118f, 0.135f));
+    EXPECT(tc, !HybridRootQuietMinorMajorAttackCandidate(
+                   253, 252, 1171, 1, 10, 0.357f, 2, 3, 0.223f, 0.135f));
+    EXPECT(tc, !HybridRootQuietMinorMajorAttackCandidate(
+                   124, 73, 4212, 5, 1, -0.005f, 1, 18, 0.371f, 0.099f));
+    EXPECT(tc, !HybridRootQuietMinorMajorAttackCandidate(
+                   124, 63, 4212, 5, 1, -0.005f, 1, 18, 0.371f, 0.135f));
+    EXPECT(tc, !HybridRootQuietMinorMajorAttackCandidate(
+                   482, 359, 677, 1, 21, 0.355f, 2, 5, 0.144f, 0.135f));
+    EXPECT(tc, !HybridRootQuietMinorMajorAttackCandidate(
+                   167, 163, 1922, 1, 10, 0.370f, 2, 9, 0.118f, 0.135f));
+
     const auto ane_lever =
         [](bool ane_root_probe, int selected_ane_rank, float selected_ane_score,
            int candidate_ane_rank, float candidate_ane_score,

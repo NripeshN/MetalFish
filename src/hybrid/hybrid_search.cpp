@@ -1843,6 +1843,36 @@ bool HybridMCTSRootSelectorConfirmsPawnLever(
       candidate_mcts_q);
 }
 
+bool HybridRootQuietMinorMajorAttackCandidate(
+    int selected_average_score, int candidate_average_score,
+    uint64_t candidate_effort, int selected_mcts_rank,
+    uint32_t selected_mcts_current_visits, float selected_mcts_q,
+    int candidate_mcts_rank, uint32_t candidate_mcts_current_visits,
+    float candidate_mcts_q, float candidate_mcts_policy) {
+  if (candidate_mcts_rank <= 0 || candidate_mcts_rank > 2)
+    return false;
+  if (candidate_mcts_current_visits < 4 || candidate_mcts_policy < 0.10f)
+    return false;
+  if (candidate_effort < 1500 || candidate_effort > 10000)
+    return false;
+  if (selected_average_score - candidate_average_score > 60)
+    return false;
+
+  if (candidate_mcts_rank == 1) {
+    if (selected_mcts_rank > 0 && selected_mcts_rank <= 3 &&
+        selected_mcts_q - candidate_mcts_q > 0.12f) {
+      return false;
+    }
+    return true;
+  }
+
+  if (selected_mcts_rank != 1)
+    return false;
+  if (selected_mcts_q - candidate_mcts_q > 0.25f)
+    return false;
+  return selected_average_score - candidate_average_score <= 20;
+}
+
 bool HybridANERootPawnLeverCandidate(
     bool ane_root_probe, int selected_ane_rank, float selected_ane_score,
     int candidate_ane_rank, float candidate_ane_score,
@@ -4030,6 +4060,64 @@ Move ParallelHybridSearch::make_final_decision() {
     }
     return best_lever;
   };
+  const auto find_root_quiet_attack_tiebreak = [&](Move selected) {
+    if (!config_.root_pawn_lever_tiebreak || selected == Move::none() ||
+        low_node_mcts_primary || !mcts_decision_budget ||
+        !mcts_visit_evidence_sane) {
+      return Move::none();
+    }
+
+    const Position &root_pos = get_decision_root_pos();
+    const ABRootLookup selected_ab = find_ab_root_move(selected);
+    if (selected_ab.rank <= 0 || std::abs(selected_ab.average_score) > 1000)
+      return Move::none();
+    const MCTSRootLookup selected_mcts = find_mcts_root_move(selected);
+
+    std::vector<ABRootMoveInfo> root_moves;
+    {
+      std::lock_guard<std::mutex> lock(ab_root_mutex_);
+      root_moves = ab_root_moves_;
+    }
+
+    Move best_attack = Move::none();
+    int best_rank = MCTSSharedState::MAX_TOP_MOVES + 1;
+    uint32_t best_visits = 0;
+    const int count = std::min<int>(static_cast<int>(root_moves.size()),
+                                    ABSharedState::MAX_PV);
+    for (int i = 0; i < count; ++i) {
+      const ABRootMoveInfo &candidate = root_moves[i];
+      if (candidate.move == Move::none() || candidate.move == selected)
+        continue;
+      const auto hint_it =
+          std::find(ab_root_order_hints_snapshot.begin(),
+                    ab_root_order_hints_snapshot.end(), candidate.move);
+      if (hint_it == ab_root_order_hints_snapshot.end() ||
+          std::distance(ab_root_order_hints_snapshot.begin(), hint_it) > 3) {
+        continue;
+      }
+      if (!HybridIsQuietMinorMajorAttack(root_pos, candidate.move))
+        continue;
+
+      const MCTSRootLookup mcts_lookup = find_mcts_root_move(candidate.move);
+      if (!HybridRootQuietMinorMajorAttackCandidate(
+              selected_ab.average_score, candidate.average_score,
+              candidate.effort, selected_mcts.rank,
+              selected_mcts.current_visits, selected_mcts.q, mcts_lookup.rank,
+              mcts_lookup.current_visits, mcts_lookup.q,
+              mcts_lookup.policy)) {
+        continue;
+      }
+
+      if (mcts_lookup.rank < best_rank ||
+          (mcts_lookup.rank == best_rank &&
+           mcts_lookup.current_visits > best_visits)) {
+        best_attack = candidate.move;
+        best_rank = mcts_lookup.rank;
+        best_visits = mcts_lookup.current_visits;
+      }
+    }
+    return best_attack;
+  };
   const auto trace_simple = [&](const char *reason, Move selected) {
     if (!config_.trace_decisions)
       return;
@@ -4079,6 +4167,13 @@ Move ParallelHybridSearch::make_final_decision() {
     }
     trace_simple("fallback_legal", Move::none());
     return first_allowed_legal_move();
+  }
+
+  Move quiet_attack_tiebreak = find_root_quiet_attack_tiebreak(ab_best);
+  if (quiet_attack_tiebreak != Move::none()) {
+    stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+    trace_simple("root_quiet_attack_tiebreak", quiet_attack_tiebreak);
+    return quiet_attack_tiebreak;
   }
 
   if (ab_best == mcts_best) {

@@ -682,6 +682,13 @@ bool HybridMCTSRootSelectorConfirmsPawnLever(
     uint32_t candidate_mcts_current_visits, float candidate_mcts_q,
     float candidate_mcts_policy);
 
+bool HybridRootQuietMinorMajorAttackCandidate(
+    int selected_average_score, int candidate_average_score,
+    uint64_t candidate_effort, int selected_mcts_rank,
+    uint32_t selected_mcts_current_visits, float selected_mcts_q,
+    int candidate_mcts_rank, uint32_t candidate_mcts_current_visits,
+    float candidate_mcts_q, float candidate_mcts_policy);
+
 bool HybridANERootPawnLeverCandidate(
     bool ane_root_probe, int selected_ane_rank, float selected_ane_score,
     int candidate_ane_rank, float candidate_ane_score,
