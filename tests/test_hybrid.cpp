@@ -1248,6 +1248,9 @@ void test_hybrid_config() {
                    true, true, true, true, true, true, false, 36, 33, 23, 22, 1,
                    0.957f, 0.446f, 0.446f, 119, 145, -94, -94, 0.444f));
     EXPECT(tc, HybridPawnOnlyANEMCTSOverride(
+                   true, true, true, true, true, true, false, 35, 32, 22, 21, 1,
+                   0.955f, 0.426f, 0.426f, 112, 125, -105, -105, 0.444f));
+    EXPECT(tc, HybridPawnOnlyANEMCTSOverride(
                    true, true, true, true, true, true, false, 49, 46, 31, 30, 1,
                    0.968f, 0.608f, 0.607f, 180, 205, -93, -99, 0.444f));
     EXPECT(tc, HybridPawnOnlyANEMCTSOverride(
@@ -1329,6 +1332,12 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridPawnOnlyANEMCTSOverride(
                    true, true, true, true, true, true, false, 36, 33, 23, 22, 1,
                    0.957f, 0.446f, 0.446f, 119, 145, -94, -94, 0.399f));
+    EXPECT(tc, !HybridPawnOnlyANEMCTSOverride(
+                   true, true, true, true, true, true, false, 35, 32, 22, 21, 1,
+                   0.955f, 0.426f, 0.426f, 112, 119, -105, -105, 0.444f));
+    EXPECT(tc, !HybridPawnOnlyANEMCTSOverride(
+                   true, true, true, true, true, true, false, 35, 32, 22, 21, 1,
+                   0.955f, 0.426f, 0.426f, 112, 125, -105, -105, 0.439f));
     EXPECT(tc, !HybridPawnOnlyANEMCTSOverride(
                    true, true, true, true, true, true, false, 62, 59, 35, 34, 1,
                    0.971f, 0.691f, 0.666f, 219, 237, -20, -141, 0.444f));
@@ -2020,6 +2029,9 @@ void test_hybrid_config() {
     EXPECT(tc, HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    true, true, true, true, true, 102, 93, 0.912f, 0.708f, 472,
                    412, 5, -32001, 1297, 2, 4, 0.193f, 0.918f));
+    EXPECT(tc, HybridMCTSRootRejectRookEndgamePawnPushOverride(
+                   true, true, true, true, true, 36, 31, 0.861f, 0.673f, 461,
+                   263, 6, -32001, 5, 3, 2, 0.178f, 0.912f));
     EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    false, true, true, true, true, 53, 47, 0.887f, 0.677f, 468,
                    366, 3, -32001, 2429, 2, 3, 0.169f, 0.916f));
@@ -2048,20 +2060,38 @@ void test_hybrid_config() {
                    true, true, true, true, true, 44, 47, 0.887f, 0.677f, 468,
                    366, 3, -32001, 2429, 2, 3, 0.169f, 0.916f));
     EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
+                   true, true, true, true, true, 29, 31, 0.861f, 0.673f, 461,
+                   263, 6, -32001, 5, 3, 2, 0.178f, 0.912f));
+    EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    true, true, true, true, true, 53, 39, 0.887f, 0.677f, 468,
                    366, 3, -32001, 2429, 2, 3, 0.169f, 0.916f));
+    EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
+                   true, true, true, true, true, 36, 27, 0.861f, 0.673f, 461,
+                   263, 6, -32001, 5, 3, 2, 0.178f, 0.912f));
     EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    true, true, true, true, true, 53, 47, 0.879f, 0.677f, 468,
                    366, 3, -32001, 2429, 2, 3, 0.169f, 0.916f));
     EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
+                   true, true, true, true, true, 36, 31, 0.839f, 0.673f, 461,
+                   263, 6, -32001, 5, 3, 2, 0.178f, 0.912f));
+    EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    true, true, true, true, true, 53, 47, 0.887f, 0.590f, 468,
                    366, 3, -32001, 2429, 2, 3, 0.169f, 0.916f));
+    EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
+                   true, true, true, true, true, 36, 31, 0.861f, 0.659f, 461,
+                   263, 6, -32001, 5, 3, 2, 0.178f, 0.912f));
     EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    true, true, true, true, true, 53, 47, 0.887f, 0.677f, 429,
                    366, 3, -32001, 2429, 2, 3, 0.169f, 0.916f));
     EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
+                   true, true, true, true, true, 36, 31, 0.861f, 0.673f, 439,
+                   263, 6, -32001, 5, 3, 2, 0.178f, 0.912f));
+    EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    true, true, true, true, true, 53, 47, 0.887f, 0.677f, 468,
                    299, 3, -32001, 2429, 2, 3, 0.169f, 0.916f));
+    EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
+                   true, true, true, true, true, 36, 31, 0.861f, 0.673f, 461,
+                   239, 6, -32001, 5, 3, 2, 0.178f, 0.912f));
     EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    true, true, true, true, true, 53, 47, 0.887f, 0.677f, 468,
                    366, 1, -32001, 2429, 2, 3, 0.169f, 0.916f));
@@ -2069,11 +2099,17 @@ void test_hybrid_config() {
                    true, true, true, true, true, 53, 47, 0.887f, 0.677f, 468,
                    366, 7, -32001, 2429, 2, 3, 0.169f, 0.916f));
     EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
+                   true, true, true, true, true, 36, 31, 0.861f, 0.673f, 461,
+                   263, 7, -32001, 5, 3, 2, 0.178f, 0.912f));
+    EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    true, true, true, true, true, 53, 47, 0.887f, 0.677f, 468,
                    366, 3, 388, 2429, 2, 3, 0.169f, 0.916f));
     EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    true, true, true, true, true, 53, 47, 0.887f, 0.677f, 468,
                    366, 3, -32001, 20001, 2, 3, 0.169f, 0.916f));
+    EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
+                   true, true, true, true, true, 36, 31, 0.861f, 0.673f, 461,
+                   263, 6, -32001, 65, 3, 2, 0.178f, 0.912f));
     EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    true, true, true, true, true, 53, 47, 0.887f, 0.677f, 468,
                    366, 3, -32001, 2429, 1, 3, 0.169f, 0.916f));
@@ -2081,11 +2117,17 @@ void test_hybrid_config() {
                    true, true, true, true, true, 53, 47, 0.887f, 0.677f, 468,
                    366, 3, -32001, 2429, 2, 0, 0.169f, 0.916f));
     EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
+                   true, true, true, true, true, 36, 31, 0.861f, 0.673f, 461,
+                   263, 6, -32001, 5, 3, 3, 0.178f, 0.912f));
+    EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    true, true, true, true, true, 53, 47, 0.887f, 0.677f, 468,
                    366, 3, -32001, 2429, 2, 33, 0.169f, 0.916f));
     EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    true, true, true, true, true, 53, 47, 0.887f, 0.677f, 468,
                    366, 3, -32001, 2429, 2, 3, 0.330f, 0.916f));
+    EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
+                   true, true, true, true, true, 36, 31, 0.861f, 0.673f, 461,
+                   263, 6, -32001, 5, 3, 2, 0.270f, 0.912f));
   }
   {
     TestCase tc("Rook endgame central pawn push lower bound stays narrow");

@@ -1025,7 +1025,19 @@ bool HybridMCTSRootRejectRookEndgamePawnPushOverride(
     if (mcts_root_visits < 45 || mcts_root_visits > 1600 ||
         mcts_best_visits < 40 || visit_share < 0.88f || root_q_gap < 0.60f ||
         mcts_cp < 430 || eval_delta < 300) {
-      return false;
+      const bool ultra_low_root_breakthrough =
+          mcts_root_visits >= 30 && mcts_root_visits <= 48 &&
+          mcts_best_visits >= 28 && visit_share >= 0.84f &&
+          root_q_gap >= 0.66f && mcts_cp >= 440 && eval_delta >= 240 &&
+          mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 6 &&
+          mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 64 &&
+          ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 3 &&
+          ab_in_mcts_current_visits > 0 && ab_in_mcts_current_visits <= 2 &&
+          mcts_best_visits >=
+              12 * std::max<uint32_t>(1, ab_in_mcts_current_visits) &&
+          mcts_q - ab_in_mcts_q >= 0.65f;
+      if (!ultra_low_root_breakthrough)
+        return false;
     }
   } else {
     if (mcts_root_visits < 1500 || mcts_root_visits > 6000 ||
@@ -2227,6 +2239,19 @@ bool HybridPawnOnlyANEMCTSOverride(
       std::abs(ab_average_score - mcts_average_score) <= 120 &&
       (mcts_root_visits <= 60 || (mcts_cp >= 210 && eval_delta >= 220));
   if (short_ane_king_recapture)
+    return true;
+
+  const bool short_high_margin_ane_king_recapture =
+      king_recapture_shape && mcts_root_visits >= 35 &&
+      mcts_root_visits <= 40 && mcts_best_visits >= 30 &&
+      mcts_current_root_visits >= 20 && mcts_current_root_visits <= 24 &&
+      mcts_current_best_visits >= 20 && visit_share >= 0.95f &&
+      root_q_gap >= 0.40f && q_gap_to_ab >= 0.42f && mcts_cp >= 110 &&
+      eval_delta >= 120 && ane_score_margin >= 0.44f &&
+      ab_mcts_visits <= 1 && std::abs(ab_average_score) <= 150 &&
+      std::abs(mcts_average_score) <= 150 &&
+      std::abs(ab_average_score - mcts_average_score) <= 120;
+  if (short_high_margin_ane_king_recapture)
     return true;
 
   const bool tiny_ane_king_recapture =
