@@ -1167,6 +1167,17 @@ void test_hybrid_config() {
                    32, -0.803f, 4, 1, -0.290f, 2, -100, -200, true, 182, 0));
   }
   {
+    TestCase tc("ANE root hints require clear margin for AB ordering");
+
+    EXPECT(tc, HybridANERootHintMarginClear(0, 0.0f, 0.0f));
+    EXPECT(tc, HybridANERootHintMarginClear(1, 0.438f, 0.436f));
+    EXPECT(tc, HybridANERootHintMarginClear(2, 0.438f, 0.420f));
+    EXPECT(tc, !HybridANERootHintMarginClear(2, 0.438f, 0.436f));
+    EXPECT(tc, !HybridANERootHintMarginClear(2, 0.438f, 0.424f));
+    EXPECT(tc, !HybridANERootHintMarginClear(2, std::numeric_limits<float>::infinity(),
+                                             0.424f));
+  }
+  {
     TestCase tc("Pawn-only ANE/MCTS override predicate");
 
     EXPECT(tc, HybridPawnOnlyANEMCTSOverride(

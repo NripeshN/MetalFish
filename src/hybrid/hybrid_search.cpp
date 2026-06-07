@@ -1540,6 +1540,15 @@ bool HybridANEQSupportedRootOverride(
   return ab_barely_evaluated_ane || ab_did_not_refute_ane;
 }
 
+bool HybridANERootHintMarginClear(size_t hint_count, float top_score,
+                                  float second_score) {
+  if (hint_count <= 1)
+    return true;
+  if (!std::isfinite(top_score) || !std::isfinite(second_score))
+    return false;
+  return top_score - second_score >= 0.015f;
+}
+
 bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
                              int ab_average_score, int mcts_average_score,
                              uint64_t ab_effort, uint64_t mcts_effort,
@@ -3006,8 +3015,32 @@ std::vector<Move> ParallelHybridSearch::collect_root_order_hints() {
   for (Move move : collect_mcts_root_order_hints())
     add_hint(move);
   if (config_.ane_root_hints) {
-    for (Move move : collect_ane_root_order_hints())
-      add_hint(move);
+    std::vector<Move> ane_hints = collect_ane_root_order_hints();
+    bool use_ane_hints = !ane_hints.empty();
+    float ane_top_score = 0.0f;
+    float ane_second_score = 0.0f;
+    size_t ane_hint_info_count = 0;
+    if (use_ane_hints) {
+      std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+      ane_hint_info_count = ane_root_hint_infos_.size();
+      if (ane_hint_info_count > 0)
+        ane_top_score = ane_root_hint_infos_[0].score;
+      if (ane_hint_info_count > 1)
+        ane_second_score = ane_root_hint_infos_[1].score;
+      use_ane_hints =
+          HybridANERootHintMarginClear(ane_hint_info_count, ane_top_score,
+                                       ane_second_score);
+    }
+    if (use_ane_hints) {
+      for (Move move : ane_hints)
+        add_hint(move);
+    } else if (config_.trace_decisions && !ane_hints.empty()) {
+      std::ostringstream ss;
+      ss << "Hybrid: AB root hints from ANE suppressed low margin "
+         << std::fixed << std::setprecision(3)
+         << (ane_top_score - ane_second_score);
+      send_info_string(ss.str());
+    }
   }
 
   const int max_hints =

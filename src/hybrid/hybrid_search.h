@@ -608,6 +608,9 @@ bool HybridANEQSupportedRootOverride(
     int ane_in_ab_score, int ane_in_ab_average_score, bool ane_in_ab_upperbound,
     uint64_t ane_in_ab_effort, int selected_ab_average_score);
 
+bool HybridANERootHintMarginClear(size_t hint_count, float top_score,
+                                  float second_score);
+
 bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
                              int ab_average_score, int mcts_average_score,
                              uint64_t ab_effort, uint64_t mcts_effort,
