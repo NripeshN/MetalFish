@@ -534,6 +534,9 @@ void test_hybrid_config() {
     EXPECT(tc, HybridMCTSShortRootTacticalOverride(
                    true, true, false, 161, 98, 0.609f, 0.177f, 236, 80, 579,
                    555, 2, -32001, false, 1144870, 4, 10, 0.381f, 0.657f));
+    EXPECT(tc, HybridMCTSShortRootTacticalOverride(
+                   true, true, true, 294, 187, 0.636f, 0.180f, 229, 60, 622,
+                   563, 2, -32001, false, 1867440, 2, 32, 0.421f, 0.644f));
     EXPECT(tc, !HybridMCTSShortRootTacticalOverride(
                    true, true, true, 172, 94, 0.605f, 0.173f, 234, 67, 598, 563,
                    2, -32001, false, 520856, 5, 10, 0.381f, 0.653f));
@@ -552,6 +555,18 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSShortRootTacticalOverride(
                    true, true, true, 172, 104, 0.605f, 0.173f, 234, 67, 598,
                    563, 2, -32001, false, 520856, 5, 10, 0.420f, 0.653f));
+    EXPECT(tc, !HybridMCTSShortRootTacticalOverride(
+                   true, true, true, 294, 187, 0.636f, 0.180f, 229, 60, 633,
+                   563, 2, -32001, false, 1867440, 2, 32, 0.421f, 0.644f));
+    EXPECT(tc, !HybridMCTSShortRootTacticalOverride(
+                   true, true, true, 361, 187, 0.636f, 0.180f, 229, 60, 622,
+                   563, 2, -32001, false, 1867440, 2, 32, 0.421f, 0.644f));
+    EXPECT(tc, !HybridMCTSShortRootTacticalOverride(
+                   true, true, true, 294, 187, 0.636f, 0.180f, 229, 60, 622,
+                   563, 2, -32001, false, 1867440, 2, 65, 0.421f, 0.644f));
+    EXPECT(tc, !HybridMCTSShortRootTacticalOverride(
+                   true, true, true, 294, 187, 0.636f, 0.180f, 229, 60, 622,
+                   563, 2, -32001, false, 1867440, 2, 32, 0.445f, 0.644f));
   }
   {
     TestCase tc("MCTS AB-lowerbound confirmed override predicate");

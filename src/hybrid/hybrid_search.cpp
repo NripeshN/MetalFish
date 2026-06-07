@@ -697,26 +697,51 @@ bool HybridMCTSShortRootTacticalOverride(
   if (!fixed_budget || !visit_evidence_sane)
     return false;
 
-  if (mcts_root_visits < 150 || mcts_root_visits >= 230 ||
-      mcts_best_visits < 95 || visit_share < 0.58f || root_q_gap < 0.16f ||
-      mcts_cp < 200 || eval_delta < 45) {
+  if (root_q_gap < 0.16f || mcts_cp < 200 || eval_delta < 45)
     return false;
-  }
 
   const int max_average_gap = ab_root_rejects_mcts ? 70 : 25;
   if (ab_average_score - mcts_average_score > max_average_gap)
     return false;
 
-  if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 3 ||
-      mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
-      mcts_in_ab_effort < 200000 || mcts_in_ab_effort > 1500000) {
+  if (mcts_root_visits >= 150 && mcts_root_visits < 230 &&
+      mcts_best_visits >= 95 && visit_share >= 0.58f) {
+    if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 3 ||
+        mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
+        mcts_in_ab_effort < 200000 || mcts_in_ab_effort > 1500000) {
+      return false;
+    }
+
+    if (ab_in_mcts_rank < 4 || ab_in_mcts_current_visits > 16)
+      return false;
+
+    return mcts_q - ab_in_mcts_q >= 0.24f;
+  }
+
+  if (!ab_root_rejects_mcts)
+    return false;
+
+  if (mcts_root_visits < 240 || mcts_root_visits > 360 ||
+      mcts_best_visits < 150 || mcts_best_visits > 260 ||
+      visit_share < 0.58f || visit_share > 0.72f || eval_delta < 50) {
     return false;
   }
 
-  if (ab_in_mcts_rank < 4 || ab_in_mcts_current_visits > 16)
+  if (ab_average_score - mcts_average_score > 60)
     return false;
 
-  return mcts_q - ab_in_mcts_q >= 0.24f;
+  if (mcts_in_ab_rank != 2 || mcts_in_ab_score != -VALUE_INFINITE ||
+      mcts_in_ab_lowerbound || mcts_in_ab_effort < 1000000 ||
+      mcts_in_ab_effort > 3000000) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank != 2 || ab_in_mcts_current_visits < 20 ||
+      ab_in_mcts_current_visits > 64) {
+    return false;
+  }
+
+  return mcts_q - ab_in_mcts_q >= 0.20f;
 }
 
 bool HybridMCTSABLowerBoundConfirmedOverride(
