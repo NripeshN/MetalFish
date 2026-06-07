@@ -270,10 +270,10 @@ HYBRID_ANE_ROOT_HINTS = (
     env_bool_string("METALFISH_HYBRID_ANE_ROOT_HINTS", False) == "true"
 )
 HYBRID_ANE_ONLY_PAWN_ENDGAMES = (
-    env_bool_string("METALFISH_HYBRID_ANE_ONLY_PAWN_ENDGAMES", False) == "true"
+    env_bool_string("METALFISH_HYBRID_ANE_ONLY_PAWN_ENDGAMES", True) == "true"
 )
 HYBRID_ANE_CONFIRM_MCTS_OVERRIDE = (
-    env_bool_string("METALFISH_HYBRID_ANE_CONFIRM_MCTS_OVERRIDE", False) == "true"
+    env_bool_string("METALFISH_HYBRID_ANE_CONFIRM_MCTS_OVERRIDE", True) == "true"
 )
 HYBRID_ANE_WEIGHTS = pathlib.Path(
     os.environ.get("METALFISH_HYBRID_ANE_WEIGHTS", str(DEFAULT_ANE_WEIGHTS))
@@ -804,9 +804,18 @@ def ane_status_label(args) -> str:
         if getattr(args, "hybrid_ane_only_pawn_endgames", HYBRID_ANE_ONLY_PAWN_ENDGAMES)
         else "all roots"
     )
+    confirm = (
+        "confirm on"
+        if getattr(
+            args,
+            "hybrid_ane_confirm_mcts_override",
+            HYBRID_ANE_CONFIRM_MCTS_OVERRIDE,
+        )
+        else "confirm off"
+    )
     status = "ready" if weights.exists() and model.exists() else "missing files"
     return (
-        f"{status} | {compute}, {scope}, {hints}, wait {wait_ms} ms, "
+        f"{status} | {compute}, {scope}, {hints}, {confirm}, wait {wait_ms} ms, "
         f"min budget {min_budget} ms, "
         f"weights={weights.name}, model={model.name}"
     )
