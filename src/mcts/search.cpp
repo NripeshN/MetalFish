@@ -768,6 +768,18 @@ bool MCTSRootLowPolicyLeverProbeCandidate(uint32_t root_visits,
          candidate_policy >= 0.035f && candidate_policy <= 0.08f;
 }
 
+bool MCTSRootTinyLowVisitQOverrideCandidate(
+    uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
+    float best_policy, float best_q, float candidate_policy,
+    float candidate_q) {
+  return root_visits >= 24 && root_visits <= 32 && candidate_visits >= 4 &&
+         candidate_visits * 2 >= std::max<uint32_t>(1, best_visits) &&
+         best_q < 0.65f &&
+         candidate_policy >= 0.045f &&
+         candidate_policy <= best_policy * 0.65f &&
+         candidate_q > best_q + 0.020f;
+}
+
 bool MCTSRootTacticalCaptureProbeCandidate(uint32_t root_visits,
                                            int candidate_policy_rank,
                                            float candidate_policy) {
@@ -2759,6 +2771,16 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
             protects_minor_pawn_endgame_capture ||
             protects_high_policy_visit_leader)
           continue;
+        if (MCTSRootTinyLowVisitQOverrideCandidate(
+                total_child_visits,
+                params_.low_visit_q_override_rescan ? q_best_visits : best_n,
+                cn, edges[q_idx].GetP(), q_best, edges[i].GetP(), cq)) {
+          q_idx = i;
+          q_best = cq;
+          q_best_visits = cn;
+          q_changed = true;
+          continue;
+        }
         if (MCTSRootLowVisitQOverrideCandidate(
                 params_.low_visit_q_override_rescan ? q_best_visits : best_n,
                 cn, q_best, cq, near_equal_required_gap, edges[i].GetP(),

@@ -791,6 +791,24 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
          "late low-policy lever probe blocked", tc);
   expect(!MCTSRootLowPolicyLeverProbeCandidate(25, 5, 0.090f),
          "high-policy lever probe blocked", tc);
+  expect(MCTSRootTinyLowVisitQOverrideCandidate(25, 6, 4, 0.103f, 0.555f,
+                                                0.050f, 0.581f),
+         "BK.07 nodes-25 low-visit Q override passes", tc);
+  expect(MCTSRootTinyLowVisitQOverrideCandidate(25, 10, 8, 0.217f, -0.103f,
+                                                0.127f, -0.057f),
+         "BK.18 nodes-25 low-visit Q override passes", tc);
+  expect(!MCTSRootTinyLowVisitQOverrideCandidate(25, 6, 3, 0.103f, 0.555f,
+                                                 0.050f, 0.581f),
+         "tiny low-visit Q override needs near visits", tc);
+  expect(!MCTSRootTinyLowVisitQOverrideCandidate(25, 6, 4, 0.103f, 0.555f,
+                                                 0.080f, 0.581f),
+         "tiny low-visit Q override blocks high-policy candidate", tc);
+  expect(!MCTSRootTinyLowVisitQOverrideCandidate(25, 6, 4, 0.103f, 0.555f,
+                                                 0.050f, 0.574f),
+         "tiny low-visit Q override needs clear Q gap", tc);
+  expect(!MCTSRootTinyLowVisitQOverrideCandidate(25, 14, 8, 0.320f, 0.711f,
+                                                 0.152f, 0.752f),
+         "BK.11 high-confidence pawn lever resists tiny Q override", tc);
 
   Position bk22;
   StateInfo bk22_st;
