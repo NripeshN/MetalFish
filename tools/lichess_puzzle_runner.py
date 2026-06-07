@@ -878,9 +878,7 @@ def fail_under_tripped(solved: int, total: int, target_total: int, floor: int) -
     return solved + remaining < floor
 
 
-def print_fail_under(
-    solved: int, total: int, target_total: int, floor: int
-) -> None:
+def print_fail_under(solved: int, total: int, target_total: int, floor: int) -> None:
     max_possible = solved + max(0, target_total - total)
     print(
         "Fail-under tripped: "
@@ -1066,13 +1064,9 @@ def run(args) -> int:
                             f"({solved / max(1, total):.1%})",
                             flush=True,
                         )
-                    if fail_under_tripped(
-                        solved, total, target_total, args.fail_under
-                    ):
+                    if fail_under_tripped(solved, total, target_total, args.fail_under):
                         ended = "fail_under"
-                        print_fail_under(
-                            solved, total, target_total, args.fail_under
-                        )
+                        print_fail_under(solved, total, target_total, args.fail_under)
                         break
 
                 solutions = [
@@ -1215,13 +1209,9 @@ def run_offline(args) -> int:
                             f"Progress: {solved}/{total} ({solved / total:.1%})",
                             flush=True,
                         )
-                    if fail_under_tripped(
-                        solved, total, target_total, args.fail_under
-                    ):
+                    if fail_under_tripped(solved, total, target_total, args.fail_under):
                         ended = "fail_under"
-                        print_fail_under(
-                            solved, total, target_total, args.fail_under
-                        )
+                        print_fail_under(solved, total, target_total, args.fail_under)
                         break
                 if ended in {"time_budget", "fail_under"}:
                     break
