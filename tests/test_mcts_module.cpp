@@ -679,6 +679,16 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(MCTSIsKingsidePawnLever(pos, lever), "f6f5 is a kingside lever", tc);
   expect(!MCTSIsKingsidePawnLever(pos, quiet), "quiet bishop move is not lever",
          tc);
+  Position bk02;
+  StateInfo bk02_st;
+  bk02.set("3r1k2/4npp1/1ppr3p/p6P/P2PPPP1/1NR5/5K2/2R5 w - -", false,
+           &bk02_st);
+  const Move central_break = UCIEngine::to_move(bk02, "d4d5");
+  const Move noncentral_push = UCIEngine::to_move(bk02, "f4f5");
+  expect(MCTSIsCentralPawnBreak(bk02, central_break),
+         "BK.02 d4d5 is a central pawn break", tc);
+  expect(!MCTSIsCentralPawnBreak(bk02, noncentral_push),
+         "BK.02 f4f5 is not a central pawn break", tc);
   expect(MCTSRootHighPolicyLeverCandidate(96, 43, 17, 0.208f, -0.426f, 0.260f,
                                           -0.612f),
          "BK.03 post-tiny high-policy lever passes", tc);
@@ -791,6 +801,14 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
          "late low-policy lever probe blocked", tc);
   expect(!MCTSRootLowPolicyLeverProbeCandidate(25, 5, 0.090f),
          "high-policy lever probe blocked", tc);
+  expect(MCTSRootCentralPawnBreakProbeCandidate(25, 7, 0.043f),
+         "BK.02 nodes-25 central break probe passes", tc);
+  expect(!MCTSRootCentralPawnBreakProbeCandidate(15, 7, 0.043f),
+         "early central break probe blocked", tc);
+  expect(!MCTSRootCentralPawnBreakProbeCandidate(25, 9, 0.043f),
+         "late central break probe blocked", tc);
+  expect(!MCTSRootCentralPawnBreakProbeCandidate(25, 7, 0.090f),
+         "high-policy central break probe blocked", tc);
   expect(MCTSRootTinyLowVisitQOverrideCandidate(25, 6, 4, 0.103f, 0.555f,
                                                 0.050f, 0.581f),
          "BK.07 nodes-25 low-visit Q override passes", tc);
@@ -823,6 +841,10 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
          "BK.22 quiet knight move is not a capture", tc);
   expect(MCTSRootTacticalCaptureProbeCandidate(87, 14, 0.010f),
          "BK.22 low-policy capture probe passes", tc);
+  expect(MCTSRootTacticalCaptureProbeCandidate(16, 14, 0.013f),
+         "BK.22 nodes-25 capture probe passes", tc);
+  expect(!MCTSRootTacticalCaptureProbeCandidate(15, 14, 0.013f),
+         "early low-policy capture probe blocked", tc);
   expect(!MCTSRootTacticalCaptureProbeCandidate(87, 17, 0.010f),
          "late low-policy capture probe blocked", tc);
   expect(!MCTSRootTacticalCaptureProbeCandidate(87, 14, 0.030f),
@@ -1067,7 +1089,9 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
          "BK.16 queen move is not a minor central quiet probe", tc);
   expect(MCTSRootTacticalQuietProbeCandidate(49, 6, 0.040f),
          "BK.16 tiny-root quiet probe passes", tc);
-  expect(!MCTSRootTacticalQuietProbeCandidate(31, 6, 0.040f),
+  expect(MCTSRootTacticalQuietProbeCandidate(16, 6, 0.040f),
+         "BK.16 nodes-25 quiet probe passes", tc);
+  expect(!MCTSRootTacticalQuietProbeCandidate(15, 6, 0.040f),
          "early quiet probe blocked", tc);
   expect(!MCTSRootTacticalQuietProbeCandidate(81, 6, 0.040f),
          "mature quiet probe blocked", tc);

@@ -411,6 +411,7 @@ private:
 };
 
 bool MCTSIsKingsidePawnLever(const Position &pos, Move move);
+bool MCTSIsCentralPawnBreak(const Position &pos, Move move);
 bool MCTSIsMinorCentralPawnCapture(const Position &pos, Move move);
 bool MCTSIsMinorKingPawnCheckCapture(const Position &pos, Move move);
 bool MCTSIsMinorHighValueCapture(const Position &pos, Move move);
@@ -433,6 +434,9 @@ bool MCTSRootLowPolicyLeverCandidate(uint32_t root_visits, uint32_t best_visits,
 bool MCTSRootLowPolicyLeverProbeCandidate(uint32_t root_visits,
                                           int candidate_policy_rank,
                                           float candidate_policy);
+bool MCTSRootCentralPawnBreakProbeCandidate(uint32_t root_visits,
+                                            int candidate_policy_rank,
+                                            float candidate_policy);
 bool MCTSRootTinyLowVisitQOverrideCandidate(
     uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
     float best_policy, float best_q, float candidate_policy, float candidate_q);

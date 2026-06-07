@@ -475,6 +475,31 @@ bool MCTSIsKingsidePawnLever(const Position &pos, Move move) {
   return bool(attacks_bb<PAWN>(to, us) & pos.pieces(~us, PAWN));
 }
 
+bool MCTSIsCentralPawnBreak(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL)
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  if (piece == NO_PIECE || type_of(piece) != PAWN || !pos.empty(to))
+    return false;
+  if (file_of(from) != file_of(to))
+    return false;
+
+  const Color us = color_of(piece);
+  if (to != from + pawn_push(us))
+    return false;
+
+  const File target_file = file_of(to);
+  if (target_file != FILE_D && target_file != FILE_E)
+    return false;
+  if (relative_rank(us, to) != RANK_5)
+    return false;
+
+  return bool(attacks_bb<PAWN>(to, us) & pos.pieces(~us, PAWN));
+}
+
 bool MCTSIsMinorCentralPawnCapture(const Position &pos, Move move) {
   if (move == Move::none() || move.type_of() != NORMAL || !pos.capture(move))
     return false;
@@ -768,6 +793,14 @@ bool MCTSRootLowPolicyLeverProbeCandidate(uint32_t root_visits,
          candidate_policy >= 0.035f && candidate_policy <= 0.08f;
 }
 
+bool MCTSRootCentralPawnBreakProbeCandidate(uint32_t root_visits,
+                                            int candidate_policy_rank,
+                                            float candidate_policy) {
+  return root_visits >= 16 && root_visits <= 80 && candidate_policy_rank >= 4 &&
+         candidate_policy_rank <= 8 && candidate_policy >= 0.035f &&
+         candidate_policy <= 0.080f;
+}
+
 bool MCTSRootTinyLowVisitQOverrideCandidate(uint32_t root_visits,
                                             uint32_t best_visits,
                                             uint32_t candidate_visits,
@@ -784,7 +817,7 @@ bool MCTSRootTinyLowVisitQOverrideCandidate(uint32_t root_visits,
 bool MCTSRootTacticalCaptureProbeCandidate(uint32_t root_visits,
                                            int candidate_policy_rank,
                                            float candidate_policy) {
-  return root_visits >= 32 && root_visits <= 600 &&
+  return root_visits >= 16 && root_visits <= 600 &&
          candidate_policy_rank >= 10 && candidate_policy_rank <= 16 &&
          candidate_policy >= 0.006f && candidate_policy <= 0.020f;
 }
@@ -800,7 +833,7 @@ bool MCTSRootHighValueCaptureProbeCandidate(uint32_t root_visits,
 bool MCTSRootTacticalQuietProbeCandidate(uint32_t root_visits,
                                          int candidate_policy_rank,
                                          float candidate_policy) {
-  return root_visits >= 32 && root_visits <= 80 && candidate_policy_rank >= 5 &&
+  return root_visits >= 16 && root_visits <= 80 && candidate_policy_rank >= 5 &&
          candidate_policy_rank <= 10 && candidate_policy >= 0.025f &&
          candidate_policy <= 0.070f;
 }
@@ -2160,7 +2193,7 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
   }
 
   if (params_.root_tactical_capture_probe && is_root && best_idx >= 0 &&
-      children_visits >= 32 && children_visits <= 600 &&
+      children_visits >= 16 && children_visits <= 600 &&
       !ctx.pos.capture(edges[best_idx].move)) {
     int probe_idx = -1;
     float probe_policy = 0.0f;
@@ -2201,7 +2234,7 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
   }
 
   if (params_.root_tactical_capture_probe && is_root && best_idx >= 0 &&
-      children_visits >= 32 && children_visits <= 80 &&
+      children_visits >= 16 && children_visits <= 80 &&
       !ctx.pos.capture(edges[best_idx].move)) {
     bool already_probed = false;
     int probe_idx = -1;
@@ -2239,12 +2272,17 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
     Position root_pos;
     StateInfo root_state;
     root_pos.set(tree_.RootFen(), false, &root_state);
-    if (!MCTSIsKingsidePawnLever(root_pos, edges[best_idx].move)) {
+    if (!MCTSIsKingsidePawnLever(root_pos, edges[best_idx].move) &&
+        !MCTSIsCentralPawnBreak(root_pos, edges[best_idx].move)) {
       int probe_idx = -1;
       float probe_policy = 0.0f;
       const int policy_rank_limit = std::min(num_edges, 8);
       for (int i = 0; i < policy_rank_limit; ++i) {
-        if (!MCTSIsKingsidePawnLever(root_pos, edges[i].move))
+        const bool kingside_lever =
+            MCTSIsKingsidePawnLever(root_pos, edges[i].move);
+        const bool central_break =
+            MCTSIsCentralPawnBreak(root_pos, edges[i].move);
+        if (!kingside_lever && !central_break)
           continue;
 
         Node *child = edges[i].child.load(std::memory_order_acquire);
@@ -2254,8 +2292,12 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
           continue;
 
         const float policy = edges[i].GetP();
-        if (!MCTSRootLowPolicyLeverProbeCandidate(children_visits, i + 1,
-                                                  policy)) {
+        const bool candidate_ok = kingside_lever
+                                      ? MCTSRootLowPolicyLeverProbeCandidate(
+                                            children_visits, i + 1, policy)
+                                      : MCTSRootCentralPawnBreakProbeCandidate(
+                                            children_visits, i + 1, policy);
+        if (!candidate_ok) {
           continue;
         }
         if (probe_idx < 0 || policy > probe_policy) {
