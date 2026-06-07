@@ -1074,6 +1074,54 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(!MCTSRootQueenPromotionDeflectionCandidate(84, 50, 3, 0.089f, -0.044f,
                                                     false),
          "promotion deflection override requires a checking visit leader", tc);
+  Position queen_endgame_passer_tactic;
+  StateInfo queen_endgame_passer_tactic_st;
+  queen_endgame_passer_tactic.set("1Q6/6pk/2q4p/1p2P3/2p3P1/"
+                                  "5P2/5K1P/8 b - - 0 44",
+                                  false, &queen_endgame_passer_tactic_st);
+  const Move queen_shuffle =
+      UCIEngine::to_move(queen_endgame_passer_tactic, "c6c5");
+  const Move defended_passer =
+      UCIEngine::to_move(queen_endgame_passer_tactic, "c4c3");
+  expect(MCTSIsQueenEndgameAdvancedPassedPawnPush(queen_endgame_passer_tactic,
+                                                  defended_passer),
+         "02TxK c4c3 is a queen-defended advanced passer", tc);
+  expect(!MCTSIsQueenEndgameAdvancedPassedPawnPush(queen_endgame_passer_tactic,
+                                                   queen_shuffle),
+         "02TxK queen shuffle is not a passed-pawn push", tc);
+  expect(MCTSRootQueenEndgamePassedPawnCandidate(
+             queen_endgame_passer_tactic, queen_shuffle, defended_passer, 44,
+             23, 19, 0.310f, 0.567f, 0.409f, 0.473f),
+         "02TxK traced second root can prefer the queen-defended passer", tc);
+  expect(!MCTSRootQueenEndgamePassedPawnCandidate(
+             queen_endgame_passer_tactic, queen_shuffle, defended_passer, 44,
+             23, 19, 0.310f, 0.700f, 0.409f, 0.473f),
+         "queen-endgame passer still respects large Q deficits", tc);
+  Position premature_passer_tactic;
+  StateInfo premature_passer_tactic_st;
+  premature_passer_tactic.set("1Q6/6pk/6qp/1p6/2p1P1P1/"
+                              "5P2/5K1P/8 b - - 1 43",
+                              false, &premature_passer_tactic_st);
+  const Move premature_passer =
+      UCIEngine::to_move(premature_passer_tactic, "c4c3");
+  expect(!MCTSIsQueenEndgameAdvancedPassedPawnPush(premature_passer_tactic,
+                                                   premature_passer),
+         "02TxK first-root passer is blocked until the queen defends it", tc);
+  Position queen_endgame_later_root;
+  StateInfo queen_endgame_later_root_st;
+  queen_endgame_later_root.set("8/6pk/2qQ3p/1p2P3/6P1/2p2P2/"
+                               "5K1P/8 b - - 1 45",
+                               false, &queen_endgame_later_root_st);
+  const Move later_passer =
+      UCIEngine::to_move(queen_endgame_later_root, "c3c2");
+  expect(MCTSIsQueenEndgameAdvancedPassedPawnPush(queen_endgame_later_root,
+                                                  later_passer),
+         "02TxK later c3c2 is recognized as defended but needs visits", tc);
+  expect(!MCTSRootQueenEndgamePassedPawnCandidate(
+             queen_endgame_later_root,
+             UCIEngine::to_move(queen_endgame_later_root, "c6c8"), later_passer,
+             52, 24, 0, 0.255f, 0.481f, 0.012f, -0.347f),
+         "02TxK later unvisited passer cannot override the queen move", tc);
   expect(MCTSRootClockLowVisitQOverrideCandidate(91, 37, 21, 0.400f, 0.475f,
                                                  0.194f),
          "02TvL reused-root current visits can prefer the higher-Q queen move",

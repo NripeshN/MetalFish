@@ -735,6 +735,51 @@ bool MCTSIsQueenPromotionDeflectionRecapture(const Position &pos, Move move) {
   return false;
 }
 
+bool MCTSIsQueenEndgameAdvancedPassedPawnPush(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL || pos.capture(move))
+    return false;
+  if (pos.count<QUEEN>(WHITE) != 1 || pos.count<QUEEN>(BLACK) != 1 ||
+      pos.count<ROOK>() != 0 || pos.count<BISHOP>() != 0 ||
+      pos.count<KNIGHT>() != 0) {
+    return false;
+  }
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  if (piece == NO_PIECE || type_of(piece) != PAWN || !pos.empty(to))
+    return false;
+
+  const Color us = color_of(piece);
+  if (to != from + pawn_push(us) || file_of(from) != file_of(to))
+    return false;
+  if (relative_rank(us, to) < RANK_6)
+    return false;
+
+  const Bitboard their_pawns = pos.pieces(~us, PAWN);
+  const File to_file = file_of(to);
+  const int rank_step = us == WHITE ? 1 : -1;
+  for (int rr = int(rank_of(to)) + rank_step;
+       rr >= int(RANK_1) && rr <= int(RANK_8); rr += rank_step) {
+    for (int ff = std::max(int(FILE_A), int(to_file) - 1);
+         ff <= std::min(int(FILE_H), int(to_file) + 1); ++ff) {
+      if (their_pawns & square_bb(make_square(File(ff), Rank(rr))))
+        return false;
+    }
+  }
+
+  const Bitboard occupied_after_push =
+      (pos.pieces() ^ square_bb(from)) | square_bb(to);
+  Bitboard queens = pos.pieces(us, QUEEN);
+  const Bitboard target = square_bb(to);
+  while (queens) {
+    const Square queen_sq = pop_lsb(queens);
+    if (attacks_bb<QUEEN>(queen_sq, occupied_after_push) & target)
+      return true;
+  }
+  return false;
+}
+
 bool MCTSIsQuietQueenCheck(const Position &pos, Move move) {
   if (move == Move::none() || move.type_of() != NORMAL || pos.capture(move))
     return false;
@@ -998,6 +1043,34 @@ bool MCTSRootQueenPromotionDeflectionCandidate(
   if (candidate_visits < 3 || candidate_visits * 20 < best_visits)
     return false;
   return candidate_policy >= 0.070f && candidate_q >= -0.150f;
+}
+
+bool MCTSRootQueenEndgamePassedPawnCandidate(
+    const Position &pos, Move best_move, Move candidate_move,
+    uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
+    float best_policy, float best_q, float candidate_policy,
+    float candidate_q) {
+  if (root_visits < 32 || root_visits > 160)
+    return false;
+  if (best_move == Move::none() || candidate_move == Move::none() ||
+      best_move.type_of() != NORMAL || candidate_move.type_of() != NORMAL)
+    return false;
+  if (pos.capture(best_move))
+    return false;
+  const Piece best_piece = pos.piece_on(best_move.from_sq());
+  if (best_piece == NO_PIECE || type_of(best_piece) != QUEEN)
+    return false;
+  if (!MCTSIsQueenEndgameAdvancedPassedPawnPush(pos, candidate_move))
+    return false;
+  if (candidate_visits < 16)
+    return false;
+  if (static_cast<uint64_t>(candidate_visits) * 5 <
+      static_cast<uint64_t>(std::max<uint32_t>(1, best_visits)) * 3) {
+    return false;
+  }
+  if (candidate_policy < 0.250f || candidate_policy < best_policy + 0.050f)
+    return false;
+  return best_q - candidate_q <= 0.130f;
 }
 
 bool MCTSRootPawnEndgameEnPassantCandidate(uint32_t root_visits,
@@ -2989,6 +3062,49 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
       best_idx = q_idx;
       best_n = edges[best_idx].child.load(std::memory_order_acquire)->GetN();
       best_q = q_best;
+    }
+  }
+
+  if (fixed_movetime_search && best_idx >= 0 && !best_is_terminal_win &&
+      total_child_visits <= q_override_visit_cap) {
+    Position root_pos;
+    StateInfo root_state;
+    root_pos.set(tree_.RootFen(), false, &root_state);
+    int passer_idx = -1;
+    float passer_policy = 0.0f;
+    float passer_q = -2.0f;
+    uint32_t passer_visits = 0;
+    for (int i = 0; i < num_edges; ++i) {
+      if (i == best_idx)
+        continue;
+      Node *child = edges[i].child.load(std::memory_order_acquire);
+      if (!child)
+        continue;
+
+      const uint32_t cn = child->GetN();
+      const float cq = child->GetWL();
+      const float candidate_policy = edges[i].GetP();
+      if (!MCTSRootQueenEndgamePassedPawnCandidate(
+              root_pos, edges[best_idx].move, edges[i].move, total_child_visits,
+              best_n, cn, edges[best_idx].GetP(), best_q, candidate_policy,
+              cq)) {
+        continue;
+      }
+
+      if (passer_idx < 0 || candidate_policy > passer_policy ||
+          (std::abs(candidate_policy - passer_policy) <= 0.000001f &&
+           cq > passer_q)) {
+        passer_idx = i;
+        passer_policy = candidate_policy;
+        passer_q = cq;
+        passer_visits = cn;
+      }
+    }
+
+    if (passer_idx >= 0) {
+      best_idx = passer_idx;
+      best_n = passer_visits;
+      best_q = passer_q;
     }
   }
 
