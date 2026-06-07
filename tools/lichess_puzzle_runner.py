@@ -32,7 +32,7 @@ LICHESS_API = "https://lichess.org/api"
 DEFAULT_ANE_WEIGHTS = ROOT / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz"
 DEFAULT_ANE_MODEL = ROOT / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc"
 DEFAULT_ANE_ROOT_HINTS = False
-DEFAULT_ANE_ONLY_PAWN_ENDGAMES = True
+DEFAULT_ANE_ONLY_PAWN_ENDGAMES = False
 DEFAULT_ANE_ROOT_HINT_WAIT_MS = 0
 DEFAULT_ANE_MIN_BUDGET_MS = 0
 SETOPTION_ALIASES = {
@@ -532,7 +532,7 @@ def initial_ane_stats(args) -> dict[str, object]:
             getattr(args, "hybrid_ane_confirm_mcts_override", False)
         ),
         "ane_only_pawn_endgames": bool(
-            getattr(args, "hybrid_ane_only_pawn_endgames", True)
+            getattr(args, "hybrid_ane_only_pawn_endgames", DEFAULT_ANE_ONLY_PAWN_ENDGAMES)
         ),
         "ane_compute_units": (
             str(getattr(args, "hybrid_ane_compute_units", "")) if requested else ""

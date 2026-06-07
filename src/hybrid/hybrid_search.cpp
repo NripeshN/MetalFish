@@ -1898,6 +1898,10 @@ bool HybridRootQuietMinorMajorAttackCandidate(
   return selected_average_score - candidate_average_score <= 20;
 }
 
+bool HybridRootQuietAttackTieBreakAllowed(Move selected, Move mcts_best) {
+  return selected != Move::none() && selected != mcts_best;
+}
+
 bool HybridANERootPawnLeverCandidate(
     bool ane_root_probe, int selected_ane_rank, float selected_ane_score,
     int candidate_ane_rank, float candidate_ane_score,
@@ -4086,7 +4090,8 @@ Move ParallelHybridSearch::make_final_decision() {
     return best_lever;
   };
   const auto find_root_quiet_attack_tiebreak = [&](Move selected) {
-    if (!config_.root_pawn_lever_tiebreak || selected == Move::none() ||
+    if (!config_.root_pawn_lever_tiebreak ||
+        !HybridRootQuietAttackTieBreakAllowed(selected, mcts_best) ||
         low_node_mcts_primary || !mcts_decision_budget ||
         !mcts_visit_evidence_sane) {
       return Move::none();

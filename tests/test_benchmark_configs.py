@@ -195,6 +195,17 @@ def assert_bk_hybrid_fallback_warning() -> None:
         raise AssertionError("BK parity warned after fallback was disabled")
 
 
+def assert_bk_ane_scope_default() -> None:
+    text = (PROJ / "tests/bk_parity.py").read_text()
+    expected = (
+        '"--hybrid-ane-only-pawn-endgames",\n'
+        "        action=argparse.BooleanOptionalAction,\n"
+        "        default=False,"
+    )
+    if expected not in text:
+        raise AssertionError("BK parity ANE scope default drifted from all-root")
+
+
 def assert_tactical_fail_under_guard() -> None:
     selected = ["metalfish-hybrid"]
     if paper_benchmarks.parse_tactical_fail_under("", selected) != {}:
@@ -248,6 +259,7 @@ def detect_paper_engines_clean() -> dict[str, paper_benchmarks.EngineConfig]:
 
 def main() -> int:
     assert_tactical_fail_under_guard()
+    assert_bk_ane_scope_default()
     paper = detect_paper_engines_clean()
     expected_pure_mcts_threads = "1" if platform.system() == "Darwin" else "8"
 

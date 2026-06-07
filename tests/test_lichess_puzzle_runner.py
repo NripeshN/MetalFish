@@ -171,8 +171,8 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
         options["HybridANEConfirmMCTSOverride"] == "true",
     )
     expect(
-        "ANE scope defaults to pawn-only",
-        options["HybridANEOnlyPawnEndgames"] == "true",
+        "ANE scope defaults to all roots",
+        options["HybridANEOnlyPawnEndgames"] == "false",
     )
     expect("HybridTrace enabled", options["HybridTrace"] == "true")
     expect("ANE weights option", options["HybridANEWeights"] == "networks/t1.pb.gz")
@@ -279,7 +279,7 @@ def test_hybrid_ane_stats_distinguish_configured_from_active() -> None:
         "ANE confirmation requested",
         stats["ane_confirm_mcts_override_requested"] is True,
     )
-    expect("ANE pawn-only scope tracked", stats["ane_only_pawn_endgames"] is True)
+    expect("ANE all-root scope tracked", stats["ane_only_pawn_endgames"] is False)
     expect("ANE starts inactive", stats["ane_root_nonempty"] == 0)
 
     puzzle_runner.update_ane_stats(

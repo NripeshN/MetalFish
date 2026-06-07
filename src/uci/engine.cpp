@@ -169,7 +169,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridANERootProbe", Option(false));
   options.add("HybridANERootHints", Option(false));
   options.add("HybridANEConfirmMCTSOverride", Option(false));
-  options.add("HybridANEOnlyPawnEndgames", Option(true));
+  options.add("HybridANEOnlyPawnEndgames", Option(false));
   options.add("HybridANEWeights", Option(""));
   options.add("HybridANEModelPath", Option(""));
   options.add("HybridANEComputeUnits", Option("cpu-ne"));

@@ -217,7 +217,7 @@ struct ParallelHybridConfig {
   bool ane_root_probe = false;
   bool ane_root_hints = false;
   bool ane_confirm_mcts_override = false;
-  bool ane_only_pawn_endgames = true;
+  bool ane_only_pawn_endgames = false;
   std::string ane_weights_path;
   std::string ane_model_path;
   std::string ane_compute_units = "cpu-ne";
@@ -688,6 +688,8 @@ bool HybridRootQuietMinorMajorAttackCandidate(
     uint32_t selected_mcts_current_visits, float selected_mcts_q,
     int candidate_mcts_rank, uint32_t candidate_mcts_current_visits,
     float candidate_mcts_q, float candidate_mcts_policy);
+
+bool HybridRootQuietAttackTieBreakAllowed(Move selected, Move mcts_best);
 
 bool HybridANERootPawnLeverCandidate(
     bool ane_root_probe, int selected_ane_rank, float selected_ane_score,

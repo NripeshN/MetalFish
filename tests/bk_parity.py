@@ -1213,7 +1213,7 @@ def main() -> int:
     parser.add_argument(
         "--hybrid-ane-only-pawn-endgames",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
     )
     parser.add_argument(
         "--hybrid-ane-weights",
