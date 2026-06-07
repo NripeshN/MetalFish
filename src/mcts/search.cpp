@@ -713,6 +713,11 @@ bool MCTSRootHighPolicyLeverCandidate(uint32_t root_visits,
       q_gap <= 0.06f;
   if (best_q >= 0.0f && candidate_q < 0.0f)
     return false;
+  if (root_visits >= 24 && root_visits < 40) {
+    return candidate_visits >= 6 && underexplored &&
+           candidate_policy >= 0.20f &&
+           candidate_policy >= best_policy * 1.20f && q_gap <= 0.18f;
+  }
   return root_visits >= 40 && candidate_visits >= 8 &&
          ((root_visits <= 600 && underexplored) || near_visit_policy_tie) &&
          candidate_policy >= 0.20f && candidate_policy >= best_policy * 1.15f &&

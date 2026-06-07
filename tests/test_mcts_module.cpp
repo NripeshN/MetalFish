@@ -691,6 +691,18 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(MCTSRootHighPolicyLeverCandidate(99, 36, 17, 0.179f, -0.436f, 0.217f,
                                           -0.612f),
          "BK.03 observed nodes-100 high-policy lever passes", tc);
+  expect(MCTSRootHighPolicyLeverCandidate(25, 10, 6, 0.179f, -0.395f, 0.217f,
+                                          -0.568f),
+         "BK.03 observed nodes-25 high-policy lever passes", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(25, 10, 5, 0.179f, -0.395f, 0.217f,
+                                           -0.568f),
+         "nodes-25 high-policy lever needs enough visits", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(25, 10, 6, 0.179f, -0.395f, 0.214f,
+                                           -0.568f),
+         "nodes-25 high-policy lever needs clear policy edge", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(25, 10, 6, 0.179f, -0.395f, 0.217f,
+                                           -0.590f),
+         "nodes-25 high-policy lever needs tight value gap", tc);
   expect(!MCTSRootHighPolicyLeverCandidate(96, 43, 7, 0.208f, -0.426f, 0.260f,
                                            -0.612f),
          "insufficient visits blocked", tc);
