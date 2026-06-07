@@ -747,12 +747,11 @@ bool HybridMCTSShortRootTacticalOverride(
 bool HybridMCTSVerifiedHintSupportOverride(
     bool fixed_budget, bool visit_evidence_sane,
     bool verified_hint_supports_mcts, uint64_t mcts_root_visits,
-    uint32_t mcts_best_visits, float visit_share, float root_q_gap,
-    int mcts_cp, int eval_delta, int ab_average_score, int mcts_average_score,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int ab_average_score, int mcts_average_score,
     int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
-    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort,
-    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits,
-    float ab_in_mcts_q, float mcts_q) {
+    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
   if (!fixed_budget || !visit_evidence_sane || !verified_hint_supports_mcts)
     return false;
 
@@ -760,9 +759,9 @@ bool HybridMCTSVerifiedHintSupportOverride(
     return false;
 
   if (mcts_root_visits < 120 || mcts_root_visits > 320 ||
-      mcts_best_visits < 70 || mcts_best_visits > 220 ||
-      visit_share < 0.55f || visit_share > 0.72f || root_q_gap < 0.16f ||
-      mcts_cp < 200 || eval_delta < 45) {
+      mcts_best_visits < 70 || mcts_best_visits > 220 || visit_share < 0.55f ||
+      visit_share > 0.72f || root_q_gap < 0.16f || mcts_cp < 200 ||
+      eval_delta < 45) {
     return false;
   }
 
@@ -4453,15 +4452,14 @@ Move ParallelHybridSearch::make_final_decision() {
   const bool ab_verified_hint_supports_mcts =
       !ab_verified_root_order_hints_snapshot.empty() &&
       ab_verified_root_order_hints_snapshot.front() == mcts_best;
-  const bool mcts_verified_hint_support =
-      HybridMCTSVerifiedHintSupportOverride(
-          mcts_decision_budget, mcts_visit_evidence_sane,
-          ab_verified_hint_supports_mcts, mcts_confidence_total_nodes,
-          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
-          ab_in_ab.average_score, mcts_in_ab.average_score, mcts_in_ab.rank,
-          mcts_in_ab.score, mcts_in_ab.score_lowerbound,
-          mcts_in_ab.score_upperbound, mcts_in_ab.effort, ab_in_mcts.rank,
-          ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool mcts_verified_hint_support = HybridMCTSVerifiedHintSupportOverride(
+      mcts_decision_budget, mcts_visit_evidence_sane,
+      ab_verified_hint_supports_mcts, mcts_confidence_total_nodes,
+      mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+      ab_in_ab.average_score, mcts_in_ab.average_score, mcts_in_ab.rank,
+      mcts_in_ab.score, mcts_in_ab.score_lowerbound,
+      mcts_in_ab.score_upperbound, mcts_in_ab.effort, ab_in_mcts.rank,
+      ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
   const bool mcts_ab_lowerbound_confirmed =
       HybridMCTSABLowerBoundConfirmedOverride(
           mcts_decision_budget, mcts_visit_evidence_sane,

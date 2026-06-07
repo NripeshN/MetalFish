@@ -571,42 +571,42 @@ void test_hybrid_config() {
   {
     TestCase tc("Verified AB hint supports MCTS override");
 
-    EXPECT(tc, HybridMCTSVerifiedHintSupportOverride(
-                   true, true, true, 268, 167, 0.623f, 0.187f, 232, 62, 623,
-                   561, 2, -VALUE_INFINITE, false, true, 332488, 2, 32,
-                   0.421f, 0.651f));
-    EXPECT(tc, HybridMCTSVerifiedHintSupportOverride(
-                   true, true, true, 255, 158, 0.620f, 0.184f, 232, 72, 589,
-                   564, 2, -VALUE_INFINITE, false, true, 2018929, 2, 32,
-                   0.421f, 0.649f));
-    EXPECT(tc, !HybridMCTSVerifiedHintSupportOverride(
-                   true, true, false, 268, 167, 0.623f, 0.187f, 232, 62, 623,
-                   561, 2, -VALUE_INFINITE, false, true, 332488, 2, 32,
-                   0.421f, 0.651f));
-    EXPECT(tc, !HybridMCTSVerifiedHintSupportOverride(
-                   true, true, true, 268, 167, 0.623f, 0.159f, 232, 62, 623,
-                   561, 2, -VALUE_INFINITE, false, true, 332488, 2, 32,
-                   0.421f, 0.651f));
-    EXPECT(tc, !HybridMCTSVerifiedHintSupportOverride(
-                   true, true, true, 268, 167, 0.623f, 0.187f, 232, 62, 632,
-                   561, 2, -VALUE_INFINITE, false, true, 332488, 2, 32,
-                   0.421f, 0.651f));
-    EXPECT(tc, !HybridMCTSVerifiedHintSupportOverride(
-                   true, true, true, 268, 167, 0.623f, 0.187f, 232, 62, 623,
-                   561, 2, -VALUE_INFINITE, false, false, 332488, 2, 32,
-                   0.421f, 0.651f));
-    EXPECT(tc, !HybridMCTSVerifiedHintSupportOverride(
-                   true, true, true, 268, 167, 0.623f, 0.187f, 232, 62, 623,
-                   561, 2, -VALUE_INFINITE, false, true, 2500001, 2, 32,
-                   0.421f, 0.651f));
-    EXPECT(tc, !HybridMCTSVerifiedHintSupportOverride(
-                   true, true, true, 268, 167, 0.623f, 0.187f, 232, 62, 623,
-                   561, 2, -VALUE_INFINITE, false, true, 332488, 2, 65,
-                   0.421f, 0.651f));
-    EXPECT(tc, !HybridMCTSVerifiedHintSupportOverride(
-                   true, true, true, 268, 167, 0.623f, 0.187f, 232, 62, 623,
-                   561, 2, -VALUE_INFINITE, false, true, 332488, 2, 32,
-                   0.455f, 0.651f));
+    EXPECT(tc,
+           HybridMCTSVerifiedHintSupportOverride(
+               true, true, true, 268, 167, 0.623f, 0.187f, 232, 62, 623, 561, 2,
+               -VALUE_INFINITE, false, true, 332488, 2, 32, 0.421f, 0.651f));
+    EXPECT(tc,
+           HybridMCTSVerifiedHintSupportOverride(
+               true, true, true, 255, 158, 0.620f, 0.184f, 232, 72, 589, 564, 2,
+               -VALUE_INFINITE, false, true, 2018929, 2, 32, 0.421f, 0.649f));
+    EXPECT(tc,
+           !HybridMCTSVerifiedHintSupportOverride(
+               true, true, false, 268, 167, 0.623f, 0.187f, 232, 62, 623, 561,
+               2, -VALUE_INFINITE, false, true, 332488, 2, 32, 0.421f, 0.651f));
+    EXPECT(tc,
+           !HybridMCTSVerifiedHintSupportOverride(
+               true, true, true, 268, 167, 0.623f, 0.159f, 232, 62, 623, 561, 2,
+               -VALUE_INFINITE, false, true, 332488, 2, 32, 0.421f, 0.651f));
+    EXPECT(tc,
+           !HybridMCTSVerifiedHintSupportOverride(
+               true, true, true, 268, 167, 0.623f, 0.187f, 232, 62, 632, 561, 2,
+               -VALUE_INFINITE, false, true, 332488, 2, 32, 0.421f, 0.651f));
+    EXPECT(tc,
+           !HybridMCTSVerifiedHintSupportOverride(
+               true, true, true, 268, 167, 0.623f, 0.187f, 232, 62, 623, 561, 2,
+               -VALUE_INFINITE, false, false, 332488, 2, 32, 0.421f, 0.651f));
+    EXPECT(tc,
+           !HybridMCTSVerifiedHintSupportOverride(
+               true, true, true, 268, 167, 0.623f, 0.187f, 232, 62, 623, 561, 2,
+               -VALUE_INFINITE, false, true, 2500001, 2, 32, 0.421f, 0.651f));
+    EXPECT(tc,
+           !HybridMCTSVerifiedHintSupportOverride(
+               true, true, true, 268, 167, 0.623f, 0.187f, 232, 62, 623, 561, 2,
+               -VALUE_INFINITE, false, true, 332488, 2, 65, 0.421f, 0.651f));
+    EXPECT(tc,
+           !HybridMCTSVerifiedHintSupportOverride(
+               true, true, true, 268, 167, 0.623f, 0.187f, 232, 62, 623, 561, 2,
+               -VALUE_INFINITE, false, true, 332488, 2, 32, 0.455f, 0.651f));
   }
   {
     TestCase tc("MCTS AB-lowerbound confirmed override predicate");
