@@ -231,9 +231,7 @@ def collect_trace_log_stats(results_paths: list[pathlib.Path]) -> TraceLogStats:
                                     stats.time_safety_reasons[reason] = (
                                         stats.time_safety_reasons.get(reason, 0) + 1
                                     )
-                                elif line.startswith(
-                                    "Hybrid: AB root hints from MCTS"
-                                ):
+                                elif line.startswith("Hybrid: AB root hints from MCTS"):
                                     stats.root_hint_events += 1
                                     hint_count = max(0, len(line.split()) - 6)
                                     stats.root_hint_moves_total += hint_count
