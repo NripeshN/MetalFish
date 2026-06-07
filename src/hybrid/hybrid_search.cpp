@@ -3027,9 +3027,8 @@ std::vector<Move> ParallelHybridSearch::collect_root_order_hints() {
         ane_top_score = ane_root_hint_infos_[0].score;
       if (ane_hint_info_count > 1)
         ane_second_score = ane_root_hint_infos_[1].score;
-      use_ane_hints =
-          HybridANERootHintMarginClear(ane_hint_info_count, ane_top_score,
-                                       ane_second_score);
+      use_ane_hints = HybridANERootHintMarginClear(
+          ane_hint_info_count, ane_top_score, ane_second_score);
     }
     if (use_ane_hints) {
       for (Move move : ane_hints)

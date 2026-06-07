@@ -1174,8 +1174,8 @@ void test_hybrid_config() {
     EXPECT(tc, HybridANERootHintMarginClear(2, 0.438f, 0.420f));
     EXPECT(tc, !HybridANERootHintMarginClear(2, 0.438f, 0.436f));
     EXPECT(tc, !HybridANERootHintMarginClear(2, 0.438f, 0.424f));
-    EXPECT(tc, !HybridANERootHintMarginClear(2, std::numeric_limits<float>::infinity(),
-                                             0.424f));
+    EXPECT(tc, !HybridANERootHintMarginClear(
+                   2, std::numeric_limits<float>::infinity(), 0.424f));
   }
   {
     TestCase tc("Pawn-only ANE/MCTS override predicate");
