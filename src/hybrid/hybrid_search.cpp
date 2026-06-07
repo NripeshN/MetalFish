@@ -722,7 +722,7 @@ bool HybridMCTSShortRootTacticalOverride(
     return false;
 
   if (mcts_root_visits < 240 || mcts_root_visits > 360 ||
-      mcts_best_visits < 145 || mcts_best_visits > 260 || visit_share < 0.58f ||
+      mcts_best_visits < 150 || mcts_best_visits > 260 || visit_share < 0.58f ||
       visit_share > 0.72f || eval_delta < 50) {
     return false;
   }
