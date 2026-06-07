@@ -2318,8 +2318,7 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
 
   if (params_.root_tactical_capture_probe && is_root && best_idx >= 0 &&
       (limits_.movetime > 0 || limits_.nodes > 0) && children_visits >= 16 &&
-      children_visits <= 600 &&
-      !ctx.pos.gives_check(edges[best_idx].move)) {
+      children_visits <= 600 && !ctx.pos.gives_check(edges[best_idx].move)) {
     int probe_idx = -1;
     float probe_policy = 0.0f;
     const int policy_rank_limit = std::min(num_edges, 32);
