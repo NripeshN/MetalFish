@@ -1090,12 +1090,20 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
          "non-checking queen quiet is blocked", tc);
   expect(MCTSRootQuietQueenCheckProbeCandidate(105, 12, 0.030f),
          "low-policy quiet queen check can be probed", tc);
-  expect(!MCTSRootQuietQueenCheckProbeCandidate(31, 12, 0.030f),
+  expect(MCTSRootQuietQueenCheckProbeCandidate(16, 4, 0.039f),
+         "BK.01 nodes-25 quiet queen check can be probed", tc);
+  expect(!MCTSRootQuietQueenCheckProbeCandidate(15, 4, 0.039f),
          "early quiet queen check probe blocked", tc);
   expect(!MCTSRootQuietQueenCheckProbeCandidate(105, 33, 0.030f),
          "late-rank quiet queen check probe blocked", tc);
   expect(!MCTSRootQuietQueenCheckProbeCandidate(105, 12, 0.003f),
          "tiny-policy quiet queen check probe blocked", tc);
+  expect(MCTSRootQuietQueenCheckProbeStillViable(0, -0.700f),
+         "unvisited quiet queen check remains viable", tc);
+  expect(MCTSRootQuietQueenCheckProbeStillViable(1, 0.999f),
+         "positive quiet queen check remains viable", tc);
+  expect(!MCTSRootQuietQueenCheckProbeStillViable(1, -0.657f),
+         "negative quiet queen check stops forced probing", tc);
   Position quiet_queen_net_pos;
   StateInfo quiet_queen_net_st;
   quiet_queen_net_pos.set(

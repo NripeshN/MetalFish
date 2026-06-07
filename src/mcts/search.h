@@ -461,6 +461,8 @@ bool MCTSRootFifthRankCurrentOverrideCandidate(
 bool MCTSRootQuietQueenCheckProbeCandidate(uint32_t root_visits,
                                            int candidate_policy_rank,
                                            float candidate_policy);
+bool MCTSRootQuietQueenCheckProbeStillViable(uint32_t candidate_visits,
+                                             float candidate_q);
 bool MCTSRootQuietQueenKingNetProbeCandidate(uint32_t root_visits,
                                              int candidate_policy_rank,
                                              float candidate_policy);

@@ -858,7 +858,7 @@ bool MCTSRootFifthRankCurrentOverrideCandidate(
 bool MCTSRootQuietQueenCheckProbeCandidate(uint32_t root_visits,
                                            int candidate_policy_rank,
                                            float candidate_policy) {
-  if (root_visits < 32 || root_visits > 600 || candidate_policy_rank < 2 ||
+  if (root_visits < 16 || root_visits > 600 || candidate_policy_rank < 2 ||
       candidate_policy_rank > 32)
     return false;
 
@@ -866,6 +866,11 @@ bool MCTSRootQuietQueenCheckProbeCandidate(uint32_t root_visits,
     return candidate_policy >= 0.020f && candidate_policy <= 0.220f;
 
   return candidate_policy >= 0.004f && candidate_policy <= 0.080f;
+}
+
+bool MCTSRootQuietQueenCheckProbeStillViable(uint32_t candidate_visits,
+                                             float candidate_q) {
+  return candidate_visits == 0 || candidate_q >= 0.0f;
 }
 
 bool MCTSRootQuietQueenKingNetProbeCandidate(uint32_t root_visits,
@@ -2312,7 +2317,8 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
   }
 
   if (params_.root_tactical_capture_probe && is_root && best_idx >= 0 &&
-      limits_.movetime > 0 && children_visits >= 32 && children_visits <= 600 &&
+      (limits_.movetime > 0 || limits_.nodes > 0) && children_visits >= 16 &&
+      children_visits <= 600 &&
       !ctx.pos.gives_check(edges[best_idx].move)) {
     int probe_idx = -1;
     float probe_policy = 0.0f;
@@ -2325,6 +2331,9 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
       const float policy = edges[i].GetP();
       const uint32_t target_visits = policy >= 0.020f ? 32 : 16;
       if (child && child->GetN() >= target_visits)
+        continue;
+      if (child && !MCTSRootQuietQueenCheckProbeStillViable(child->GetN(),
+                                                            child->GetWL()))
         continue;
       if (child && child->GetNInFlight() > 0)
         continue;
