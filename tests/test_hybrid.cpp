@@ -1538,12 +1538,12 @@ void test_hybrid_config() {
                    482, 359, 677, 1, 21, 0.355f, 2, 5, 0.144f, 0.135f));
     EXPECT(tc, !HybridRootQuietMinorMajorAttackCandidate(
                    167, 163, 1922, 1, 10, 0.370f, 2, 9, 0.118f, 0.135f));
-    EXPECT(tc, HybridRootQuietAttackTieBreakAllowed(
-                   Move(SQ_E3, SQ_F4), Move(SQ_H5, SQ_F6)));
-    EXPECT(tc, !HybridRootQuietAttackTieBreakAllowed(
-                   Move(SQ_H5, SQ_F6), Move(SQ_H5, SQ_F6)));
-    EXPECT(tc, !HybridRootQuietAttackTieBreakAllowed(
-                   Move::none(), Move(SQ_H5, SQ_F6)));
+    EXPECT(tc, HybridRootQuietAttackTieBreakAllowed(Move(SQ_E3, SQ_F4),
+                                                    Move(SQ_H5, SQ_F6)));
+    EXPECT(tc, !HybridRootQuietAttackTieBreakAllowed(Move(SQ_H5, SQ_F6),
+                                                     Move(SQ_H5, SQ_F6)));
+    EXPECT(tc, !HybridRootQuietAttackTieBreakAllowed(Move::none(),
+                                                     Move(SQ_H5, SQ_F6)));
 
     const auto ane_lever =
         [](bool ane_root_probe, int selected_ane_rank, float selected_ane_score,

@@ -532,7 +532,9 @@ def initial_ane_stats(args) -> dict[str, object]:
             getattr(args, "hybrid_ane_confirm_mcts_override", False)
         ),
         "ane_only_pawn_endgames": bool(
-            getattr(args, "hybrid_ane_only_pawn_endgames", DEFAULT_ANE_ONLY_PAWN_ENDGAMES)
+            getattr(
+                args, "hybrid_ane_only_pawn_endgames", DEFAULT_ANE_ONLY_PAWN_ENDGAMES
+            )
         ),
         "ane_compute_units": (
             str(getattr(args, "hybrid_ane_compute_units", "")) if requested else ""
