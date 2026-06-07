@@ -1187,6 +1187,8 @@ def run_offline(args) -> int:
         with jsonl_path.open("w") as out:
             for repeat_idx in range(args.repeat_puzzles):
                 for item in puzzles:
+                    if total >= target_total:
+                        break
                     if time.monotonic() >= deadline:
                         ended = "time_budget"
                         break
@@ -1213,7 +1215,7 @@ def run_offline(args) -> int:
                         ended = "fail_under"
                         print_fail_under(solved, total, target_total, args.fail_under)
                         break
-                if ended in {"time_budget", "fail_under"}:
+                if ended in {"time_budget", "fail_under"} or total >= target_total:
                     break
     finally:
         engine.close()

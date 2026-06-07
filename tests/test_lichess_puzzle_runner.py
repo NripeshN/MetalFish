@@ -465,6 +465,71 @@ def test_repeat_result_ids_are_comparable() -> None:
     expect("repeat result id is unique", repeated["id"] == "abc#r2")
 
 
+def test_offline_repeat_run_respects_max_puzzles() -> None:
+    class FakeEngine:
+        def __init__(self, path: pathlib.Path, options: dict[str, str], cwd=None):
+            del path, options, cwd
+
+        def close(self) -> None:
+            pass
+
+    old_engine = puzzle_runner.UCIEngine
+    old_iter = puzzle_runner.iter_offline_csv_puzzles
+    old_solve = puzzle_runner.solve_puzzle
+
+    try:
+        puzzle_runner.UCIEngine = FakeEngine
+        puzzle_runner.iter_offline_csv_puzzles = lambda args: [
+            {"puzzle": {"id": "a"}},
+            {"puzzle": {"id": "b"}},
+        ]
+        puzzle_runner.solve_puzzle = lambda engine, item, movetime_ms: {
+            "id": item["puzzle"]["id"],
+            "solved": True,
+            "searches": [],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            fake_engine = root / "engine"
+            fake_engine.write_text("")
+            fake_csv = root / "puzzles.csv"
+            fake_csv.write_text("PuzzleId,FEN,Moves\n")
+            out_dir = root / "results"
+
+            args = puzzle_runner.parse_args(
+                [
+                    "--offline-csv",
+                    str(fake_csv),
+                    "--engine",
+                    str(fake_engine),
+                    "--mode",
+                    "ab",
+                    "--max-puzzles",
+                    "3",
+                    "--repeat-puzzles",
+                    "3",
+                    "--results-dir",
+                    str(out_dir),
+                    "--progress-interval",
+                    "999",
+                ]
+            )
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                rc = puzzle_runner.run_offline(args)
+
+            jsonl = next(out_dir.glob("lichess-puzzles-offline-*.jsonl"))
+            rows = [json.loads(line) for line in jsonl.read_text().splitlines()]
+
+        expect("offline repeat run succeeds", rc == 0)
+        expect("offline repeat run stops at max-puzzles", len(rows) == 3)
+        expect("repeat id remains comparable", rows[-1]["id"] == "a#r2")
+    finally:
+        puzzle_runner.UCIEngine = old_engine
+        puzzle_runner.iter_offline_csv_puzzles = old_iter
+        puzzle_runner.solve_puzzle = old_solve
+
+
 def test_compare_puzzle_runs_detects_regression() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -851,6 +916,7 @@ def main() -> int:
     test_hybrid_ane_low_time_fallback_can_be_overridden()
     test_search_info_parser_tracks_ane_hints()
     test_repeat_result_ids_are_comparable()
+    test_offline_repeat_run_respects_max_puzzles()
     test_compare_puzzle_runs_detects_regression()
     test_compare_puzzle_runs_summarizes_ane_trace()
     test_compare_puzzle_runs_prints_changed_puzzles()
