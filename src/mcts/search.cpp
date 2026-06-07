@@ -695,16 +695,14 @@ bool MCTSRootHighPolicyLeverCandidate(uint32_t root_visits,
   const uint32_t safe_best_visits = std::max<uint32_t>(1, best_visits);
   bool underexplored = false;
   if (root_visits <= 80) {
-    underexplored =
-        static_cast<uint64_t>(candidate_visits) * 5 <=
-        static_cast<uint64_t>(safe_best_visits) * 3;
+    underexplored = static_cast<uint64_t>(candidate_visits) * 5 <=
+                    static_cast<uint64_t>(safe_best_visits) * 3;
   } else if (root_visits <= 120) {
     underexplored = static_cast<uint64_t>(candidate_visits) * 2 <=
                     static_cast<uint64_t>(safe_best_visits);
   } else {
-    underexplored =
-        static_cast<uint64_t>(candidate_visits) * 5 <=
-        static_cast<uint64_t>(safe_best_visits) * 2;
+    underexplored = static_cast<uint64_t>(candidate_visits) * 5 <=
+                    static_cast<uint64_t>(safe_best_visits) * 2;
   }
   const float q_gap = best_q - candidate_q;
   const bool near_visit_policy_tie =
