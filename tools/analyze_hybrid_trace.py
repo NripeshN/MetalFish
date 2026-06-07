@@ -111,8 +111,33 @@ def normalize_time_safety_reason(reason: str) -> str:
     return reason
 
 
-def iter_trace_decisions(results_path: pathlib.Path) -> Iterable[TraceDecision]:
-    data = json.loads(results_path.read_text())
+def load_result_records(results_path: pathlib.Path) -> list[object]:
+    text = results_path.read_text()
+    try:
+        return [json.loads(text)]
+    except json.JSONDecodeError as whole_file_error:
+        records: list[object] = []
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError as line_error:
+                raise ValueError(
+                    f"{results_path}: invalid JSONL at line {line_no}: "
+                    f"{line_error.msg}"
+                ) from line_error
+        if records:
+            return records
+        raise whole_file_error
+
+
+def normalize_trace_line(value: object) -> str:
+    line = str(value).removeprefix("info string ").strip()
+    return line if line.startswith("HybridTrace:") else ""
+
+
+def iter_tournament_trace_decisions(data: dict) -> Iterable[TraceDecision]:
     for match in data.get("matches", []):
         for game in match.get("games", []):
             game_no = int(game.get("game", 0))
@@ -145,37 +170,86 @@ def iter_trace_decisions(results_path: pathlib.Path) -> Iterable[TraceDecision]:
                 )
 
 
+def iter_puzzle_trace_decisions(record_no: int, data: dict) -> Iterable[TraceDecision]:
+    puzzle_id = str(data.get("puzzle_id") or data.get("id") or "")
+    for search_no, search in enumerate(data.get("searches", []), start=1):
+        if not isinstance(search, dict):
+            continue
+        trace = normalize_trace_line(search.get("hybrid_trace", ""))
+        if not trace:
+            continue
+        fields = parse_fields(trace)
+        if puzzle_id:
+            fields["PuzzleId"] = puzzle_id
+        ab_move = fields.get("ABMove", "none")
+        mcts_move = fields.get("MCTSMove", "none")
+        yield TraceDecision(
+            game=record_no,
+            ply=int(search.get("ply", search_no)),
+            side=str(search.get("side", "")),
+            fen=str(search.get("fen", "")),
+            played=str(search.get("actual", "")),
+            reason=fields.get("reason", "?"),
+            selected=fields.get("selected", "none"),
+            ab_move=ab_move,
+            mcts_move=mcts_move,
+            fields=fields,
+        )
+
+
+def iter_trace_decisions(results_path: pathlib.Path) -> Iterable[TraceDecision]:
+    for record_no, record in enumerate(load_result_records(results_path), start=1):
+        if not isinstance(record, dict):
+            continue
+        if "matches" in record:
+            yield from iter_tournament_trace_decisions(record)
+        elif "searches" in record:
+            yield from iter_puzzle_trace_decisions(record_no, record)
+
+
 def collect_trace_log_stats(results_paths: list[pathlib.Path]) -> TraceLogStats:
     stats = TraceLogStats()
     for results_path in results_paths:
-        data = json.loads(results_path.read_text())
-        for match in data.get("matches", []):
-            for game in match.get("games", []):
-                for entry in game.get("search_log", []):
+        for record in load_result_records(results_path):
+            if not isinstance(record, dict):
+                continue
+            if "matches" in record:
+                for match in record.get("matches", []):
+                    for game in match.get("games", []):
+                        for entry in game.get("search_log", []):
+                            stats.search_entries += 1
+                            has_trace = False
+                            for raw in entry.get("lines", []):
+                                line = str(raw).removeprefix("info string ")
+                                if line.startswith("Starting Parallel Hybrid Search"):
+                                    stats.hybrid_starts += 1
+                                elif line.startswith("Time safety:"):
+                                    stats.time_safety_fallbacks += 1
+                                    reason = line.removeprefix("Time safety:").strip()
+                                    reason = reason.split(";", 1)[0].strip()
+                                    reason = normalize_time_safety_reason(reason)
+                                    stats.time_safety_reasons[reason] = (
+                                        stats.time_safety_reasons.get(reason, 0) + 1
+                                    )
+                                elif line.startswith(
+                                    "Hybrid: AB root hints from MCTS"
+                                ):
+                                    stats.root_hint_events += 1
+                                    hint_count = max(0, len(line.split()) - 6)
+                                    stats.root_hint_moves_total += hint_count
+                                    stats.root_hint_sizes[hint_count] = (
+                                        stats.root_hint_sizes.get(hint_count, 0) + 1
+                                    )
+                                elif line.startswith("HybridTrace:"):
+                                    has_trace = True
+                            if has_trace:
+                                stats.trace_entries += 1
+            elif "searches" in record:
+                for search in record.get("searches", []):
+                    if not isinstance(search, dict):
+                        continue
                     stats.search_entries += 1
-                    has_trace = False
-                    for raw in entry.get("lines", []):
-                        line = str(raw).removeprefix("info string ")
-                        if line.startswith("Starting Parallel Hybrid Search"):
-                            stats.hybrid_starts += 1
-                        elif line.startswith("Time safety:"):
-                            stats.time_safety_fallbacks += 1
-                            reason = line.removeprefix("Time safety:").strip()
-                            reason = reason.split(";", 1)[0].strip()
-                            reason = normalize_time_safety_reason(reason)
-                            stats.time_safety_reasons[reason] = (
-                                stats.time_safety_reasons.get(reason, 0) + 1
-                            )
-                        elif line.startswith("Hybrid: AB root hints from MCTS"):
-                            stats.root_hint_events += 1
-                            hint_count = max(0, len(line.split()) - 6)
-                            stats.root_hint_moves_total += hint_count
-                            stats.root_hint_sizes[hint_count] = (
-                                stats.root_hint_sizes.get(hint_count, 0) + 1
-                            )
-                        elif line.startswith("HybridTrace:"):
-                            has_trace = True
-                    if has_trace:
+                    if normalize_trace_line(search.get("hybrid_trace", "")):
                         stats.trace_entries += 1
     return stats
 

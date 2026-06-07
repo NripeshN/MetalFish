@@ -145,6 +145,49 @@ def assert_hybrid_trace_final_decision_only() -> None:
         )
 
 
+def assert_hybrid_trace_jsonl_decisions() -> None:
+    records = [
+        {
+            "id": "puzzle-a",
+            "searches": [
+                {
+                    "ply": 0,
+                    "actual": "g6g5",
+                    "hybrid_trace": (
+                        "HybridTrace: reason=engines_agree selected=g6g5 "
+                        "ABMove=g6g5 MCTSMove=g6g5 MCTSBestVisits=22"
+                    ),
+                }
+            ],
+        },
+        {
+            "id": "puzzle-b",
+            "searches": [
+                {
+                    "ply": 2,
+                    "actual": "f6f5",
+                    "hybrid_trace": (
+                        "HybridTrace: reason=mcts_root_reject_q_gap "
+                        "selected=f6f5 ABMove=g6g5 MCTSMove=f6f5 "
+                        "MCTSBestVisits=81"
+                    ),
+                }
+            ],
+        },
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "puzzles.jsonl"
+        path.write_text("\n".join(json.dumps(record) for record in records))
+        decisions = list(analyze_hybrid_trace.iter_trace_decisions(path))
+        stats = analyze_hybrid_trace.collect_trace_log_stats([path])
+    if [d.selected for d in decisions] != ["g6g5", "f6f5"]:
+        raise AssertionError("trace analyzer did not parse puzzle JSONL decisions")
+    if decisions[1].fields.get("PuzzleId") != "puzzle-b":
+        raise AssertionError("trace analyzer did not keep puzzle id in trace fields")
+    if stats.search_entries != 2 or stats.trace_entries != 2:
+        raise AssertionError("trace analyzer did not count puzzle JSONL coverage")
+
+
 def assert_tournament_draw_reason_precision() -> None:
     claimable = paper_benchmarks.chess.Board()
     for move in ["g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6", "f3g1"]:
@@ -351,6 +394,7 @@ def main() -> int:
     )
     assert_paper_hybrid_env_overrides()
     assert_hybrid_trace_final_decision_only()
+    assert_hybrid_trace_jsonl_decisions()
     assert_tournament_draw_reason_precision()
     assert_transformer_low_time_warnings_cover_mcts()
     assert_bk_hybrid_fallback_warning()
