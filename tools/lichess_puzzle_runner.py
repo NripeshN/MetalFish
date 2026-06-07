@@ -871,6 +871,25 @@ def tag_repeat_result(result: dict, repeat_idx: int, repeat_count: int) -> dict:
     return tagged
 
 
+def fail_under_tripped(solved: int, total: int, target_total: int, floor: int) -> bool:
+    if floor <= 0:
+        return False
+    remaining = max(0, target_total - total)
+    return solved + remaining < floor
+
+
+def print_fail_under(
+    solved: int, total: int, target_total: int, floor: int
+) -> None:
+    max_possible = solved + max(0, target_total - total)
+    print(
+        "Fail-under tripped: "
+        f"solved {solved}/{total}, max possible {max_possible}/{target_total} "
+        f"< floor {floor}",
+        flush=True,
+    )
+
+
 def write_summary(path: pathlib.Path, stats: dict) -> None:
     total = max(1, int(stats.get("puzzles", 0)))
     solved = int(stats.get("solved", 0))
@@ -894,6 +913,8 @@ def write_summary(path: pathlib.Path, stats: dict) -> None:
         lines.append(f"- Source: {stats.get('source')}")
     if stats.get("ended"):
         lines.append(f"- Ended: {stats.get('ended')}")
+    if stats.get("fail_under"):
+        lines.append(f"- Fail-under floor: {stats.get('fail_under')}")
     if stats.get("rate_limit_events"):
         lines.append(f"- Rate-limit events: {stats.get('rate_limit_events')}")
     if stats.get("ane_probe_requested"):
@@ -1000,6 +1021,7 @@ def run(args) -> int:
     engine = UCIEngine(args.engine, options, args.engine_cwd)
     solved = 0
     total = 0
+    target_total = args.max_puzzles
     started = time.monotonic()
     ended = "completed"
     ane_stats = initial_ane_stats(args)
@@ -1044,6 +1066,14 @@ def run(args) -> int:
                             f"({solved / max(1, total):.1%})",
                             flush=True,
                         )
+                    if fail_under_tripped(
+                        solved, total, target_total, args.fail_under
+                    ):
+                        ended = "fail_under"
+                        print_fail_under(
+                            solved, total, target_total, args.fail_under
+                        )
+                        break
 
                 solutions = [
                     {
@@ -1054,7 +1084,11 @@ def run(args) -> int:
                     for result in batch_results
                     if result.get("id")
                 ]
-                next_nb = args.batch_size if time.monotonic() < deadline else 0
+                next_nb = (
+                    args.batch_size
+                    if ended != "fail_under" and time.monotonic() < deadline
+                    else 0
+                )
                 while True:
                     try:
                         puzzles = client.submit_batch(
@@ -1078,6 +1112,9 @@ def run(args) -> int:
                         ended = "rate_limited"
                         puzzles = []
                         break
+                if ended == "fail_under":
+                    puzzles = []
+                    break
     finally:
         engine.close()
 
@@ -1092,6 +1129,7 @@ def run(args) -> int:
         "rated": args.rated,
         "duration_s": duration_s,
         "ended": ended,
+        "fail_under": args.fail_under,
         "rate_limit_events": rate_limit_events,
     }
     stats.update(ane_stats)
@@ -1107,6 +1145,8 @@ def run(args) -> int:
     accuracy = solved / max(1, total)
     if total == 0:
         return 2
+    if ended == "fail_under":
+        return 1
     if accuracy < args.min_accuracy:
         return 1
     return 0
@@ -1132,6 +1172,7 @@ def run_offline(args) -> int:
     puzzles = iter_offline_csv_puzzles(args)
     if not puzzles:
         raise RuntimeError("No offline puzzles matched the selected filters")
+    target_total = min(args.max_puzzles, len(puzzles) * args.repeat_puzzles)
 
     engine = UCIEngine(args.engine, options, args.engine_cwd)
     solved = 0
@@ -1174,7 +1215,15 @@ def run_offline(args) -> int:
                             f"Progress: {solved}/{total} ({solved / total:.1%})",
                             flush=True,
                         )
-                if ended == "time_budget":
+                    if fail_under_tripped(
+                        solved, total, target_total, args.fail_under
+                    ):
+                        ended = "fail_under"
+                        print_fail_under(
+                            solved, total, target_total, args.fail_under
+                        )
+                        break
+                if ended in {"time_budget", "fail_under"}:
                     break
     finally:
         engine.close()
@@ -1190,6 +1239,7 @@ def run_offline(args) -> int:
         "rated": False,
         "duration_s": duration_s,
         "ended": ended,
+        "fail_under": args.fail_under,
         "source": str(args.offline_csv),
         "rate_limit_events": 0,
         "repeat_puzzles": args.repeat_puzzles,
@@ -1207,6 +1257,8 @@ def run_offline(args) -> int:
     accuracy = solved / max(1, total)
     if total == 0:
         return 2
+    if ended == "fail_under":
+        return 1
     if accuracy < args.min_accuracy:
         return 1
     return 0
@@ -1310,6 +1362,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--angle", default="mix")
     parser.add_argument("--rated", action="store_true", default=False)
     parser.add_argument("--min-accuracy", type=float, default=0.0)
+    parser.add_argument(
+        "--fail-under",
+        type=int,
+        default=0,
+        help="Stop and fail once the requested run can no longer solve at least this many puzzles.",
+    )
     parser.add_argument("--request-interval-s", type=float, default=2.0)
     parser.add_argument("--rate-limit-backoff-s", type=float, default=65.0)
     parser.add_argument("--max-rate-limit-waits", type=int, default=5)
@@ -1335,6 +1393,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     args.max_minutes = max(0.1, args.max_minutes)
     args.max_puzzles = max(1, args.max_puzzles)
     args.repeat_puzzles = max(1, args.repeat_puzzles)
+    args.fail_under = max(0, args.fail_under)
     args.progress_interval = max(1, args.progress_interval)
     args.max_rate_limit_waits = max(0, args.max_rate_limit_waits)
     args.hybrid_ane_root_hint_count = max(1, min(32, args.hybrid_ane_root_hint_count))

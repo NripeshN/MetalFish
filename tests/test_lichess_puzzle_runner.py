@@ -24,6 +24,7 @@ from tools.lichess_puzzle_runner import (  # noqa: E402
     board_from_csv_puzzle,
     csv_puzzle_item,
     csv_row_matches,
+    fail_under_tripped,
     normalize_move,
     parse_auto_int,
     parse_setoptions,
@@ -135,6 +136,24 @@ def test_csv_filter_and_setoption_parsing() -> None:
     )
     expect(
         "auto parser keeps integers", parse_auto_int("8", option_name="--threads") == 8
+    )
+
+
+def test_fail_under_helper_and_parsing() -> None:
+    args = puzzle_runner.parse_args(["--fail-under", "198"])
+
+    expect("fail-under parser keeps floor", args.fail_under == 198)
+    expect(
+        "fail-under does not trip while floor remains possible",
+        not fail_under_tripped(solved=122, total=125, target_total=200, floor=198),
+    )
+    expect(
+        "fail-under trips once floor is impossible",
+        fail_under_tripped(solved=121, total=125, target_total=200, floor=198),
+    )
+    expect(
+        "fail-under disabled at zero",
+        not fail_under_tripped(solved=0, total=100, target_total=100, floor=0),
     )
 
 
