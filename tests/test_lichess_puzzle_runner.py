@@ -371,7 +371,11 @@ def test_solver_accepts_alternate_mating_move() -> None:
     )
 
     expect("alternate checkmate solves puzzle", result["solved"])
+    expect("search side recorded", result["searches"][0]["side"] == "black")
+    expect("search fen recorded", " b " in result["searches"][0]["fen"])
     expect("alternate mate recorded", result["searches"][-1]["actual"] == "e3f2")
+    expect("follow-up side recorded", result["searches"][-1]["side"] == "black")
+    expect("follow-up fen recorded", " b " in result["searches"][-1]["fen"])
     expect(
         "alternate mate marker recorded",
         result["searches"][-1]["accepted_mating_alternative"],

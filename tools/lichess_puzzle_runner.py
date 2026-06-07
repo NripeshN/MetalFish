@@ -817,6 +817,8 @@ def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
         actual = normalize_move(answer.bestmove, board)
         search_record = {
             "ply": idx,
+            "side": "white" if board.turn == chess.WHITE else "black",
+            "fen": board.fen(),
             "expected": expected,
             "actual": actual or answer.bestmove,
             "nodes": answer.nodes,
