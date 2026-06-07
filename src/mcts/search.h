@@ -430,6 +430,9 @@ bool MCTSRootLowPolicyLeverCandidate(uint32_t root_visits, uint32_t best_visits,
                                      int candidate_rank, float best_policy,
                                      float best_q, float candidate_policy,
                                      float candidate_q);
+bool MCTSRootLowPolicyLeverProbeCandidate(uint32_t root_visits,
+                                          int candidate_policy_rank,
+                                          float candidate_policy);
 bool MCTSRootTacticalCaptureProbeCandidate(uint32_t root_visits,
                                            int candidate_policy_rank,
                                            float candidate_policy);

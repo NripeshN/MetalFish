@@ -748,9 +748,21 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(MCTSRootLowPolicyLeverCandidate(49, 14, 2, 7, 0.206f, 0.925f, 0.050f,
                                          0.885f),
          "BK.09 tiny-node rank-seven low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(25, 7, 1, 6, 0.174f, 0.918f, 0.052f,
+                                         0.887f),
+         "BK.09 nodes-25 low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(25, 6, 2, 5, 0.161f, 0.912f, 0.052f,
+                                         0.885f),
+         "BK.09 nodes-25 low-policy lever passes after probe", tc);
+  expect(!MCTSRootLowPolicyLeverCandidate(25, 7, 1, 6, 0.174f, 0.918f, 0.052f,
+                                          0.860f),
+         "nodes-25 single-visit low-policy lever needs tight Q gap", tc);
   expect(MCTSRootLowPolicyLeverCandidate(49, 24, 2, 4, 0.314f, -0.199f, 0.038f,
                                          -0.259f),
          "BK.17 tiny-node rank-four low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(25, 12, 2, 5, 0.258f, -0.203f, 0.043f,
+                                         -0.259f),
+         "BK.17 nodes-25 low-policy lever passes after probe", tc);
   expect(MCTSRootLowPolicyLeverCandidate(82, 41, 2, 5, 0.314f, -0.189f, 0.038f,
                                          -0.259f),
          "BK.17 defensive low-policy lever passes", tc);
@@ -769,6 +781,16 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(!MCTSRootLowPolicyLeverCandidate(98, 29, 4, 7, 0.206f, 0.931f, 0.040f,
                                           0.881f),
          "weak rank-seven low-policy lever blocked", tc);
+  expect(MCTSRootLowPolicyLeverProbeCandidate(25, 5, 0.043f),
+         "BK.17 nodes-25 low-policy lever probe passes", tc);
+  expect(MCTSRootLowPolicyLeverProbeCandidate(25, 6, 0.052f),
+         "BK.09 nodes-25 low-policy lever probe passes", tc);
+  expect(!MCTSRootLowPolicyLeverProbeCandidate(15, 5, 0.043f),
+         "too-early low-policy lever probe blocked", tc);
+  expect(!MCTSRootLowPolicyLeverProbeCandidate(25, 8, 0.043f),
+         "late low-policy lever probe blocked", tc);
+  expect(!MCTSRootLowPolicyLeverProbeCandidate(25, 5, 0.090f),
+         "high-policy lever probe blocked", tc);
 
   Position bk22;
   StateInfo bk22_st;

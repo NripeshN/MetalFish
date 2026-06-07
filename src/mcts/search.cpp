@@ -734,12 +734,38 @@ bool MCTSRootLowPolicyLeverCandidate(uint32_t root_visits, uint32_t best_visits,
                         candidate_policy >= 0.045f) ||
                        (candidate_rank == 4 && candidate_visits >= 2 &&
                         candidate_policy >= 0.035f);
+  if (root_visits >= 24 && root_visits < 40) {
+    const bool tiny_rank_ok =
+        (candidate_rank >= 5 && candidate_rank <= 6) ||
+        (candidate_rank == 7 && candidate_policy >= 0.045f) ||
+        (candidate_rank == 4 && candidate_policy >= 0.035f);
+    if (!tiny_rank_ok || candidate_visits == 0)
+      return false;
+
+    const float q_gap_limit = candidate_visits >= 2 ? 0.09f : 0.05f;
+    return static_cast<uint64_t>(candidate_visits) * 2 <
+               std::max<uint32_t>(1, best_visits) &&
+           candidate_policy >= 0.035f && candidate_policy <= 0.08f &&
+           candidate_policy <= best_policy * 0.35f &&
+           best_q - candidate_q <= q_gap_limit;
+  }
   return root_visits >= 40 && root_visits <= 600 && rank_ok &&
          candidate_visits >= 2 &&
          candidate_visits * 3 < std::max<uint32_t>(1, best_visits) &&
          candidate_policy >= 0.035f && candidate_policy <= 0.08f &&
          candidate_policy <= best_policy * 0.35f &&
          best_q - candidate_q <= 0.09f;
+}
+
+bool MCTSRootLowPolicyLeverProbeCandidate(uint32_t root_visits,
+                                          int candidate_policy_rank,
+                                          float candidate_policy) {
+  const bool rank_ok =
+      (candidate_policy_rank >= 5 && candidate_policy_rank <= 6) ||
+      (candidate_policy_rank == 7 && candidate_policy >= 0.045f) ||
+      (candidate_policy_rank == 4 && candidate_policy >= 0.035f);
+  return root_visits >= 16 && root_visits <= 80 && rank_ok &&
+         candidate_policy >= 0.035f && candidate_policy <= 0.08f;
 }
 
 bool MCTSRootTacticalCaptureProbeCandidate(uint32_t root_visits,
@@ -2188,6 +2214,41 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
 
     if (!already_probed && probe_idx >= 0)
       return {probe_idx, 1};
+  }
+
+  if (params_.low_policy_root_lever_selection && is_root && best_idx >= 0 &&
+      children_visits >= 16 && children_visits <= 80) {
+    Position root_pos;
+    StateInfo root_state;
+    root_pos.set(tree_.RootFen(), false, &root_state);
+    if (!MCTSIsKingsidePawnLever(root_pos, edges[best_idx].move)) {
+      int probe_idx = -1;
+      float probe_policy = 0.0f;
+      const int policy_rank_limit = std::min(num_edges, 8);
+      for (int i = 0; i < policy_rank_limit; ++i) {
+        if (!MCTSIsKingsidePawnLever(root_pos, edges[i].move))
+          continue;
+
+        Node *child = edges[i].child.load(std::memory_order_acquire);
+        if (child && child->GetN() >= 2)
+          continue;
+        if (child && child->GetNInFlight() > 0)
+          continue;
+
+        const float policy = edges[i].GetP();
+        if (!MCTSRootLowPolicyLeverProbeCandidate(children_visits, i + 1,
+                                                  policy)) {
+          continue;
+        }
+        if (probe_idx < 0 || policy > probe_policy) {
+          probe_idx = i;
+          probe_policy = policy;
+        }
+      }
+
+      if (probe_idx >= 0)
+        return {probe_idx, 1};
+    }
   }
 
   if (params_.root_tactical_capture_probe && is_root && best_idx >= 0 &&
