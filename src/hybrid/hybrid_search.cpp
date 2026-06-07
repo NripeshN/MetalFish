@@ -722,8 +722,8 @@ bool HybridMCTSShortRootTacticalOverride(
     return false;
 
   if (mcts_root_visits < 240 || mcts_root_visits > 360 ||
-      mcts_best_visits < 150 || mcts_best_visits > 260 ||
-      visit_share < 0.58f || visit_share > 0.72f || eval_delta < 50) {
+      mcts_best_visits < 150 || mcts_best_visits > 260 || visit_share < 0.58f ||
+      visit_share > 0.72f || eval_delta < 50) {
     return false;
   }
 
@@ -4128,8 +4128,7 @@ Move ParallelHybridSearch::make_final_decision() {
               selected_ab.average_score, candidate.average_score,
               candidate.effort, selected_mcts.rank,
               selected_mcts.current_visits, selected_mcts.q, mcts_lookup.rank,
-              mcts_lookup.current_visits, mcts_lookup.q,
-              mcts_lookup.policy)) {
+              mcts_lookup.current_visits, mcts_lookup.q, mcts_lookup.policy)) {
         continue;
       }
 
