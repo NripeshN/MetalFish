@@ -1587,6 +1587,8 @@ void test_hybrid_config() {
     EXPECT(tc, HybridRootQuietMinorMajorAttackCandidate(
                    118, 115, 2006, 5, 1, -0.005f, 1, 15, 0.274f, 0.135f));
     EXPECT(tc, HybridRootQuietMinorMajorAttackCandidate(
+                   123, 69, 7038, 4, 2, 0.021f, 2, 18, 0.371f, 0.135f));
+    EXPECT(tc, HybridRootQuietMinorMajorAttackCandidate(
                    96, 138, 3816, 1, 21, 0.355f, 2, 9, 0.118f, 0.135f));
     EXPECT(tc, !HybridRootQuietMinorMajorAttackCandidate(
                    253, 252, 1171, 1, 10, 0.357f, 2, 3, 0.223f, 0.135f));
@@ -1598,6 +1600,8 @@ void test_hybrid_config() {
                    482, 359, 677, 1, 21, 0.355f, 2, 5, 0.144f, 0.135f));
     EXPECT(tc, !HybridRootQuietMinorMajorAttackCandidate(
                    167, 163, 1922, 1, 10, 0.370f, 2, 9, 0.118f, 0.135f));
+    EXPECT(tc, !HybridRootQuietMinorMajorAttackCandidate(
+                   123, 69, 7038, 4, 3, 0.021f, 2, 18, 0.371f, 0.135f));
     EXPECT(tc, HybridRootQuietAttackTieBreakAllowed(Move(SQ_E3, SQ_F4),
                                                     Move(SQ_H5, SQ_F6)));
     EXPECT(tc, !HybridRootQuietAttackTieBreakAllowed(Move(SQ_H5, SQ_F6),

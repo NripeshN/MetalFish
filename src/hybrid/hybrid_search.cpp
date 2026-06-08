@@ -1982,8 +1982,11 @@ bool HybridRootQuietMinorMajorAttackCandidate(
     return true;
   }
 
-  if (selected_mcts_rank != 1)
-    return false;
+  if (selected_mcts_rank != 1) {
+    return selected_mcts_rank > 2 && selected_mcts_current_visits <= 2 &&
+           candidate_mcts_current_visits >= 12 &&
+           candidate_mcts_q - selected_mcts_q >= 0.08f;
+  }
   if (selected_mcts_q - candidate_mcts_q > 0.25f)
     return false;
   return selected_average_score - candidate_average_score <= 20;
