@@ -100,7 +100,7 @@ jobs:
             --hybrid-ane-compute-units cpu-ne \
             --hybrid-ane-root-hint-count 10 \
             --hybrid-ane-root-hint-wait-ms 250 \
-            --hybrid-ane-min-budget-ms 1000
+            --hybrid-ane-min-budget-ms 500
 
       - name: Run Apple accelerator tool tests
         run: |

@@ -72,7 +72,7 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
         hybrid_ane_compute_units="cpu-ne",
         hybrid_ane_root_hint_count=10,
         hybrid_ane_root_hint_wait_ms=250,
-        hybrid_ane_min_budget_ms=1000,
+        hybrid_ane_min_budget_ms=500,
     )
     enabled = types.SimpleNamespace(
         ponder=True,
@@ -85,7 +85,7 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
         hybrid_ane_only_pawn_endgames=False,
         hybrid_ane_root_hint_count=10,
         hybrid_ane_root_hint_wait_ms=250,
-        hybrid_ane_min_budget_ms=1000,
+        hybrid_ane_min_budget_ms=500,
     )
 
     no_ane = lichess_bot.apply_runtime_engine_options(base_options, disabled)
@@ -110,8 +110,8 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
         with_ane["HybridANEConfirmMCTSOverride"] == "false",
     )
     expect(
-        "ANE default scope is pawn endgames",
-        with_default_no_hints["HybridANEOnlyPawnEndgames"] == "true",
+        "ANE default scope probes all roots",
+        with_default_no_hints["HybridANEOnlyPawnEndgames"] == "false",
     )
     expect(
         "ANE all-root explicit opt-out passed",
@@ -127,7 +127,7 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
     )
     expect(
         "ANE min budget uses retained profile",
-        with_ane["HybridANEMinBudgetMs"] == "1000",
+        with_ane["HybridANEMinBudgetMs"] == "500",
     )
 
 

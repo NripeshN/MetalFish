@@ -881,7 +881,7 @@ def main() -> int:
             "Run ANE option/config smoke",
             "--hybrid-ane-root-probe",
             "--hybrid-ane-compute-units cpu-ne",
-            "--hybrid-ane-min-budget-ms 1000",
+            "--hybrid-ane-min-budget-ms 500",
         ],
     )
     assert_file_contains(

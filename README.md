@@ -260,9 +260,10 @@ setoption name HybridANEWeights value networks/t1-512x15x8h-distilled-swa-339500
 setoption name HybridANEModelPath value build/coreml/compiled/t1-512-heads-b8.mlmodelc
 setoption name HybridANEComputeUnits value cpu-ne
 setoption name HybridANEOnlyPawnEndgames value false
+setoption name HybridANEConfirmMCTSOverride value true
 setoption name HybridANERootHintCount value 10
 setoption name HybridANERootHintWaitMs value 0
-setoption name HybridANEMinBudgetMs value 0
+setoption name HybridANEMinBudgetMs value 500
 ```
 
 Current ANE findings:
@@ -271,10 +272,9 @@ Current ANE findings:
   `cpu-gpu` are faster in isolation but compete with Metal inference.
 - T1-512 is retained over T1-256. T1-256 is lower latency, but it regressed the
   ANE-sensitive repeat gate.
-- The Lichess bot now probes all roots when ANE is explicitly enabled. The
-  broader scope tied the retained 200-puzzle gate at 199/200 and improved the
-  current ANE-sensitive low-root repeat gate from 30/40 to 34/40. UCI still
-  defaults to the conservative pawn-only scope unless the option above is set.
+- The Lichess bot probes all roots when ANE is explicitly enabled. The current
+  retained profile keeps root hints off, allows ANE to confirm narrowly gated
+  MCTS overrides, and starts ANE probes at 500 ms or larger move budgets.
 - ANE root hints are available as an explicit experiment, but they are disabled
   by default. After the low-visit pawn-lever update, ANE root hints regressed
   the local 1s BK repeat from 67/72 to 66/72, while ANE probe without root
@@ -293,9 +293,11 @@ python3 tools/lichess_puzzle_runner.py \
   --engine build/metalfish --mode hybrid \
   --weights networks/BT4-1024x15x32h-swa-6147500.pb \
   --hybrid-ane-root-probe \
+  --hybrid-ane-confirm-mcts-override \
   --hybrid-ane-weights networks/t1-512x15x8h-distilled-swa-3395000.pb.gz \
   --hybrid-ane-model-path build/coreml/compiled/t1-512-heads-b8.mlmodelc \
   --hybrid-ane-compute-units cpu-ne \
+  --hybrid-ane-min-budget-ms 500 \
   --threads 8 --hash-mb 4096 --movetime-ms 3000
 
 python3 tools/lc0_coreml_concurrency_benchmark.py \
