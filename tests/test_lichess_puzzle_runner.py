@@ -247,7 +247,7 @@ def test_hybrid_ane_default_wait_uses_benchmarked_profile() -> None:
     options = puzzle_runner.engine_options(args)
 
     expect("ANE benchmark default wait", options["HybridANERootHintWaitMs"] == "0")
-    expect("ANE root hints default on", options["HybridANERootHints"] == "true")
+    expect("ANE root hints default off", options["HybridANERootHints"] == "false")
     expect("HybridTrace default off", "HybridTrace" not in options)
     expect("ANE benchmark default min budget", options["HybridANEMinBudgetMs"] == "0")
     expect(

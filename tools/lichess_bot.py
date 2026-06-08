@@ -267,7 +267,7 @@ HYBRID_ANE_ROOT_PROBE = (
     env_bool_string("METALFISH_HYBRID_ANE_ROOT_PROBE", False) == "true"
 )
 HYBRID_ANE_ROOT_HINTS = (
-    env_bool_string("METALFISH_HYBRID_ANE_ROOT_HINTS", True) == "true"
+    env_bool_string("METALFISH_HYBRID_ANE_ROOT_HINTS", False) == "true"
 )
 HYBRID_ANE_ONLY_PAWN_ENDGAMES = (
     env_bool_string("METALFISH_HYBRID_ANE_ONLY_PAWN_ENDGAMES", True) == "true"
