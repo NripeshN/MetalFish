@@ -831,9 +831,30 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
                    true, false, true, 2192, 2113, 0.964f, 1.149f, 336, 396, 3,
                    -VALUE_INFINITE, 2601, 2, 27, -0.341f, 0.808f));
-    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+    EXPECT(tc, HybridMCTSRootRejectQGapOverride(
                    true, true, true, 54, 52, 0.963f, 1.463f, 603, 685, 2,
                    -VALUE_INFINITE, 55, 2, 1, -0.498f, 0.965f));
+    EXPECT(tc, HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 56, 51, 0.911f, 1.462f, 601, 686, 3,
+                   -VALUE_INFINITE, 61, 2, 1, -0.498f, 0.964f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 54, 52, 0.879f, 1.463f, 603, 685, 2,
+                   -VALUE_INFINITE, 55, 2, 1, -0.498f, 0.965f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 54, 52, 0.963f, 1.199f, 603, 685, 2,
+                   -VALUE_INFINITE, 55, 2, 1, -0.498f, 0.965f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 54, 52, 0.963f, 1.463f, 499, 685, 2,
+                   -VALUE_INFINITE, 55, 2, 1, -0.498f, 0.965f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 54, 52, 0.963f, 1.463f, 603, 599, 2,
+                   -VALUE_INFINITE, 55, 2, 1, -0.498f, 0.965f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 54, 52, 0.963f, 1.463f, 603, 685, 2,
+                   -VALUE_INFINITE, 101, 2, 1, -0.498f, 0.965f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 54, 52, 0.963f, 1.463f, 603, 685, 2,
+                   -VALUE_INFINITE, 55, 2, 3, -0.498f, 0.965f));
     EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
                    true, true, true, 198, 158, 0.798f, 1.157f, 397, 408, 5,
                    -VALUE_INFINITE, 69, 4, 1, -0.290f, 0.868f));
