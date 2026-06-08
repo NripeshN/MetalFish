@@ -63,10 +63,9 @@ def test_live_defaults_avoid_crash_prone_resources() -> None:
 def test_runtime_ane_options_are_explicitly_opt_in() -> None:
     base_options, _ = lichess_bot.build_engine_options()
     disabled = types.SimpleNamespace(ponder=True, hybrid_ane_root_probe=False)
-    default_no_hints = types.SimpleNamespace(
+    default_with_hints = types.SimpleNamespace(
         ponder=True,
         hybrid_ane_root_probe=True,
-        hybrid_ane_root_hints=False,
         hybrid_ane_weights=pathlib.Path("networks/t1.pb.gz"),
         hybrid_ane_model_path=pathlib.Path("build/coreml/t1.mlmodelc"),
         hybrid_ane_compute_units="cpu-ne",
@@ -89,21 +88,21 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
     )
 
     no_ane = lichess_bot.apply_runtime_engine_options(base_options, disabled)
-    with_default_no_hints = lichess_bot.apply_runtime_engine_options(
-        base_options, default_no_hints
+    with_default_hints = lichess_bot.apply_runtime_engine_options(
+        base_options, default_with_hints
     )
     with_ane = lichess_bot.apply_runtime_engine_options(base_options, enabled)
 
     expect("ANE probe is opt-in", "HybridANERootProbe" not in no_ane)
     expect(
-        "ANE root hints default off with ANE probe",
-        with_default_no_hints["HybridANERootHints"] == "false",
+        "ANE root hints default on with ANE probe",
+        with_default_hints["HybridANERootHints"] == "true",
     )
     expect("ANE probe option enabled", with_ane["HybridANERootProbe"] == "true")
     expect("ANE root hints option enabled", with_ane["HybridANERootHints"] == "true")
     expect(
         "ANE confirmation defaults on with ANE probe",
-        with_default_no_hints["HybridANEConfirmMCTSOverride"] == "true",
+        with_default_hints["HybridANEConfirmMCTSOverride"] == "true",
     )
     expect(
         "ANE confirmation explicit opt-out passed",
@@ -111,7 +110,7 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
     )
     expect(
         "ANE default scope is pawn endgames",
-        with_default_no_hints["HybridANEOnlyPawnEndgames"] == "true",
+        with_default_hints["HybridANEOnlyPawnEndgames"] == "true",
     )
     expect(
         "ANE all-root explicit opt-out passed",
@@ -131,7 +130,7 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
     )
 
 
-def test_verbose_runtime_enables_trace_without_forcing_ane_hints() -> None:
+def test_verbose_runtime_keeps_explicit_ane_hint_choice() -> None:
     base_options, _ = lichess_bot.build_engine_options()
     args = types.SimpleNamespace(
         ponder=True,
@@ -151,7 +150,7 @@ def test_verbose_runtime_enables_trace_without_forcing_ane_hints() -> None:
 
     expect("verbose enables HybridTrace", options["HybridTrace"] == "true")
     expect(
-        "verbose does not force ANE root hints",
+        "verbose keeps explicit ANE root hints opt-out",
         options["HybridANERootHints"] == "false",
     )
     expect("ANE root probe stays enabled", options["HybridANERootProbe"] == "true")
@@ -4093,7 +4092,7 @@ def main() -> int:
     test_reader_uses_launch_queue()
     test_live_defaults_avoid_crash_prone_resources()
     test_runtime_ane_options_are_explicitly_opt_in()
-    test_verbose_runtime_enables_trace_without_forcing_ane_hints()
+    test_verbose_runtime_keeps_explicit_ane_hint_choice()
     test_verbose_path_enables_trace_and_resolves_log_path()
     test_verbose_log_tees_stdout_and_stderr()
     test_verbose_uci_option_tracking_filters_useful_options()
