@@ -3353,6 +3353,8 @@ def test_game_start_claims_slot_and_clears_pending() -> None:
     expect("game thread ran", played == ["g1"])
     expect("tc failures reset", bot._tc_failures == 0)
     expect("seek blocked by active game", not bot._should_seek())
+    bot.active_games.pop("g1", None)
+    expect("seek blocked by unrelated accepted reservation", not bot._should_seek())
     expect(
         "target marked as played in speed",
         "targetbot" in bot._played_by_speed.get("rapid", {}),
