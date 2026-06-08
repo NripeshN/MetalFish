@@ -240,7 +240,7 @@ setoption name NNWeights value networks/BT4-1024x15x32h-swa-6147500.pb
 setoption name Threads value 8
 setoption name Hash value 4096
 setoption name Ponder value true
-setoption name HybridABCandidateVerifyMs value 120
+setoption name HybridABCandidateVerifyMs value 240
 isready
 position startpos
 go movetime 5000

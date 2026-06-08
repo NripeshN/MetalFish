@@ -492,7 +492,7 @@ def detect_engines(threads: int, hash_mb: int) -> Dict[str, EngineConfig]:
             "HybridMCTSABRootHints": "true",
             "HybridMCTSABRootHintDelayMs": "0",
             "HybridMCTSABRootHintCount": "8",
-            "HybridABCandidateVerifyMs": "120",
+            "HybridABCandidateVerifyMs": "240",
             "HybridABCandidateVerifyCount": "5",
             "HybridABPolicyWeight": "0.0",
             "HybridRootPawnLeverTieBreak": "true",

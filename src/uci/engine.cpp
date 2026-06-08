@@ -163,7 +163,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridMCTSABRootHints", Option(true));
   options.add("HybridMCTSABRootHintDelayMs", Option(0, 0, 1000));
   options.add("HybridMCTSABRootHintCount", Option(8, 1, 16));
-  options.add("HybridABCandidateVerifyMs", Option(120, 0, 1000));
+  options.add("HybridABCandidateVerifyMs", Option(240, 0, 1000));
   options.add("HybridABCandidateVerifyCount", Option(5, 1, 10));
   options.add("HybridRootPawnLeverTieBreak", Option(true));
   options.add("HybridANERootProbe", Option(false));

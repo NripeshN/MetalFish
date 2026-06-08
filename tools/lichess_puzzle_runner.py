@@ -392,7 +392,7 @@ def engine_options(args) -> dict[str, str]:
                 "HybridMCTSABRootHints": "true",
                 "HybridMCTSABRootHintDelayMs": "0",
                 "HybridMCTSABRootHintCount": "8",
-                "HybridABCandidateVerifyMs": "120",
+                "HybridABCandidateVerifyMs": "240",
                 "HybridABCandidateVerifyCount": "5",
                 "HybridMCTSUseSharedTT": "false",
                 "HybridMCTSMinimumKLDGainPerNode": "0.0",

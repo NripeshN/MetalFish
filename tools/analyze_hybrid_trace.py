@@ -482,7 +482,7 @@ class MetalFishProbe:
                 "HybridMCTSABRootHints": "true",
                 "HybridMCTSABRootHintDelayMs": "0",
                 "HybridMCTSABRootHintCount": "8",
-                "HybridABCandidateVerifyMs": "120",
+                "HybridABCandidateVerifyMs": "240",
                 "HybridABCandidateVerifyCount": "4",
                 "HybridABPolicyWeight": "0.0",
                 "HybridRootPawnLeverTieBreak": "true",
