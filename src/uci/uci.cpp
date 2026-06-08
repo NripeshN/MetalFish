@@ -1559,6 +1559,7 @@ static void preload_search_objects(Engine &engine) {
     bool created = false;
     auto mcts = get_or_create_cached_mcts(config, cache_key, &created);
     if (mcts && created) {
+      mcts->NewGame();
       sync_cout << "info string MCTS search preloaded (transformer ready)"
                 << sync_endl;
     }

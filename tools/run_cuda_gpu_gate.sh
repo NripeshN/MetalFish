@@ -945,6 +945,7 @@ METALFISH_CUDA_PROFILE=0 \
   --position "fen ${BK07_FEN}" \
   --go "nodes 50" \
   --expect-bestmove h5f6 \
+  --expect-min-nodes 50 \
   --json-out "${BUILD_DIR}/cuda-gpu-uci-bk07-search.json" \
   --expect-output "CUDA transformer backend" \
   --expect-output "MCTS runtime: backend=cuda" \
@@ -1632,6 +1633,7 @@ METALFISH_CUDA_PROFILE=0 \
   --position "fen ${BK07_FEN}" \
   --go "nodes 50" \
   --expect-bestmove h5f6 \
+  --expect-min-nodes 50 \
   --json-out "${BUILD_DIR}/cuda-gpu-package-uci-bk07-search.json" \
   --expect-output "CUDA transformer backend" \
   --expect-output "MCTS runtime: backend=cuda" \

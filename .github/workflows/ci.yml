@@ -273,7 +273,8 @@ jobs:
             --setoption MCTSAddDirichletNoise=false \
             --position "fen 1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -" \
             --go "nodes 50" \
-            --expect-bestmove h5f6
+            --expect-bestmove h5f6 \
+            --expect-min-nodes 50
           python3 tools/uci_smoke.py \
             --engine build/metalfish \
             --timeout 90 \
@@ -291,6 +292,7 @@ jobs:
             --position "fen 1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -" \
             --go "nodes 50" \
             --expect-bestmove h5f6 \
+            --expect-min-nodes 50 \
             --json-out build/metal-mcts-bk07-search.json
           python3 tools/uci_smoke.py \
             --engine build/metalfish \
