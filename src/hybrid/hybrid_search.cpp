@@ -3254,9 +3254,9 @@ std::vector<Move> ParallelHybridSearch::verify_ab_root_candidates(
       const int lead_avg = leading_snapshot.move == leading
                                ? leading_snapshot.average_score
                                : std::numeric_limits<int>::min();
-      const int lead_score =
-          leading_snapshot.move == leading ? leading_snapshot.score
-                                           : std::numeric_limits<int>::min();
+      const int lead_score = leading_snapshot.move == leading
+                                 ? leading_snapshot.score
+                                 : std::numeric_limits<int>::min();
       const int single_verify_ms = std::clamp(verify_ms / 2, 80, 160);
       for (Move candidate : limited_candidates) {
         if (candidate == leading ||

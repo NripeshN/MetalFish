@@ -1781,8 +1781,8 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridIsQuietMinorMajorAttack(pos,
                                               UCIEngine::to_move(pos, "a4a5")));
 
-    pos.set("r3r3/pp3pk1/3p1q1p/1b3P2/5R2/P3B2Q/2p2KPP/R7 w - - 0 29",
-            false, &st);
+    pos.set("r3r3/pp3pk1/3p1q1p/1b3P2/5R2/P3B2Q/2p2KPP/R7 w - - 0 29", false,
+            &st);
     EXPECT(tc, HybridIsQuietMajorCheck(pos, UCIEngine::to_move(pos, "f4g4")));
     EXPECT(tc, HybridIsQuietMajorCheck(pos, UCIEngine::to_move(pos, "h3g4")));
     EXPECT(tc, !HybridIsQuietMajorCheck(pos, UCIEngine::to_move(pos, "e3d4")));
