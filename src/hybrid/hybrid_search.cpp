@@ -2113,6 +2113,23 @@ bool HybridIsQuietMinorMajorAttack(const Position &pos, Move move) {
               pos.pieces(~us, QUEEN, ROOK));
 }
 
+bool HybridIsQuietMajorCheck(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL)
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  if (piece == NO_PIECE || !pos.empty(to))
+    return false;
+
+  const PieceType pieceType = type_of(piece);
+  if (pieceType != ROOK && pieceType != QUEEN)
+    return false;
+
+  return pos.gives_check(move);
+}
+
 bool HybridIsBishopOnlyEndgame(const Position &pos) {
   return pos.count<BISHOP>() > 0 && pos.count<QUEEN>() == 0 &&
          pos.count<ROOK>() == 0 && pos.count<KNIGHT>() == 0;
@@ -3212,6 +3229,80 @@ std::vector<Move> ParallelHybridSearch::verify_ab_root_candidates(
       if (std::find(verified_order.begin(), verified_order.end(),
                     root_move.move) == verified_order.end()) {
         verified_order.push_back(root_move.move);
+      }
+    }
+  }
+
+  if (verify_started && !should_stop() && !verified_order.empty()) {
+    StateInfo root_state;
+    Position root_pos;
+    root_pos.set(root_fen_, false, &root_state);
+    if (root_pos.count<QUEEN>() > 0) {
+      const auto find_verify_root = [&verify_snapshot](Move target) {
+        Engine::RootMoveSnapshot result;
+        for (const auto &root_move : verify_snapshot) {
+          if (root_move.move == target) {
+            result = root_move;
+            break;
+          }
+        }
+        return result;
+      };
+
+      const Move leading = verified_order.front();
+      const auto leading_snapshot = find_verify_root(leading);
+      const int lead_avg = leading_snapshot.move == leading
+                               ? leading_snapshot.average_score
+                               : std::numeric_limits<int>::min();
+      const int lead_score =
+          leading_snapshot.move == leading ? leading_snapshot.score
+                                           : std::numeric_limits<int>::min();
+      const int single_verify_ms = std::clamp(verify_ms / 2, 80, 160);
+      for (Move candidate : limited_candidates) {
+        if (candidate == leading ||
+            !HybridIsQuietMajorCheck(root_pos, candidate))
+          continue;
+
+        const auto candidate_snapshot = find_verify_root(candidate);
+        if (candidate_snapshot.move == candidate &&
+            candidate_snapshot.average_score + 80 < lead_avg)
+          continue;
+
+        ::MetalFish::Search::LimitsType single_limits;
+        single_limits.movetime = single_verify_ms;
+        single_limits.startTime = now();
+        single_limits.ponderMode = false;
+        single_limits.root_order_hints = {candidate};
+        single_limits.searchmoves.push_back(UCIEngine::move(candidate, false));
+
+        bool single_started = false;
+        {
+          std::lock_guard<std::mutex> lock(ab_start_mutex_);
+          if (!should_stop()) {
+            engine_->go(single_limits);
+            ab_search_started_.store(true, std::memory_order_release);
+            single_started = true;
+          }
+        }
+        if (!single_started)
+          break;
+
+        if (should_stop())
+          engine_->stop();
+        engine_->wait_for_search_finished();
+
+        const auto single_snapshot = engine_->root_move_snapshot(1);
+        if (single_snapshot.empty() || single_snapshot[0].move != candidate)
+          continue;
+
+        if (single_snapshot[0].average_score >= lead_avg + 120 ||
+            single_snapshot[0].score >= lead_score + 180) {
+          verified_order.erase(std::remove(verified_order.begin(),
+                                           verified_order.end(), candidate),
+                               verified_order.end());
+          verified_order.insert(verified_order.begin(), candidate);
+          break;
+        }
       }
     }
   }

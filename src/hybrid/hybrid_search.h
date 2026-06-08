@@ -733,6 +733,8 @@ bool HybridIsQuietCentralQueenMove(const Position &pos, Move move);
 
 bool HybridIsQuietMinorMajorAttack(const Position &pos, Move move);
 
+bool HybridIsQuietMajorCheck(const Position &pos, Move move);
+
 bool HybridIsBishopOnlyEndgame(const Position &pos);
 
 bool HybridIsQuietBishopBackRankRetreat(const Position &pos, Move move);
