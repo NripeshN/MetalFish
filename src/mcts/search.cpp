@@ -3538,61 +3538,48 @@ bool Search::TryGetRootTablebaseMoveStatsLocked(RootMoveStats *out) const {
 
   const Edge *edges = root->Edges();
   const int num_edges = root->NumEdges();
+  ::MetalFish::Search::RootMoves tb_root_moves;
+  tb_root_moves.reserve(static_cast<size_t>(num_edges));
+  for (int i = 0; i < num_edges; ++i)
+    tb_root_moves.emplace_back(edges[i].move);
+
+  if (!Tablebases::root_probe(pos, tb_root_moves, true, true,
+                              []() { return false; }) &&
+      !Tablebases::root_probe_wdl(pos, tb_root_moves, true)) {
+    return false;
+  }
+
   int best_idx = -1;
-  int best_wdl = -3;
-  int best_dtz = 0;
-  bool best_has_dtz = false;
+  int best_tb_rank = 0;
+  uint32_t best_visits = 0;
+  float best_policy = 0.0f;
 
-  for (int i = 0; i < num_edges; ++i) {
-    StateInfo child_st;
-    pos.do_move(edges[i].move, child_st);
-
-    Tablebases::ProbeState wdl_state;
-    int root_wdl = 0;
-    if (pos.is_draw(1)) {
-      root_wdl = static_cast<int>(Tablebases::WDLDraw);
-      wdl_state = Tablebases::OK;
-    } else {
-      root_wdl = -static_cast<int>(Tablebases::probe_wdl(pos, &wdl_state));
-    }
-
-    bool has_dtz = false;
-    int root_dtz = 0;
-    if (wdl_state != Tablebases::FAIL) {
-      Tablebases::ProbeState dtz_state;
-      root_dtz = -Tablebases::probe_dtz(pos, &dtz_state);
-      has_dtz = dtz_state != Tablebases::FAIL;
-    }
-
-    pos.undo_move(edges[i].move);
-
-    if (wdl_state == Tablebases::FAIL)
-      return false;
-
-    bool prefer = best_idx < 0 || root_wdl > best_wdl;
-    if (!prefer && root_wdl == best_wdl) {
-      if (root_wdl > 0 && has_dtz &&
-          (!best_has_dtz || std::abs(root_dtz) < std::abs(best_dtz))) {
-        prefer = true;
-      } else if (root_wdl < 0 && has_dtz &&
-                 (!best_has_dtz || std::abs(root_dtz) > std::abs(best_dtz))) {
-        prefer = true;
-      } else if (root_wdl == 0 && best_idx >= 0) {
-        Node *child = edges[i].child.load(std::memory_order_acquire);
-        Node *best_child =
-            edges[best_idx].child.load(std::memory_order_acquire);
-        const uint32_t cn = child ? child->GetN() : 0;
-        const uint32_t best_n = best_child ? best_child->GetN() : 0;
-        prefer = cn > best_n ||
-                 (cn == best_n && edges[i].GetP() > edges[best_idx].GetP());
+  for (const auto &ranked : tb_root_moves) {
+    const Move move = ranked.pv[0];
+    int edge_idx = -1;
+    for (int i = 0; i < num_edges; ++i) {
+      if (edges[i].move == move) {
+        edge_idx = i;
+        break;
       }
     }
+    if (edge_idx < 0)
+      continue;
+
+    Node *child = edges[edge_idx].child.load(std::memory_order_acquire);
+    const uint32_t visits = child ? child->GetN() : 0;
+    const float policy = edges[edge_idx].GetP();
+    const bool prefer =
+        best_idx < 0 || ranked.tbRank > best_tb_rank ||
+        (ranked.tbRank == best_tb_rank &&
+         (visits > best_visits ||
+          (visits == best_visits && policy > best_policy)));
 
     if (prefer) {
-      best_idx = i;
-      best_wdl = root_wdl;
-      best_dtz = root_dtz;
-      best_has_dtz = has_dtz;
+      best_idx = edge_idx;
+      best_tb_rank = ranked.tbRank;
+      best_visits = visits;
+      best_policy = policy;
     }
   }
 
@@ -3604,9 +3591,9 @@ bool Search::TryGetRootTablebaseMoveStatsLocked(RootMoveStats *out) const {
   const uint32_t baseline = RootVisitBaselineLocked(edges[best_idx].move);
   const uint32_t current_visits = visits >= baseline ? visits - baseline : 0;
   float q = 0.0f;
-  if (best_wdl >= static_cast<int>(Tablebases::WDLWin))
+  if (best_tb_rank > 0)
     q = 1.0f;
-  else if (best_wdl <= static_cast<int>(Tablebases::WDLLoss))
+  else if (best_tb_rank < 0)
     q = -1.0f;
   *out = {edges[best_idx].move, q, visits, edges[best_idx].GetP(),
           current_visits};
