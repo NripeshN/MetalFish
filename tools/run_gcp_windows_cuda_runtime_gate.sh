@@ -1502,6 +1502,7 @@ function Invoke-UciSmoke {
     [string[]]\$RequiredText,
     [string[]]\$RejectedText = @(),
     [string[]]\$PositiveMetrics = @(),
+    [int]\$MinNodes = 0,
     [bool]\$Profile = \$false
   )
   \$setOptions = @()
@@ -1658,6 +1659,13 @@ function Invoke-UciSmoke {
   }
   foreach (\$metric in \$PositiveMetrics) {
     Assert-PositiveMetric -Name \$Name -Text (\$out + \$err) -Metric \$metric
+  }
+  if (\$MinNodes -gt 0) {
+    \$searchInfo = Find-LastSearchInfo (\$out + \$err)
+    \$nodes = \$searchInfo["nodes"]
+    if (\$null -eq \$nodes -or [int64]\$nodes -lt \$MinNodes) {
+      throw "\$Name searched fewer nodes than expected: \$nodes < \$MinNodes"
+    }
   }
 }
 
@@ -2048,7 +2056,7 @@ Invoke-UciSmoke -Name "cuda-bk07-mcts" -Commands @(
   "position fen \$Bk07Fen",
   "go nodes 50",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=cuda", "minibatch=1", "bestmove h5f6"))
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=cuda", "minibatch=1", "bestmove h5f6")) -MinNodes 50
 
 Invoke-UciSmoke -Name "cuda-kiwipete-mcts" -Commands @(
   "uci",

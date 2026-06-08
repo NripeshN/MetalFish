@@ -2181,6 +2181,8 @@ def main() -> int:
             "hybrid-cuda-promotion",
             "hybrid-cuda-en-passant",
             "bestmove h5f6",
+            "MinNodes 50",
+            "searched fewer nodes than expected",
             "cuda_bk07_mcts",
             "cuda_kiwipete_mcts",
             "cuda_after_e4_mcts",
