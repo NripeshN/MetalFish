@@ -1944,6 +1944,31 @@ void test_hybrid_config() {
                    0.140f, 0.880f));
   }
   {
+    TestCase tc("Mid-root tactical Q gap can bypass AB rejection");
+
+    EXPECT(tc, HybridMCTSMidRootTacticalQGapOverride(
+                   true, true, true, 141, 82, 0.582f, 0.869f, 187, 229, 2,
+                   -32001, false, false, 0, 2, 48, -0.315f, 0.555f));
+    EXPECT(tc, HybridMCTSMidRootTacticalQGapOverride(
+                   true, true, true, 147, 88, 0.599f, 0.894f, 198, 253, 2,
+                   -32001, false, false, 1426, 2, 48, -0.315f, 0.580f));
+    EXPECT(tc, !HybridMCTSMidRootTacticalQGapOverride(
+                   true, true, false, 141, 82, 0.582f, 0.869f, 187, 229, 2,
+                   -32001, false, false, 0, 2, 48, -0.315f, 0.555f));
+    EXPECT(tc, !HybridMCTSMidRootTacticalQGapOverride(
+                   true, true, true, 141, 82, 0.54f, 0.869f, 187, 229, 2,
+                   -32001, false, false, 0, 2, 48, -0.315f, 0.555f));
+    EXPECT(tc, !HybridMCTSMidRootTacticalQGapOverride(
+                   true, true, true, 141, 82, 0.582f, 0.79f, 187, 229, 2,
+                   -32001, false, false, 0, 2, 48, -0.315f, 0.555f));
+    EXPECT(tc, !HybridMCTSMidRootTacticalQGapOverride(
+                   true, true, true, 141, 82, 0.582f, 0.869f, 187, 229, 2,
+                   -32001, false, false, 7000, 2, 48, -0.315f, 0.555f));
+    EXPECT(tc, !HybridMCTSMidRootTacticalQGapOverride(
+                   true, true, true, 141, 82, 0.582f, 0.869f, 187, 229, 2,
+                   -32001, false, false, 0, 2, 24, -0.315f, 0.555f));
+  }
+  {
     TestCase tc("Low-material pawn push can bypass stale AB root reject");
 
     EXPECT(tc, HybridMCTSRootRejectLowMaterialPushOverride(
