@@ -478,7 +478,7 @@ class MetalFishProbe:
                 "MCTSAddDirichletNoise": "false",
                 "HybridMCTSMinimumKLDGainPerNode": "0.0",
                 "HybridABRootRejectMCTS": "true",
-                "HybridMCTSRootReject": "true",
+                "HybridMCTSRootReject": "false",
                 "HybridMCTSABRootHints": "true",
                 "HybridMCTSABRootHintDelayMs": "0",
                 "HybridMCTSABRootHintCount": "8",

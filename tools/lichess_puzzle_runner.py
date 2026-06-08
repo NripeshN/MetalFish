@@ -389,7 +389,7 @@ def engine_options(args) -> dict[str, str]:
                 "NNWeights": str(args.weights),
                 "MCTSAddDirichletNoise": "false",
                 "HybridABRootRejectMCTS": "true",
-                "HybridMCTSRootReject": "true",
+                "HybridMCTSRootReject": "false",
                 "HybridMCTSABRootHints": "true",
                 "HybridMCTSABRootHintDelayMs": "0",
                 "HybridMCTSABRootHintCount": "8",

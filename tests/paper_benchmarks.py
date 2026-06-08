@@ -487,7 +487,7 @@ def detect_engines(threads: int, hash_mb: int) -> Dict[str, EngineConfig]:
             "MCTSAddDirichletNoise": "false",
             "HybridMCTSMinimumKLDGainPerNode": "0.0",
             "HybridABRootRejectMCTS": "true",
-            "HybridMCTSRootReject": "true",
+            "HybridMCTSRootReject": "false",
             "HybridMCTSUseSharedTT": "false",
             "HybridMCTSABRootHints": "true",
             "HybridMCTSABRootHintDelayMs": "0",
