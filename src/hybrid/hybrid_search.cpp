@@ -4763,10 +4763,9 @@ Move ParallelHybridSearch::make_final_decision() {
       mcts_root_reject_quiet_queen_move ||
       mcts_root_reject_quiet_minor_major_attack ||
       mcts_mid_root_tactical_q_gap || mcts_bishop_endgame_retreat ||
-      mcts_root_reject_q_gap ||
-      mcts_clock_root_reject_q_gap || mcts_discovered_pawn_push_override ||
-      mcts_reused_root_current || mcts_root_rejects_ab ||
-      (mcts_overwhelming && eval_delta >= 250);
+      mcts_root_reject_q_gap || mcts_clock_root_reject_q_gap ||
+      mcts_discovered_pawn_push_override || mcts_reused_root_current ||
+      mcts_root_rejects_ab || (mcts_overwhelming && eval_delta >= 250);
 
   bool choose_mcts = false;
   const char *reason = "ab_default";
@@ -4781,8 +4780,8 @@ Move ParallelHybridSearch::make_final_decision() {
          mcts_root_reject_rook_pawn_push || mcts_root_reject_quiet_queen_move ||
          mcts_root_reject_quiet_minor_major_attack ||
          mcts_mid_root_tactical_q_gap || mcts_bishop_endgame_retreat ||
-         mcts_root_reject_q_gap ||
-         mcts_clock_root_reject_q_gap || mcts_verified_hint_support ||
+         mcts_root_reject_q_gap || mcts_clock_root_reject_q_gap ||
+         mcts_verified_hint_support ||
          (mcts_reliable && (!ab_has_clear_preference || eval_delta >= 180)));
     if (choose_mcts)
       reason =
@@ -4971,8 +4970,7 @@ Move ParallelHybridSearch::make_final_decision() {
        << (mcts_root_reject_quiet_queen_move ? 1 : 0)
        << " MCTSRootRejectQuietMinorMajorAttack="
        << (mcts_root_reject_quiet_minor_major_attack ? 1 : 0)
-       << " MCTSMidRootTacticalQGap="
-       << (mcts_mid_root_tactical_q_gap ? 1 : 0)
+       << " MCTSMidRootTacticalQGap=" << (mcts_mid_root_tactical_q_gap ? 1 : 0)
        << " MCTSBishopEndgameRetreat=" << (mcts_bishop_endgame_retreat ? 1 : 0)
        << " MCTSRootRejectQGap=" << (mcts_root_reject_q_gap ? 1 : 0)
        << " MCTSClockRootRejectQGap=" << (mcts_clock_root_reject_q_gap ? 1 : 0)
