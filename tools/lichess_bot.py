@@ -5109,7 +5109,7 @@ class LichessBot:
                     speed=event_speed,
                 )
                 self._cancel_pending_challenge("game started elsewhere")
-        self._clear_accepted_challenge_reservations()
+        self._clear_accepted_challenge_reservation(game_id)
 
         self._reset_elo_range()
         self._tc_failures = 0

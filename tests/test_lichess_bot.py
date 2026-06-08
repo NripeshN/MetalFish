@@ -3321,7 +3321,10 @@ def test_game_start_claims_slot_and_clears_pending() -> None:
     bot._seek_timer = Timer()
     bot._played_by_speed = {}
     bot._persist_played_format_history = False
-    bot._accepted_challenge_reservations = {"incoming": time.time() + 30}
+    bot._accepted_challenge_reservations = {
+        "g1": time.time() + 30,
+        "incoming": time.time() + 30,
+    }
 
     posted: list[str] = []
     played: list[str] = []
@@ -3337,8 +3340,12 @@ def test_game_start_claims_slot_and_clears_pending() -> None:
 
     expect("pending cleared", bot._pending_challenge_id is None)
     expect(
-        "accepted challenge reservations cleared",
-        not bot._accepted_challenge_reservations,
+        "matching accepted challenge reservation cleared",
+        "g1" not in bot._accepted_challenge_reservations,
+    )
+    expect(
+        "unrelated accepted challenge reservation preserved",
+        "incoming" in bot._accepted_challenge_reservations,
     )
     expect("seek timer canceled", bot._seek_timer is None)
     expect("no challenge cancel for accepted game", posted == [])
