@@ -883,7 +883,8 @@ def test_rate_limit_wait_respects_budget() -> None:
         puzzle_runner.time.monotonic = lambda: 100.0
         puzzle_runner.time.sleep = lambda seconds: sleeps.append(seconds)
 
-        with redirect_stdout(io.StringIO()):
+        out = io.StringIO()
+        with redirect_stdout(out):
             waited = wait_after_rate_limit(
                 LichessRateLimited(65.0),
                 deadline=300.0,
@@ -892,18 +893,26 @@ def test_rate_limit_wait_respects_budget() -> None:
             )
         expect("rate limit waits when budget remains", waited)
         expect("rate limit slept requested interval", sleeps == [65.0])
+        expect(
+            "rate limit wait is reported",
+            "Rate limited; waiting 65s before retrying" in out.getvalue(),
+        )
 
         sleeps.clear()
-        expect(
-            "rate limit stops when event budget is exhausted",
-            not wait_after_rate_limit(
+        out = io.StringIO()
+        with redirect_stdout(out):
+            stopped = wait_after_rate_limit(
                 LichessRateLimited(65.0),
                 deadline=300.0,
                 events_seen=5,
                 max_events=5,
-            ),
+            )
+        expect(
+            "rate limit stops when event budget is exhausted",
+            not stopped,
         )
         expect("exhausted rate limit did not sleep", sleeps == [])
+        expect("exhausted rate limit is not reported as wait", out.getvalue() == "")
     finally:
         puzzle_runner.time.monotonic = old_monotonic
         puzzle_runner.time.sleep = old_sleep

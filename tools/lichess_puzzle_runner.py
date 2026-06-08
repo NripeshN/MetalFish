@@ -953,7 +953,7 @@ def wait_after_rate_limit(
     remaining_s = deadline - time.monotonic()
     if events_seen >= max_events or remaining_s <= wait_s + 5.0:
         return False
-        print(f"Rate limited; waiting {wait_s:.0f}s before retrying", flush=True)
+    print(f"Rate limited; waiting {wait_s:.0f}s before retrying", flush=True)
     time.sleep(wait_s)
     return True
 
