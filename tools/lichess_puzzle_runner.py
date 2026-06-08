@@ -375,6 +375,7 @@ def engine_options(args) -> dict[str, str]:
                 "NNWeights": str(args.weights),
                 "MCTSAddDirichletNoise": "false",
                 "MCTSParityPreset": "false",
+                "PureMCTSSmartPruningFactor": "0.5",
                 "PureMCTSCPuctAtRoot": "2.4",
                 "MCTSMaxThreads": "0",
                 "TransformerLowTimeFallbackMs": "0",
