@@ -556,6 +556,8 @@ int HybridABCandidateVerifyBudgetMs(
 
   int budget_cap = 0;
   if (limits.movetime > 0) {
+    if (limits.movetime < 1000)
+      return 0;
     budget_cap = static_cast<int>(std::max<TimePoint>(0, limits.movetime)) / 6;
   } else if ((limits.time[WHITE] > 0 || limits.time[BLACK] > 0) &&
              time_budget_ms >= 1000) {

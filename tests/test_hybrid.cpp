@@ -341,6 +341,11 @@ void test_hybrid_config() {
     EXPECT(tc,
            HybridABCandidateVerifyBudgetMs(limits, 5000, 1000, false) == 833);
     EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 5000, 150, true) == 0);
+    limits.movetime = 999;
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 999, 150, false) == 0);
+    limits.movetime = 1000;
+    EXPECT(tc,
+           HybridABCandidateVerifyBudgetMs(limits, 1000, 150, false) == 150);
 
     limits = ::MetalFish::Search::LimitsType();
     limits.time[WHITE] = 30000;
