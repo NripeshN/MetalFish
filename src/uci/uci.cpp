@@ -1117,6 +1117,8 @@ static int auto_hybrid_mcts_threads(Engine &engine, int available) {
     return 1;
   if (available >= 12)
     return std::clamp(available / 4, 2, 4);
+  if (available >= 8)
+    return 3;
   if (available >= 6)
     return 2;
   return 1;
