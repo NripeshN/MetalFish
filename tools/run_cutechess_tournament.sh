@@ -114,7 +114,6 @@ MCTS=(proto=uci restart="$ENGINE_RESTART" cmd="$MF" name=MetalFish-MCTS
       option.MCTSParityPreset=false option.MCTSAddDirichletNoise=false
       option.PureMCTSSmartPruningFactor=0.5
       option.PureMCTSCPuctAtRoot=2.4
-      option.PureMCTSFpuReductionAtRoot=0.55
       option.TransformerLowTimeFallbackMs=0
       option.MCTSMinimumKLDGainPerNode=0.00005)
 HYBRID=(proto=uci restart="$ENGINE_RESTART" cmd="$MF" name=MetalFish-Hybrid
