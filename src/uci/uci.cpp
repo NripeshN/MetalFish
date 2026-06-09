@@ -1087,6 +1087,11 @@ static void apply_pure_mcts_strength_overrides(Engine &engine,
   if (pure_mcts_cpuct_at_root >= 0.0f) {
     config.cpuct_at_root = pure_mcts_cpuct_at_root;
   }
+  const float pure_mcts_fpu_reduction_at_root =
+      get_float_option(engine, "PureMCTSFpuReductionAtRoot", -1.0f);
+  if (pure_mcts_fpu_reduction_at_root >= 0.0f) {
+    config.fpu_reduction_at_root = pure_mcts_fpu_reduction_at_root;
+  }
   config.fixed_movetime_q_override_cap = 384;
   config.capture_leader_quiet_major_probe = true;
 }

@@ -377,6 +377,7 @@ def engine_options(args) -> dict[str, str]:
                 "MCTSParityPreset": "false",
                 "PureMCTSSmartPruningFactor": "0.5",
                 "PureMCTSCPuctAtRoot": "2.4",
+                "PureMCTSFpuReductionAtRoot": "0.55",
                 "MCTSMaxThreads": "0",
                 "TransformerLowTimeFallbackMs": "0",
             }

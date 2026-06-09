@@ -211,6 +211,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSSmartPruningFactor", Option("1.33"));
   options.add("PureMCTSSmartPruningFactor", Option("0.5"));
   options.add("PureMCTSCPuctAtRoot", Option("2.4"));
+  options.add("PureMCTSFpuReductionAtRoot", Option("0.55"));
   options.add("MCTSSmartPruningMinimumBatches", Option(0, 0, 10000));
   options.add("MCTSMinimumKLDGainPerNode", Option("0.00005"));
   options.add("MCTSKLDGainAverageInterval", Option(100, 1, 10000000));
