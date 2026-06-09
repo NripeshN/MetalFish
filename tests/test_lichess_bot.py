@@ -2709,6 +2709,57 @@ def test_accepted_incoming_challenge_reserves_game_slot() -> None:
     expect("second challenge skipped resource probe", resource_checks == 1)
 
 
+def test_incoming_game_start_consumes_accepted_challenge_reservation() -> None:
+    class Args:
+        seek = True
+        max_games = 1
+        include_zero_increment = False
+        include_bullet = False
+        avoid_repeat_format = False
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {}
+    bot._pending_challenge_id = None
+    bot._pending_challenge_target = None
+    bot._pending_challenge_speed = None
+    bot._challenge_sent_at = 0.0
+    bot._rotation_idx = 0
+    bot._tc_failures = 0
+    bot._draining = threading.Event()
+    bot._shutdown = threading.Event()
+    bot._seek_timer = None
+    bot._accepted_challenge_reservations = {"incoming-challenge": time.time() + 30}
+    bot._persist_played_format_history = False
+    bot._played_by_speed = {}
+
+    played: list[str] = []
+    bot.play_game = lambda game_id: played.append(game_id)
+
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(
+            {
+                "type": "gameStart",
+                "game": {
+                    "gameId": "newgame",
+                    "speed": "rapid",
+                    "opponent": {"id": "incoming-bot"},
+                },
+            }
+        )
+
+    thread = bot.active_games.get("newgame")
+    if thread is not None:
+        thread.join(timeout=1)
+
+    expect("incoming game started", played == ["newgame"])
+    expect(
+        "accepted incoming reservation consumed",
+        bot._accepted_challenge_reservations == {},
+    )
+    expect("active game blocks seeking", not bot._should_seek())
+
+
 def test_incoming_challenge_waits_for_seek_lock_before_accepting() -> None:
     class Args:
         accept_rated = False
@@ -4223,6 +4274,7 @@ def main() -> int:
     test_challenge_decline_logs_reason()
     test_challenge_handler_tolerates_malformed_time_control()
     test_accepted_incoming_challenge_reserves_game_slot()
+    test_incoming_game_start_consumes_accepted_challenge_reservation()
     test_incoming_challenge_waits_for_seek_lock_before_accepting()
     test_transient_move_rejection_remains_retryable()
     test_ponder_game_circuit_breaker()

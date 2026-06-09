@@ -2561,6 +2561,15 @@ class LichessBot:
         reservations.pop(str(challenge_id), None)
         self._accepted_challenge_reservations = reservations
 
+    def _consume_accepted_challenge_reservation(self) -> None:
+        self._cleanup_accepted_challenge_reservations()
+        reservations = getattr(self, "_accepted_challenge_reservations", {})
+        if not reservations:
+            return
+        oldest = min(reservations, key=reservations.get)
+        reservations.pop(oldest, None)
+        self._accepted_challenge_reservations = reservations
+
     def _completed_limit_reached(self) -> bool:
         limit = getattr(self.args, "quit_after_games", 0) or 0
         return limit > 0 and self._completed_games >= limit
@@ -5096,6 +5105,7 @@ class LichessBot:
         pending_id = self._pending_challenge_id
         pending_target = self._pending_challenge_target
         pending_speed = getattr(self, "_pending_challenge_speed", None)
+        matched_pending = False
         if pending_id:
             if self._pending_challenge_matches_game_start(
                 pending_id,
@@ -5105,6 +5115,7 @@ class LichessBot:
                 event_opponent,
                 event_speed,
             ):
+                matched_pending = True
                 self._mark_seek_opponent_played(pending_target, pending_speed)
                 self._cancel_pending_challenge("game started")
             else:
@@ -5119,6 +5130,8 @@ class LichessBot:
                 )
                 self._cancel_pending_challenge("game started elsewhere")
         self._clear_accepted_challenge_reservation(game_id)
+        if not matched_pending:
+            self._consume_accepted_challenge_reservation()
 
         self._reset_elo_range()
         self._tc_failures = 0
