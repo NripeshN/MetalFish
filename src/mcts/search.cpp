@@ -2577,10 +2577,10 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
       const bool candidate_ok =
           attacks_major ? MCTSRootQuietMajorAttackProbeCandidate(
                               children_visits, i + 1, policy)
-          : fifth_rank ? MCTSRootFifthRankQuietProbeCandidate(children_visits,
-                                                              i + 1, policy)
-                       : MCTSRootDeepTacticalQuietProbeCandidate(
-                             children_visits, i + 1, policy);
+          : fifth_rank  ? MCTSRootFifthRankQuietProbeCandidate(children_visits,
+                                                               i + 1, policy)
+                        : MCTSRootDeepTacticalQuietProbeCandidate(
+                              children_visits, i + 1, policy);
       if (!candidate_ok) {
         continue;
       }
