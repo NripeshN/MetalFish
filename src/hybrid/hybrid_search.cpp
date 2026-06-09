@@ -1038,9 +1038,8 @@ bool HybridMCTSRootRejectKingsidePawnPushOverride(
     return false;
 
   const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
-  const bool normal_q_gap =
-      visit_share >= 0.60f && visit_share <= 0.76f && root_q_gap >= 0.30f &&
-      q_gap_to_ab >= 0.30f;
+  const bool normal_q_gap = visit_share >= 0.60f && visit_share <= 0.76f &&
+                            root_q_gap >= 0.30f && q_gap_to_ab >= 0.30f;
   const bool single_line_current =
       visit_share >= 0.99f && root_q_gap == 0.0f &&
       ab_in_mcts_current_visits == 0 && mcts_best_current_visits >= 18 &&
@@ -4826,8 +4825,8 @@ Move ParallelHybridSearch::make_final_decision() {
           mcts_decision_budget, mcts_visit_evidence_sane, ab_root_rejects_mcts,
           mcts_kingside_pawn_push, mcts_confidence_total_nodes,
           mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
-          mcts_in_ab.rank, mcts_in_ab.score, mcts_in_ab.effort,
-          ab_in_mcts.rank, ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+          mcts_in_ab.rank, mcts_in_ab.score, mcts_in_ab.effort, ab_in_mcts.rank,
+          ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
   const bool rook_endgame_root = HybridIsRookEndgame(decision_root);
   const bool mcts_quiet_central_pawn_push =
       HybridIsQuietCentralPawnPush(decision_root, mcts_best);
