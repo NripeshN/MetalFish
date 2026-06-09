@@ -942,6 +942,30 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(MCTSRootHighValueCaptureProbeCandidate(76, 3, 0.110f),
          "02J4S high-value capture probe passes", tc);
 
+  Position queen_check_capture_tactic;
+  StateInfo queen_check_capture_tactic_st;
+  queen_check_capture_tactic.set("r1b5/pppqNkp1/3p3p/4r2n/1PP2p1N/P5P1/"
+                                 "4Q2P/4RRK1 w - - 4 23",
+                                 false, &queen_check_capture_tactic_st);
+  const Move queen_takes_knight_check =
+      UCIEngine::to_move(queen_check_capture_tactic, "e2h5");
+  const Move quiet_queen_move =
+      UCIEngine::to_move(queen_check_capture_tactic, "e2d3");
+  expect(MCTSIsQueenCheckingCapture(queen_check_capture_tactic,
+                                    queen_takes_knight_check),
+         "00ZEW Qxh5+ is a queen checking capture", tc);
+  expect(!MCTSIsQueenCheckingCapture(queen_check_capture_tactic,
+                                     quiet_queen_move),
+         "00ZEW quiet queen move is not a queen checking capture", tc);
+  expect(MCTSRootQueenCheckingCaptureProbeCandidate(111, 9, 0.018f),
+         "00ZEW rank-nine queen checking capture probe passes", tc);
+  expect(!MCTSRootQueenCheckingCaptureProbeCandidate(181, 9, 0.018f),
+         "queen checking capture probe is early-root only", tc);
+  expect(!MCTSRootQueenCheckingCaptureProbeCandidate(111, 4, 0.018f),
+         "queen checking capture probe does not steal top-policy captures", tc);
+  expect(!MCTSRootQueenCheckingCaptureProbeCandidate(111, 9, 0.080f),
+         "queen checking capture probe stays below high-policy captures", tc);
+
   Position high_policy_bishop_capture_tactic;
   StateInfo high_policy_bishop_capture_tactic_st;
   high_policy_bishop_capture_tactic.set(
