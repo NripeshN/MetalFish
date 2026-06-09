@@ -2940,8 +2940,8 @@ void test_hybrid_config() {
                                           true, 84043, 3));
     EXPECT(tc, HybridPawnOnlyMCTSOverride(true, true, true, false, true, 23, 23,
                                           13, 13, 0, 1.000f, 0.000f, 1.078f,
-                                          724, 657, 210, 30, 2,
-                                          -VALUE_INFINITE, false, 1373, 2));
+                                          724, 657, 210, 30, 2, -VALUE_INFINITE,
+                                          false, 1373, 2));
     EXPECT(tc, !HybridPawnOnlyMCTSOverride(true, true, true, false, true, 12, 7,
                                            12, 7, 2, 0.583f, 0.092f, 0.100f,
                                            -12, 0, -45, -45, 2, -VALUE_INFINITE,
