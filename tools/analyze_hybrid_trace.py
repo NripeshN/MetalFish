@@ -68,6 +68,14 @@ class TraceLogStats:
     search_entries: int = 0
     hybrid_starts: int = 0
     trace_entries: int = 0
+    ane_top_entries: int = 0
+    ane_agrees_mcts: int = 0
+    ane_confirmed_mcts: int = 0
+    ane_pawn_only_mcts: int = 0
+    ane_q_supported_root: int = 0
+    ane_failures: int = 0
+    ane_hints: int = 0
+    ane_hint_moves: int = 0
     time_safety_fallbacks: int = 0
     time_safety_reasons: dict[str, int] = field(default_factory=dict)
     root_hint_events: int = 0
@@ -209,6 +217,26 @@ def iter_trace_decisions(results_path: pathlib.Path) -> Iterable[TraceDecision]:
 
 def collect_trace_log_stats(results_paths: list[pathlib.Path]) -> TraceLogStats:
     stats = TraceLogStats()
+
+    def add_ane_fields(fields: dict[str, str]) -> None:
+        if fields.get("ANETop", "none") not in {"", "none"}:
+            stats.ane_top_entries += 1
+        stats.ane_agrees_mcts += field_int(fields, "ANEAgreesMCTS")
+        stats.ane_confirmed_mcts += field_int(fields, "ANEConfirmedMCTS")
+        stats.ane_pawn_only_mcts += field_int(fields, "PawnOnlyANEMCTS")
+        stats.ane_q_supported_root += field_int(fields, "ANEQSupportedRoot")
+
+    def add_structured_ane_fields(search: dict) -> None:
+        if str(search.get("hybrid_ane_top", "none")) not in {"", "none"}:
+            stats.ane_top_entries += 1
+        stats.ane_agrees_mcts += int(search.get("hybrid_ane_agrees_mcts") or 0)
+        stats.ane_confirmed_mcts += int(
+            search.get("hybrid_ane_confirmed_mcts") or 0
+        )
+        stats.ane_failures += int(search.get("ane_failures") or 0)
+        stats.ane_hints += int(search.get("ane_hints") or 0)
+        stats.ane_hint_moves += int(search.get("ane_hint_moves") or 0)
+
     for results_path in results_paths:
         for record in load_result_records(results_path):
             if not isinstance(record, dict):
@@ -240,6 +268,7 @@ def collect_trace_log_stats(results_paths: list[pathlib.Path]) -> TraceLogStats:
                                     )
                                 elif line.startswith("HybridTrace:"):
                                     has_trace = True
+                                    add_ane_fields(parse_fields(line))
                             if has_trace:
                                 stats.trace_entries += 1
             elif "searches" in record:
@@ -247,8 +276,12 @@ def collect_trace_log_stats(results_paths: list[pathlib.Path]) -> TraceLogStats:
                     if not isinstance(search, dict):
                         continue
                     stats.search_entries += 1
-                    if normalize_trace_line(search.get("hybrid_trace", "")):
+                    trace = normalize_trace_line(search.get("hybrid_trace", ""))
+                    if trace:
                         stats.trace_entries += 1
+                        add_ane_fields(parse_fields(trace))
+                    else:
+                        add_structured_ane_fields(search)
     return stats
 
 
@@ -606,6 +639,25 @@ def print_trace_log_stats(stats: TraceLogStats) -> None:
     print(f"  search_log entries: {stats.search_entries}")
     print(f"  traced decisions: {stats.trace_entries} ({coverage:.1f}%)")
     print(f"  hybrid starts: {stats.hybrid_starts}")
+    if (
+        stats.ane_top_entries
+        or stats.ane_agrees_mcts
+        or stats.ane_confirmed_mcts
+        or stats.ane_pawn_only_mcts
+        or stats.ane_q_supported_root
+        or stats.ane_failures
+        or stats.ane_hints
+        or stats.ane_hint_moves
+    ):
+        print("  ANE root probe:")
+        print(f"    top entries: {stats.ane_top_entries}")
+        print(f"    agrees with MCTS: {stats.ane_agrees_mcts}")
+        print(f"    confirmed MCTS overrides: {stats.ane_confirmed_mcts}")
+        print(f"    pawn-only overrides: {stats.ane_pawn_only_mcts}")
+        print(f"    Q-supported root overrides: {stats.ane_q_supported_root}")
+        print(f"    failures: {stats.ane_failures}")
+        print(f"    hint events: {stats.ane_hints}")
+        print(f"    hint moves: {stats.ane_hint_moves}")
     print(f"  MCTS-to-AB root hint events: {stats.root_hint_events}")
     if stats.root_hint_events:
         avg_hints = stats.root_hint_moves_total / stats.root_hint_events

@@ -169,8 +169,24 @@ def assert_hybrid_trace_jsonl_decisions() -> None:
                     "hybrid_trace": (
                         "HybridTrace: reason=mcts_root_reject_q_gap "
                         "selected=f6f5 ABMove=g6g5 MCTSMove=f6f5 "
-                        "MCTSBestVisits=81"
+                        "MCTSBestVisits=81 ANETop=f6f5 ANEAgreesMCTS=1 "
+                        "ANEConfirmedMCTS=1 PawnOnlyANEMCTS=1"
                     ),
+                }
+            ],
+        },
+        {
+            "id": "puzzle-c",
+            "searches": [
+                {
+                    "ply": 0,
+                    "actual": "a2a4",
+                    "hybrid_ane_top": "a2a4",
+                    "hybrid_ane_agrees_mcts": 1,
+                    "hybrid_ane_confirmed_mcts": 0,
+                    "ane_failures": 1,
+                    "ane_hints": 1,
+                    "ane_hint_moves": 6,
                 }
             ],
         },
@@ -184,8 +200,18 @@ def assert_hybrid_trace_jsonl_decisions() -> None:
         raise AssertionError("trace analyzer did not parse puzzle JSONL decisions")
     if decisions[1].fields.get("PuzzleId") != "puzzle-b":
         raise AssertionError("trace analyzer did not keep puzzle id in trace fields")
-    if stats.search_entries != 2 or stats.trace_entries != 2:
+    if stats.search_entries != 3 or stats.trace_entries != 2:
         raise AssertionError("trace analyzer did not count puzzle JSONL coverage")
+    if (
+        stats.ane_top_entries != 2
+        or stats.ane_agrees_mcts != 2
+        or stats.ane_confirmed_mcts != 1
+        or stats.ane_pawn_only_mcts != 1
+        or stats.ane_failures != 1
+        or stats.ane_hints != 1
+        or stats.ane_hint_moves != 6
+    ):
+        raise AssertionError("trace analyzer did not count ANE puzzle coverage")
 
 
 def assert_tournament_draw_reason_precision() -> None:
