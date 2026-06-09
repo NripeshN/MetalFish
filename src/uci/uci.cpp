@@ -1178,6 +1178,11 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   auto split = compute_hybrid_thread_split(engine, limits);
 
   config.mcts_config = make_mcts_config(engine, nn_weights, split.mcts_threads);
+  if (limits && limits->movetime > 0 && limits->movetime < 1000 &&
+      config.mcts_config.minibatch_size > 1) {
+    config.mcts_config.minibatch_size = 1;
+    config.mcts_config.minibatch_size_auto = false;
+  }
   config.mcts_config.high_policy_root_lever_selection = false;
   config.mcts_config.low_policy_root_lever_selection = false;
   config.mcts_config.low_visit_q_override_rescan = false;
