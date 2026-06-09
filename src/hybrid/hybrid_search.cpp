@@ -1116,29 +1116,48 @@ bool HybridMCTSRootRejectQuietQueenMoveOverride(
     return false;
   }
 
+  const bool low_root_tactical =
+      mcts_root_visits >= 7 && mcts_root_visits <= 24 &&
+      mcts_best_visits >= 5 && visit_share >= 0.70f && root_q_gap >= 1.15f &&
+      mcts_cp >= 190 && eval_delta >= 230 && mcts_in_ab_rank >= 3 &&
+      mcts_in_ab_rank <= 7 && mcts_in_ab_score == -VALUE_INFINITE &&
+      !mcts_in_ab_lowerbound && mcts_in_ab_effort <= 512 &&
+      ab_in_mcts_rank >= 5 && ab_in_mcts_rank <= 8 &&
+      ab_in_mcts_current_visits == 0 && mcts_q - ab_in_mcts_q >= 1.00f;
+
   if (mcts_root_visits < 50 || mcts_root_visits > 1200 ||
       mcts_best_visits < 47 || visit_share < 0.85f || root_q_gap < 1.05f ||
       mcts_cp < 330 || eval_delta < 330) {
-    return false;
+    if (!low_root_tactical)
+      return false;
   }
 
-  if (mcts_in_ab_rank <= 1 || mcts_in_ab_rank > 6 ||
+  if (mcts_in_ab_rank <= 1 || mcts_in_ab_rank > (low_root_tactical ? 7 : 6) ||
       mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
-      mcts_in_ab_upperbound || mcts_in_ab_effort > 512) {
+      (!low_root_tactical && mcts_in_ab_upperbound) ||
+      mcts_in_ab_effort > 512) {
     return false;
   }
 
-  if (ab_in_mcts_rank <= 1 || ab_in_mcts_rank > 4 ||
-      ab_in_mcts_current_visits == 0 || ab_in_mcts_current_visits > 4) {
-    return false;
+  if (low_root_tactical) {
+    if (ab_in_mcts_rank < 5 || ab_in_mcts_rank > 8 ||
+        ab_in_mcts_current_visits != 0) {
+      return false;
+    }
+  } else {
+    if (ab_in_mcts_rank <= 1 || ab_in_mcts_rank > 4 ||
+        ab_in_mcts_current_visits == 0 || ab_in_mcts_current_visits > 4) {
+      return false;
+    }
   }
 
+  const uint32_t dominance_multiplier = low_root_tactical ? 1 : 12;
   if (mcts_best_visits <
-      12 * std::max<uint32_t>(1, ab_in_mcts_current_visits)) {
+      dominance_multiplier * std::max<uint32_t>(1, ab_in_mcts_current_visits)) {
     return false;
   }
 
-  return mcts_q - ab_in_mcts_q >= 1.05f;
+  return mcts_q - ab_in_mcts_q >= (low_root_tactical ? 1.00f : 1.05f);
 }
 
 bool HybridMCTSRootRejectQuietMinorMajorAttackOverride(

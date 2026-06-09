@@ -2310,6 +2310,9 @@ void test_hybrid_config() {
     EXPECT(tc, HybridMCTSRootRejectQuietQueenMoveOverride(
                    true, true, true, true, 972, 948, 0.975f, 1.294f, 483, 500,
                    2, -32001, false, false, 8, 4, 3, -0.811f, 0.483f));
+    EXPECT(tc, HybridMCTSRootRejectQuietQueenMoveOverride(
+                   true, true, true, true, 14, 11, 0.786f, 1.325f, 254, 291, 7,
+                   -32001, false, false, 25, 6, 0, -0.338f, 0.691f));
     EXPECT(tc, !HybridMCTSRootRejectQuietQueenMoveOverride(
                    false, true, true, true, 56, 48, 0.857f, 1.121f, 357, 373, 5,
                    -32001, false, false, 4, 3, 1, -0.290f, 0.831f));
@@ -2325,6 +2328,33 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSRootRejectQuietQueenMoveOverride(
                    true, true, true, true, 49, 48, 0.857f, 1.121f, 357, 373, 5,
                    -32001, false, false, 4, 3, 1, -0.290f, 0.831f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietQueenMoveOverride(
+                   true, true, true, true, 6, 5, 0.833f, 1.216f, 199, 243, 5,
+                   -32001, false, true, 97, 6, 0, -0.177f, 0.581f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietQueenMoveOverride(
+                   true, true, true, true, 11, 8, 0.690f, 1.216f, 199, 243, 5,
+                   -32001, false, true, 97, 6, 0, -0.177f, 0.581f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietQueenMoveOverride(
+                   true, true, true, true, 11, 8, 0.727f, 1.216f, 189, 243, 5,
+                   -32001, false, true, 97, 6, 0, -0.177f, 0.581f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietQueenMoveOverride(
+                   true, true, true, true, 11, 8, 0.727f, 1.216f, 199, 229, 5,
+                   -32001, false, true, 97, 6, 0, -0.177f, 0.581f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietQueenMoveOverride(
+                   true, true, true, true, 11, 8, 0.727f, 1.216f, 199, 243, 8,
+                   -32001, false, true, 97, 6, 0, -0.177f, 0.581f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietQueenMoveOverride(
+                   true, true, true, true, 11, 8, 0.727f, 1.216f, 199, 243, 5,
+                   -32001, false, true, 513, 6, 0, -0.177f, 0.581f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietQueenMoveOverride(
+                   true, true, true, true, 11, 8, 0.727f, 1.216f, 199, 243, 5,
+                   -32001, false, true, 97, 4, 0, -0.177f, 0.581f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietQueenMoveOverride(
+                   true, true, true, true, 11, 8, 0.727f, 1.216f, 199, 243, 5,
+                   -32001, false, true, 97, 6, 1, -0.177f, 0.581f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietQueenMoveOverride(
+                   true, true, true, true, 11, 8, 0.727f, 1.216f, 199, 243, 5,
+                   -32001, false, true, 97, 6, 0, -0.100f, 0.581f));
     EXPECT(tc, !HybridMCTSRootRejectQuietQueenMoveOverride(
                    true, true, true, true, 56, 46, 0.857f, 1.121f, 357, 373, 5,
                    -32001, false, false, 4, 3, 1, -0.290f, 0.831f));
