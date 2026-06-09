@@ -190,8 +190,8 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
         options["HybridANEConfirmMCTSOverride"] == "true",
     )
     expect(
-        "ANE scope defaults to all roots",
-        options["HybridANEOnlyPawnEndgames"] == "false",
+        "ANE confirmation defaults to pawn endgames",
+        options["HybridANEOnlyPawnEndgames"] == "true",
     )
     expect("HybridTrace enabled", options["HybridTrace"] == "true")
     expect("ANE weights option", options["HybridANEWeights"] == "networks/t1.pb.gz")

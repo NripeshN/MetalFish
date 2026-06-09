@@ -270,7 +270,7 @@ HYBRID_ANE_ROOT_HINTS = (
     env_bool_string("METALFISH_HYBRID_ANE_ROOT_HINTS", False) == "true"
 )
 HYBRID_ANE_ONLY_PAWN_ENDGAMES = (
-    env_bool_string("METALFISH_HYBRID_ANE_ONLY_PAWN_ENDGAMES", False) == "true"
+    env_bool_string("METALFISH_HYBRID_ANE_ONLY_PAWN_ENDGAMES", True) == "true"
 )
 HYBRID_ANE_CONFIRM_MCTS_OVERRIDE = (
     env_bool_string("METALFISH_HYBRID_ANE_CONFIRM_MCTS_OVERRIDE", True) == "true"

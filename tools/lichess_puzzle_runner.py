@@ -32,7 +32,7 @@ LICHESS_API = "https://lichess.org/api"
 DEFAULT_ANE_WEIGHTS = ROOT / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz"
 DEFAULT_ANE_MODEL = ROOT / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc"
 DEFAULT_ANE_ROOT_HINTS = False
-DEFAULT_ANE_ONLY_PAWN_ENDGAMES = False
+DEFAULT_ANE_ONLY_PAWN_ENDGAMES = True
 DEFAULT_ANE_ROOT_HINT_WAIT_MS = 0
 DEFAULT_ANE_MIN_BUDGET_MS = 0
 SETOPTION_ALIASES = {
@@ -1285,7 +1285,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--hybrid-ane-confirm-mcts-override",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=True,
         help="Allow ANE agreement to confirm an MCTS override in hybrid arbitration.",
     )
     parser.add_argument(
