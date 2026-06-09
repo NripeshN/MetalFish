@@ -966,6 +966,32 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(!MCTSRootQueenCheckingCaptureProbeCandidate(111, 9, 0.080f),
          "queen checking capture probe stays below high-policy captures", tc);
 
+  Position rook_checking_pawn_capture_tactic;
+  StateInfo rook_checking_pawn_capture_tactic_st;
+  rook_checking_pawn_capture_tactic.set(
+      "4r1k1/pp3p2/3p1Ppq/5P2/8/6RP/PP2rQ2/6RK w - - 3 40", false,
+      &rook_checking_pawn_capture_tactic_st);
+  const Move rook_takes_pawn_check =
+      UCIEngine::to_move(rook_checking_pawn_capture_tactic, "g3g6");
+  const Move queen_block =
+      UCIEngine::to_move(rook_checking_pawn_capture_tactic, "f2d4");
+  expect(MCTSIsRookCheckingPawnCapture(rook_checking_pawn_capture_tactic,
+                                       rook_takes_pawn_check),
+         "01A5W Rxg6+ is a rook checking pawn capture", tc);
+  expect(!MCTSIsRookCheckingPawnCapture(rook_checking_pawn_capture_tactic,
+                                        queen_block),
+         "01A5W queen block is not a rook checking pawn capture", tc);
+  expect(MCTSRootRookCheckingPawnCaptureProbeCandidate(55, 4, 0.068f),
+         "01A5W rook checking pawn capture probe passes", tc);
+  expect(!MCTSRootRookCheckingPawnCaptureProbeCandidate(23, 4, 0.068f),
+         "rook checking pawn capture probe waits for a formed root", tc);
+  expect(!MCTSRootRookCheckingPawnCaptureProbeCandidate(55, 9, 0.068f),
+         "rook checking pawn capture probe stays inside mid-policy ranks", tc);
+  expect(
+      !MCTSRootRookCheckingPawnCaptureProbeCandidate(55, 4, 0.160f),
+      "rook checking pawn capture probe does not duplicate high policy probes",
+      tc);
+
   Position high_policy_bishop_capture_tactic;
   StateInfo high_policy_bishop_capture_tactic_st;
   high_policy_bishop_capture_tactic.set(

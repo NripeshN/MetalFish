@@ -425,6 +425,7 @@ bool MCTSIsQueenPromotionDeflectionRecapture(const Position &pos, Move move);
 bool MCTSIsQueenEndgameAdvancedPassedPawnPush(const Position &pos, Move move);
 bool MCTSIsQuietQueenCheck(const Position &pos, Move move);
 bool MCTSIsQueenCheckingCapture(const Position &pos, Move move);
+bool MCTSIsRookCheckingPawnCapture(const Position &pos, Move move);
 bool MCTSIsQuietQueenKingNetMove(const Position &pos, Move move);
 bool MCTSRootHighPolicyLeverCandidate(
     uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
@@ -452,6 +453,9 @@ bool MCTSRootHighValueCaptureProbeCandidate(uint32_t root_visits,
 bool MCTSRootQueenCheckingCaptureProbeCandidate(uint32_t root_visits,
                                                 int candidate_policy_rank,
                                                 float candidate_policy);
+bool MCTSRootRookCheckingPawnCaptureProbeCandidate(uint32_t root_visits,
+                                                   int candidate_policy_rank,
+                                                   float candidate_policy);
 bool MCTSRootTacticalQuietProbeCandidate(uint32_t root_visits,
                                          int candidate_policy_rank,
                                          float candidate_policy);

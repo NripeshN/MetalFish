@@ -808,6 +808,23 @@ bool MCTSIsQueenCheckingCapture(const Position &pos, Move move) {
   return pos.gives_check(move);
 }
 
+bool MCTSIsRookCheckingPawnCapture(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL || !pos.capture(move))
+    return false;
+
+  const Piece piece = pos.piece_on(move.from_sq());
+  const Piece captured = pos.piece_on(move.to_sq());
+  if (piece == NO_PIECE || captured == NO_PIECE || type_of(piece) != ROOK ||
+      type_of(captured) != PAWN)
+    return false;
+
+  const Color us = color_of(piece);
+  if (relative_rank(us, move.to_sq()) < RANK_6)
+    return false;
+
+  return pos.gives_check(move);
+}
+
 bool MCTSIsQuietQueenKingNetMove(const Position &pos, Move move) {
   if (move == Move::none() || move.type_of() != NORMAL || pos.capture(move))
     return false;
@@ -959,6 +976,14 @@ bool MCTSRootQueenCheckingCaptureProbeCandidate(uint32_t root_visits,
   return root_visits >= 16 && root_visits <= 180 &&
          candidate_policy_rank >= 5 && candidate_policy_rank <= 16 &&
          candidate_policy >= 0.006f && candidate_policy <= 0.060f;
+}
+
+bool MCTSRootRookCheckingPawnCaptureProbeCandidate(uint32_t root_visits,
+                                                   int candidate_policy_rank,
+                                                   float candidate_policy) {
+  return root_visits >= 24 && root_visits <= 180 &&
+         candidate_policy_rank >= 2 && candidate_policy_rank <= 8 &&
+         candidate_policy >= 0.045f && candidate_policy <= 0.120f;
 }
 
 bool MCTSRootTacticalQuietProbeCandidate(uint32_t root_visits,
@@ -2458,13 +2483,18 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
       const bool queen_checking_capture =
           limits_.movetime > 0 &&
           MCTSIsQueenCheckingCapture(ctx.pos, edges[i].move);
-      if (!low_policy_capture && !high_value_capture && !queen_checking_capture)
+      const bool rook_checking_pawn_capture =
+          limits_.movetime > 0 &&
+          MCTSIsRookCheckingPawnCapture(ctx.pos, edges[i].move);
+      if (!low_policy_capture && !high_value_capture &&
+          !queen_checking_capture && !rook_checking_pawn_capture)
         continue;
 
       Node *child = edges[i].child.load(std::memory_order_acquire);
-      const uint32_t target_visits = high_value_capture       ? 32
-                                     : queen_checking_capture ? 24
-                                                              : 16;
+      const uint32_t target_visits = high_value_capture           ? 32
+                                     : queen_checking_capture     ? 24
+                                     : rook_checking_pawn_capture ? 24
+                                                                  : 16;
       if (child && child->GetN() >= target_visits)
         continue;
       if (child && child->GetNInFlight() > 0)
@@ -2472,11 +2502,13 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
 
       const float policy = edges[i].GetP();
       const bool candidate_ok =
-          high_value_capture ? MCTSRootHighValueCaptureProbeCandidate(
-                                   children_visits, i + 1, policy)
-          : queen_checking_capture
-              ? MCTSRootQueenCheckingCaptureProbeCandidate(children_visits,
-                                                           i + 1, policy)
+          high_value_capture       ? MCTSRootHighValueCaptureProbeCandidate(
+                                         children_visits, i + 1, policy)
+          : queen_checking_capture ? MCTSRootQueenCheckingCaptureProbeCandidate(
+                                         children_visits, i + 1, policy)
+          : rook_checking_pawn_capture
+              ? MCTSRootRookCheckingPawnCaptureProbeCandidate(children_visits,
+                                                              i + 1, policy)
               : MCTSRootTacticalCaptureProbeCandidate(children_visits, i + 1,
                                                       policy);
       if (!candidate_ok)
