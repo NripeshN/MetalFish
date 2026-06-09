@@ -482,9 +482,7 @@ def test_stale_engine_reason_detects_newer_sources() -> None:
         os.utime(engine, (100.0, 100.0))
         os.utime(source, (200.0, 200.0))
 
-        reason = puzzle_runner.stale_engine_reason(
-            engine, [src], tolerance_s=0.0
-        )
+        reason = puzzle_runner.stale_engine_reason(engine, [src], tolerance_s=0.0)
 
     expect("stale engine reports a reason", "older than source file" in reason)
     expect("stale engine reason names build command", "cmake --build" in reason)
@@ -502,9 +500,7 @@ def test_stale_engine_reason_accepts_current_binary() -> None:
         os.utime(source, (100.0, 100.0))
         os.utime(engine, (200.0, 200.0))
 
-        reason = puzzle_runner.stale_engine_reason(
-            engine, [src], tolerance_s=0.0
-        )
+        reason = puzzle_runner.stale_engine_reason(engine, [src], tolerance_s=0.0)
 
     expect("fresh engine has no stale reason", reason == "")
 
