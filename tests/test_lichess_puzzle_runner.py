@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -467,6 +468,84 @@ def test_repeat_result_ids_are_comparable() -> None:
     expect("repeat result keeps original puzzle id", repeated["puzzle_id"] == "abc")
     expect("repeat result stores pass number", repeated["repeat"] == 2)
     expect("repeat result id is unique", repeated["id"] == "abc#r2")
+
+
+def test_stale_engine_reason_detects_newer_sources() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        engine = root / "metalfish"
+        src = root / "src"
+        src.mkdir()
+        source = src / "hybrid_search.cpp"
+        engine.write_text("")
+        source.write_text("// newer source\n")
+        os.utime(engine, (100.0, 100.0))
+        os.utime(source, (200.0, 200.0))
+
+        reason = puzzle_runner.stale_engine_reason(
+            engine, [src], tolerance_s=0.0
+        )
+
+    expect("stale engine reports a reason", "older than source file" in reason)
+    expect("stale engine reason names build command", "cmake --build" in reason)
+
+
+def test_stale_engine_reason_accepts_current_binary() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        engine = root / "metalfish"
+        src = root / "src"
+        src.mkdir()
+        source = src / "hybrid_search.cpp"
+        engine.write_text("")
+        source.write_text("// older source\n")
+        os.utime(source, (100.0, 100.0))
+        os.utime(engine, (200.0, 200.0))
+
+        reason = puzzle_runner.stale_engine_reason(
+            engine, [src], tolerance_s=0.0
+        )
+
+    expect("fresh engine has no stale reason", reason == "")
+
+
+def test_validate_engine_binary_rejects_stale_default_engine() -> None:
+    old_engine = puzzle_runner.ENGINE
+    old_root = puzzle_runner.ROOT
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            engine = root / "build" / "metalfish"
+            src = root / "src"
+            engine.parent.mkdir()
+            src.mkdir()
+            source = src / "search.cpp"
+            engine.write_text("")
+            source.write_text("// newer source\n")
+            os.utime(engine, (100.0, 100.0))
+            os.utime(source, (200.0, 200.0))
+            puzzle_runner.ENGINE = engine
+            puzzle_runner.ROOT = root
+
+            args = type(
+                "Args",
+                (),
+                {"engine": engine, "allow_stale_engine": False},
+            )()
+            try:
+                puzzle_runner.validate_engine_binary(args)
+            except RuntimeError as exc:
+                message = str(exc)
+            else:
+                message = ""
+
+            args.allow_stale_engine = True
+            puzzle_runner.validate_engine_binary(args)
+
+        expect("stale default engine is rejected", "older than source file" in message)
+    finally:
+        puzzle_runner.ENGINE = old_engine
+        puzzle_runner.ROOT = old_root
 
 
 def test_offline_repeat_run_respects_max_puzzles() -> None:

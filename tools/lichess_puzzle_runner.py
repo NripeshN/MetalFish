@@ -35,6 +35,8 @@ DEFAULT_ANE_ROOT_HINTS = False
 DEFAULT_ANE_ONLY_PAWN_ENDGAMES = True
 DEFAULT_ANE_ROOT_HINT_WAIT_MS = 0
 DEFAULT_ANE_MIN_BUDGET_MS = 0
+SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp", ".m", ".mm", ".metal"}
+SOURCE_FILENAMES = {"CMakeLists.txt"}
 SETOPTION_ALIASES = {
     "HybridANEWeightsPath": "HybridANEWeights",
 }
@@ -114,6 +116,68 @@ def auto_hash_mb() -> int:
         return 2048
     target = max(512, available - reserve_mb)
     return min(4096, (target // 256) * 256)
+
+
+def newest_source_mtime(paths: list[pathlib.Path]) -> tuple[float, pathlib.Path | None]:
+    newest_mtime = 0.0
+    newest_path: pathlib.Path | None = None
+    for path in paths:
+        if not path.exists():
+            continue
+        candidates = path.rglob("*") if path.is_dir() else [path]
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            if (
+                candidate.suffix not in SOURCE_SUFFIXES
+                and candidate.name not in SOURCE_FILENAMES
+            ):
+                continue
+            try:
+                mtime = candidate.stat().st_mtime
+            except OSError:
+                continue
+            if mtime > newest_mtime:
+                newest_mtime = mtime
+                newest_path = candidate
+    return newest_mtime, newest_path
+
+
+def stale_engine_reason(
+    engine: pathlib.Path,
+    source_paths: list[pathlib.Path],
+    *,
+    tolerance_s: float = 1.0,
+) -> str:
+    try:
+        engine_mtime = engine.stat().st_mtime
+    except OSError as exc:
+        raise RuntimeError(f"Engine not found at {engine}") from exc
+    source_mtime, source_path = newest_source_mtime(source_paths)
+    if source_path is None or engine_mtime + tolerance_s >= source_mtime:
+        return ""
+    return (
+        f"Engine binary {engine} is older than source file {source_path}. "
+        "Run `cmake --build build --target metalfish -j8` before benchmarking, "
+        "or pass --allow-stale-engine for an intentional stale-binary run."
+    )
+
+
+def validate_engine_binary(args) -> None:
+    if not args.engine.exists():
+        raise RuntimeError(f"Engine not found at {args.engine}")
+    if args.allow_stale_engine:
+        return
+    try:
+        default_engine = ENGINE.resolve()
+        selected_engine = args.engine.resolve()
+    except OSError:
+        return
+    if selected_engine != default_engine:
+        return
+    reason = stale_engine_reason(args.engine, [ROOT / "src", ROOT / "CMakeLists.txt"])
+    if reason:
+        raise RuntimeError(reason)
 
 
 def load_token() -> str:
@@ -965,8 +1029,7 @@ def run(args) -> int:
     if requests is None:
         raise RuntimeError("Python package 'requests' is required")
     token = load_token()
-    if not args.engine.exists():
-        raise RuntimeError(f"Engine not found at {args.engine}")
+    validate_engine_binary(args)
     if args.mode in {"mcts", "hybrid"} and not args.weights.exists():
         raise RuntimeError(f"Transformer weights not found at {args.weights}")
     validate_ane_args(args)
@@ -1150,8 +1213,7 @@ def run(args) -> int:
 
 
 def run_offline(args) -> int:
-    if not args.engine.exists():
-        raise RuntimeError(f"Engine not found at {args.engine}")
+    validate_engine_binary(args)
     if not args.offline_csv.exists():
         raise RuntimeError(f"Offline puzzle CSV not found at {args.offline_csv}")
     if args.mode in {"mcts", "hybrid"} and not args.weights.exists():
@@ -1263,6 +1325,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--engine", type=pathlib.Path, default=ENGINE)
     parser.add_argument("--engine-cwd", type=pathlib.Path, default=None)
+    parser.add_argument(
+        "--allow-stale-engine",
+        action="store_true",
+        default=False,
+        help="Allow benchmarking the default build/metalfish binary even if sources are newer.",
+    )
     parser.add_argument("--mode", choices=("ab", "mcts", "hybrid"), default="ab")
     parser.add_argument(
         "--weights",
