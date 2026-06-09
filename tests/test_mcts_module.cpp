@@ -658,6 +658,8 @@ void test_search_params_defaults(TestCounter &tc) {
          "pure MCTS root tactical capture probe default", tc);
   expect(params.low_visit_q_override_rescan,
          "pure MCTS low-visit Q override rescans by default", tc);
+  expect(!params.capture_leader_quiet_major_probe,
+         "capture-leader quiet-major probe defaults off for hybrid safety", tc);
   expect(params.fixed_movetime_q_override_cap == 0,
          "fixed-movetime Q override defaults off for hybrid safety", tc);
   expect(params.GetCpuctBase(true) == params.cpuct_base_at_root,

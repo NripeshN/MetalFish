@@ -1088,6 +1088,7 @@ static void apply_pure_mcts_strength_overrides(Engine &engine,
     config.cpuct_at_root = pure_mcts_cpuct_at_root;
   }
   config.fixed_movetime_q_override_cap = 384;
+  config.capture_leader_quiet_major_probe = true;
 }
 
 struct HybridThreadSplit {
@@ -1438,6 +1439,7 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
       << config.low_policy_root_lever_selection << "|"
       << config.root_tactical_capture_probe << "|"
       << config.low_visit_q_override_rescan << "|"
+      << config.capture_leader_quiet_major_probe << "|"
       << config.fixed_movetime_q_override_cap << "|" << config.draw_score << "|"
       << config.wdl_rescale_ratio << "|" << config.wdl_rescale_diff << "|"
       << config.two_fold_draws << "|" << config.sticky_endgames << "|"

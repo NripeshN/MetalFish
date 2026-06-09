@@ -2541,6 +2541,12 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
     int probe_idx = -1;
     float probe_policy = 0.0f;
     const int policy_rank_limit = std::min(num_edges, 12);
+    const bool best_is_capture = ctx.pos.capture(edges[best_idx].move);
+    const Piece best_captured =
+        best_is_capture ? ctx.pos.piece_on(edges[best_idx].move.to_sq()) : NO_PIECE;
+    const bool best_captures_major =
+        best_captured != NO_PIECE &&
+        (type_of(best_captured) == ROOK || type_of(best_captured) == QUEEN);
     for (int i = 0; i < policy_rank_limit; ++i) {
       const bool attacks_major =
           MCTSIsMinorQuietAttacksMajor(ctx.pos, edges[i].move);
@@ -2556,6 +2562,11 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
       Node *child = edges[i].child.load(std::memory_order_acquire);
       const bool attacks_queen =
           attacks_major && MCTSIsMinorQuietAttacksQueen(ctx.pos, edges[i].move);
+      if (best_is_capture &&
+          (!params_.capture_leader_quiet_major_probe || !attacks_queen ||
+           best_captures_major)) {
+        continue;
+      }
       const uint32_t target_visits =
           (fifth_rank || (attacks_queen && policy >= 0.180f)) ? 48 : 32;
       if (child && child->GetN() >= target_visits)
