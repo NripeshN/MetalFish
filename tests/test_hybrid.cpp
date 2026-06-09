@@ -2780,6 +2780,42 @@ void test_hybrid_config() {
                225, 209, 2, 150, true, false, 234308, 3, 11, 0.242f, 0.635f));
   }
   {
+    TestCase tc("Pawn-only MCTS override predicate");
+
+    EXPECT(tc, HybridPawnOnlyMCTSOverride(true, true, true, true, false, 31, 29,
+                                          19, 19, 0, 0.935f, 0.000f, 0.449f,
+                                          111, 133, -1, -1, 2, -VALUE_INFINITE,
+                                          false, 62385, 2));
+    EXPECT(tc, HybridPawnOnlyMCTSOverride(true, true, true, true, false, 20, 18,
+                                          14, 13, 1, 0.900f, 0.463f, 0.464f,
+                                          116, 130, -1, -1, 2, -VALUE_INFINITE,
+                                          true, 22922, 2));
+    EXPECT(tc, HybridPawnOnlyMCTSOverride(true, true, true, true, false, 25, 22,
+                                          18, 16, 2, 0.880f, 0.463f, 0.464f,
+                                          124, 146, -1, -1, 2, -VALUE_INFINITE,
+                                          true, 45755, 2));
+    EXPECT(tc, HybridPawnOnlyMCTSOverride(true, true, true, false, true, 22, 15,
+                                          22, 15, 3, 0.682f, 0.226f, 0.239f, 23,
+                                          23, -46, -46, 2, -VALUE_INFINITE,
+                                          true, 84043, 3));
+    EXPECT(tc, !HybridPawnOnlyMCTSOverride(true, true, true, false, true, 12, 7,
+                                           12, 7, 2, 0.583f, 0.092f, 0.100f,
+                                           -12, 0, -45, -45, 2, -VALUE_INFINITE,
+                                           true, 41775, 3));
+    EXPECT(tc, !HybridPawnOnlyMCTSOverride(true, true, true, true, false, 31,
+                                           29, 19, 19, 2, 0.935f, 0.000f,
+                                           0.400f, 111, 133, -1, -1, 2,
+                                           -VALUE_INFINITE, false, 62385, 2));
+    EXPECT(tc, !HybridPawnOnlyMCTSOverride(true, true, true, false, true, 22,
+                                           15, 22, 15, 3, 0.682f, 0.226f,
+                                           0.239f, 23, 23, -46, -46, 2,
+                                           -VALUE_INFINITE, false, 84043, 3));
+    EXPECT(tc, !HybridPawnOnlyMCTSOverride(true, false, true, true, false, 31,
+                                           29, 19, 19, 0, 0.935f, 0.000f,
+                                           0.449f, 111, 133, -1, -1, 2,
+                                           -VALUE_INFINITE, false, 62385, 2));
+  }
+  {
     TestCase tc("Compact fixed-budget MCTS override stays narrowly gated");
 
     EXPECT(tc, HybridMCTSCompactFixedBudgetOverride(true, true, false, 65, 56,

@@ -757,6 +757,16 @@ bool HybridPawnOnlyANEMCTSOverride(
     float q_gap_to_ab, int mcts_cp, int eval_delta, int ab_average_score,
     int mcts_average_score, float ane_score_margin);
 
+bool HybridPawnOnlyMCTSOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool candidate_shape,
+    bool king_recapture_shape, bool pawn_lever_shape, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, uint64_t mcts_current_root_visits,
+    uint32_t mcts_current_best_visits, uint32_t ab_mcts_visits,
+    float visit_share, float root_q_gap, float q_gap_to_ab, int mcts_cp,
+    int eval_delta, int ab_average_score, int mcts_average_score,
+    int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank);
+
 bool HybridIsPawnLever(const Position &pos, Move move);
 
 bool HybridIsKingsidePawnLever(const Position &pos, Move move);
