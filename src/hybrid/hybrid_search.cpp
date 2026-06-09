@@ -2162,7 +2162,8 @@ bool HybridIsQuietBishopBackRankRetreat(const Position &pos, Move move) {
 
 bool HybridANEProbeAllowedForPosition(const Position &pos,
                                       bool only_pawn_endgames) {
-  return !only_pawn_endgames || HybridIsPawnOnlyEndgame(pos);
+  return !only_pawn_endgames || HybridIsPawnOnlyEndgame(pos) ||
+         pos.count<QUEEN>() > 0;
 }
 
 bool HybridIsPawnLever(const Position &pos, Move move) {
