@@ -1040,12 +1040,17 @@ bool HybridMCTSRootRejectKingsidePawnPushOverride(
   const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
   const bool normal_q_gap = visit_share >= 0.60f && visit_share <= 0.76f &&
                             root_q_gap >= 0.30f && q_gap_to_ab >= 0.30f;
+  const bool compact_low_root_q_gap =
+      mcts_root_current_visits >= 15 && mcts_root_current_visits <= 17 &&
+      mcts_best_current_visits >= 8 && visit_share >= 0.50f &&
+      root_q_gap >= 0.24f && q_gap_to_ab >= 0.24f && mcts_cp >= 220 &&
+      eval_delta >= 190 && mcts_in_ab_effort <= 50000;
   const bool single_line_current =
       visit_share >= 0.99f && root_q_gap == 0.0f &&
       ab_in_mcts_current_visits == 0 && mcts_best_current_visits >= 18 &&
       mcts_cp >= 270 && eval_delta >= 215 && mcts_in_ab_effort <= 20000 &&
       q_gap_to_ab >= 0.32f;
-  return normal_q_gap || single_line_current;
+  return normal_q_gap || compact_low_root_q_gap || single_line_current;
 }
 
 bool HybridMCTSRootRejectRookEndgamePawnPushOverride(
