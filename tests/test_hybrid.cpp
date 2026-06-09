@@ -874,6 +874,73 @@ void test_hybrid_config() {
                    -VALUE_INFINITE, 802, 2, 2, -0.078f, 0.272f));
   }
   {
+    TestCase tc("MCTS root-reject kingside pawn-push predicate");
+
+    EXPECT(tc, HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 18, 11, 0.611f, 0.314f, 257,
+                   207, 2, -VALUE_INFINITE, 3052, 2, 3, 0.382f, 0.696f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   false, true, true, true, 18, 11, 0.611f, 0.314f, 257,
+                   207, 2, -VALUE_INFINITE, 3052, 2, 3, 0.382f, 0.696f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, false, 18, 11, 0.611f, 0.314f, 257,
+                   207, 2, -VALUE_INFINITE, 3052, 2, 3, 0.382f, 0.696f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 14, 11, 0.611f, 0.314f, 257,
+                   207, 2, -VALUE_INFINITE, 3052, 2, 3, 0.382f, 0.696f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 18, 9, 0.611f, 0.314f, 257,
+                   207, 2, -VALUE_INFINITE, 3052, 2, 3, 0.382f, 0.696f));
+    EXPECT(tc, HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 15, 10, 0.667f, 0.323f, 265,
+                   209, 2, -VALUE_INFINITE, 23641, 2, 1, 0.387f, 0.710f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 18, 11, 0.590f, 0.314f, 257,
+                   207, 2, -VALUE_INFINITE, 3052, 2, 3, 0.382f, 0.696f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 18, 11, 0.611f, 0.299f, 257,
+                   207, 2, -VALUE_INFINITE, 3052, 2, 3, 0.382f, 0.696f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 18, 11, 0.611f, 0.314f, 239,
+                   207, 2, -VALUE_INFINITE, 3052, 2, 3, 0.382f, 0.696f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 18, 11, 0.611f, 0.314f, 257,
+                   189, 2, -VALUE_INFINITE, 3052, 2, 3, 0.382f, 0.696f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 18, 11, 0.611f, 0.314f, 257,
+                   207, 3, -VALUE_INFINITE, 3052, 2, 3, 0.382f, 0.696f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 18, 11, 0.611f, 0.314f, 257,
+                   207, 2, -VALUE_INFINITE, 25001, 2, 3, 0.382f, 0.696f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 18, 11, 0.611f, 0.314f, 257,
+                   207, 2, -VALUE_INFINITE, 3052, 2, 5, 0.382f, 0.696f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 18, 11, 0.611f, 0.314f, 257,
+                   207, 2, -VALUE_INFINITE, 3052, 2, 3, 0.397f, 0.696f));
+    EXPECT(tc, HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 19, 19, 1.000f, 0.000f, 272,
+                   249, 2, -VALUE_INFINITE, 1283, 2, 0, 0.386f, 0.721f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 19, 17, 1.000f, 0.000f, 272,
+                   249, 2, -VALUE_INFINITE, 1283, 2, 0, 0.386f, 0.721f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 19, 19, 1.000f, 0.000f, 269,
+                   249, 2, -VALUE_INFINITE, 1283, 2, 0, 0.386f, 0.721f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 19, 19, 1.000f, 0.000f, 272,
+                   214, 2, -VALUE_INFINITE, 1283, 2, 0, 0.386f, 0.721f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 19, 19, 1.000f, 0.000f, 272,
+                   249, 2, -VALUE_INFINITE, 20001, 2, 0, 0.386f, 0.721f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 19, 19, 1.000f, 0.000f, 272,
+                   249, 2, -VALUE_INFINITE, 1283, 2, 1, 0.386f, 0.721f));
+    EXPECT(tc, !HybridMCTSRootRejectKingsidePawnPushOverride(
+                   true, true, true, true, 19, 19, 1.000f, 0.001f, 272,
+                   249, 2, -VALUE_INFINITE, 1283, 2, 0, 0.386f, 0.721f));
+  }
+  {
     TestCase tc("Clock-managed MCTS root-reject Q-gap override predicate");
 
     EXPECT(tc, HybridMCTSClockRootRejectQGapOverride(
