@@ -2458,27 +2458,27 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
       const bool queen_checking_capture =
           limits_.movetime > 0 &&
           MCTSIsQueenCheckingCapture(ctx.pos, edges[i].move);
-      if (!low_policy_capture && !high_value_capture &&
-          !queen_checking_capture)
+      if (!low_policy_capture && !high_value_capture && !queen_checking_capture)
         continue;
 
       Node *child = edges[i].child.load(std::memory_order_acquire);
-      const uint32_t target_visits =
-          high_value_capture ? 32 : queen_checking_capture ? 24 : 16;
+      const uint32_t target_visits = high_value_capture       ? 32
+                                     : queen_checking_capture ? 24
+                                                              : 16;
       if (child && child->GetN() >= target_visits)
         continue;
       if (child && child->GetNInFlight() > 0)
         continue;
 
       const float policy = edges[i].GetP();
-      const bool candidate_ok = high_value_capture
-                                    ? MCTSRootHighValueCaptureProbeCandidate(
-                                          children_visits, i + 1, policy)
-                                : queen_checking_capture
-                                    ? MCTSRootQueenCheckingCaptureProbeCandidate(
-                                          children_visits, i + 1, policy)
-                                    : MCTSRootTacticalCaptureProbeCandidate(
-                                          children_visits, i + 1, policy);
+      const bool candidate_ok =
+          high_value_capture ? MCTSRootHighValueCaptureProbeCandidate(
+                                   children_visits, i + 1, policy)
+          : queen_checking_capture
+              ? MCTSRootQueenCheckingCaptureProbeCandidate(children_visits,
+                                                           i + 1, policy)
+              : MCTSRootTacticalCaptureProbeCandidate(children_visits, i + 1,
+                                                      policy);
       if (!candidate_ok)
         continue;
       if (probe_idx < 0 || policy > probe_policy) {
