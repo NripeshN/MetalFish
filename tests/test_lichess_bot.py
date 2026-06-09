@@ -110,8 +110,8 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
         with_ane["HybridANEConfirmMCTSOverride"] == "false",
     )
     expect(
-        "ANE default scope probes all roots",
-        with_default_no_hints["HybridANEOnlyPawnEndgames"] == "false",
+        "ANE default scope stays pawn-endgame only",
+        with_default_no_hints["HybridANEOnlyPawnEndgames"] == "true",
     )
     expect(
         "ANE all-root explicit opt-out passed",
