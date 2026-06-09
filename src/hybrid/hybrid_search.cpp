@@ -2484,8 +2484,23 @@ bool HybridPawnOnlyMCTSOverride(
     uint64_t mcts_in_ab_effort, int ab_in_mcts_rank) {
   if (!fixed_budget || !visit_evidence_sane || !candidate_shape ||
       mcts_best_visits > mcts_root_visits ||
-      mcts_current_best_visits > mcts_current_root_visits ||
-      std::abs(ab_average_score) > 170 || std::abs(mcts_average_score) > 220 ||
+      mcts_current_best_visits > mcts_current_root_visits) {
+    return false;
+  }
+
+  const bool ultra_tiny_pawn_lever =
+      pawn_lever_shape && !king_recapture_shape && mcts_root_visits >= 20 &&
+      mcts_root_visits <= 32 && mcts_best_visits >= 20 &&
+      mcts_current_root_visits >= 12 && mcts_current_root_visits <= 16 &&
+      mcts_current_best_visits == mcts_current_root_visits &&
+      visit_share >= 0.98f && root_q_gap == 0.0f && q_gap_to_ab >= 1.00f &&
+      mcts_cp >= 650 && eval_delta >= 600 && ab_mcts_visits == 0 &&
+      ab_in_mcts_rank == 2 && mcts_in_ab_rank == 2 &&
+      mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 60000;
+  if (ultra_tiny_pawn_lever)
+    return true;
+
+  if (std::abs(ab_average_score) > 170 || std::abs(mcts_average_score) > 220 ||
       std::abs(ab_average_score - mcts_average_score) > 160) {
     return false;
   }
