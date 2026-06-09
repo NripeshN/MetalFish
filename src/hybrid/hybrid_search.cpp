@@ -2082,6 +2082,16 @@ bool HybridIsQuietCentralPawnPush(const Position &pos, Move move) {
   return relative_rank(us, to) >= RANK_4;
 }
 
+bool HybridIsQuietRookMove(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL)
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  return piece != NO_PIECE && type_of(piece) == ROOK && pos.empty(to);
+}
+
 bool HybridIsQuietCentralQueenMove(const Position &pos, Move move) {
   if (move == Move::none() || move.type_of() != NORMAL)
     return false;
@@ -2446,6 +2456,28 @@ bool HybridPawnOnlyMCTSOverride(
   }
 
   return false;
+}
+
+bool HybridMCTSRookEndgameQuietRookOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool rook_endgame,
+    bool quiet_rook_move, uint64_t mcts_root_visits, uint32_t mcts_best_visits,
+    uint64_t mcts_current_root_visits, uint32_t mcts_current_best_visits,
+    float visit_share, float q_gap_to_ab, int mcts_cp, int eval_delta,
+    int mcts_in_ab_rank, int mcts_in_ab_score, uint64_t mcts_in_ab_effort,
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits) {
+  if (!fixed_budget || !visit_evidence_sane || !rook_endgame ||
+      !quiet_rook_move) {
+    return false;
+  }
+
+  return mcts_root_visits >= 12 && mcts_root_visits <= 24 &&
+         mcts_best_visits >= 12 && mcts_current_root_visits >= 12 &&
+         mcts_current_best_visits >= 12 && visit_share >= 0.98f &&
+         q_gap_to_ab >= 1.55f && mcts_cp >= 300 && eval_delta >= 300 &&
+         mcts_in_ab_rank >= 4 && mcts_in_ab_rank <= 8 &&
+         mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 100 &&
+         ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 3 &&
+         ab_in_mcts_current_visits == 0;
 }
 
 bool HybridIsKingsidePawnLever(const Position &pos, Move move) {
@@ -4755,6 +4787,16 @@ Move ParallelHybridSearch::make_final_decision() {
   const bool mcts_root_reject_rook_pawn_push =
       mcts_root_reject_rook_pawn_push_sentinel ||
       mcts_root_reject_rook_pawn_push_lowerbound;
+  const bool mcts_quiet_rook_move =
+      HybridIsQuietRookMove(decision_root, mcts_best);
+  const bool mcts_rook_endgame_quiet_rook =
+      HybridMCTSRookEndgameQuietRookOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane, rook_endgame_root,
+          mcts_quiet_rook_move, mcts_confidence_total_nodes,
+          mcts_confidence_visits, mcts_total_current_nodes, mcts_current_visits,
+          visit_share, ab_in_mcts.rank > 0 ? mcts_q - ab_in_mcts.q : 0.0f,
+          mcts_cp, eval_delta, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits);
   const bool mcts_quiet_central_queen_move =
       HybridIsQuietCentralQueenMove(decision_root, mcts_best);
   const bool mcts_root_reject_quiet_queen_move =
@@ -4923,7 +4965,7 @@ Move ParallelHybridSearch::make_final_decision() {
       mcts_cross_root_confidence_fixed_budget ||
       mcts_root_confidence_reject_override || mcts_reused_root_confidence ||
       mcts_root_reject_low_material_push || mcts_root_reject_rook_pawn_push ||
-      mcts_root_reject_quiet_queen_move ||
+      mcts_rook_endgame_quiet_rook || mcts_root_reject_quiet_queen_move ||
       mcts_root_reject_quiet_minor_major_attack ||
       mcts_mid_root_tactical_q_gap || mcts_bishop_endgame_retreat ||
       mcts_root_reject_q_gap || mcts_clock_root_reject_q_gap ||
@@ -4941,7 +4983,8 @@ Move ParallelHybridSearch::make_final_decision() {
          mcts_ab_lowerbound_confirmed || mcts_low_node_root_confidence ||
          mcts_discovered_pawn_push_override ||
          mcts_root_reject_low_material_push ||
-         mcts_root_reject_rook_pawn_push || mcts_root_reject_quiet_queen_move ||
+         mcts_root_reject_rook_pawn_push || mcts_rook_endgame_quiet_rook ||
+         mcts_root_reject_quiet_queen_move ||
          mcts_root_reject_quiet_minor_major_attack ||
          mcts_mid_root_tactical_q_gap || mcts_bishop_endgame_retreat ||
          mcts_root_reject_q_gap || mcts_clock_root_reject_q_gap ||
@@ -4960,6 +5003,7 @@ Move ParallelHybridSearch::make_final_decision() {
           : mcts_root_reject_low_material_push
               ? "mcts_root_reject_low_material_push"
           : mcts_root_reject_rook_pawn_push ? "mcts_root_reject_rook_pawn_push"
+          : mcts_rook_endgame_quiet_rook    ? "mcts_rook_endgame_quiet_rook"
           : mcts_root_reject_quiet_queen_move
               ? "mcts_root_reject_quiet_queen_move"
           : mcts_root_reject_quiet_minor_major_attack
@@ -5032,6 +5076,9 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_root_reject_rook_pawn_push) {
       choose_mcts = true;
       reason = "mcts_root_reject_rook_pawn_push";
+    } else if (mcts_rook_endgame_quiet_rook) {
+      choose_mcts = true;
+      reason = "mcts_rook_endgame_quiet_rook";
     } else if (mcts_root_reject_quiet_queen_move) {
       choose_mcts = true;
       reason = "mcts_root_reject_quiet_queen_move";
@@ -5134,6 +5181,7 @@ Move ParallelHybridSearch::make_final_decision() {
        << (mcts_root_reject_low_material_push ? 1 : 0)
        << " MCTSRootRejectRookPawnPush="
        << (mcts_root_reject_rook_pawn_push ? 1 : 0)
+       << " MCTSRookEndgameQuietRook=" << (mcts_rook_endgame_quiet_rook ? 1 : 0)
        << " MCTSRootRejectQuietQueenMove="
        << (mcts_root_reject_quiet_queen_move ? 1 : 0)
        << " MCTSRootRejectQuietMinorMajorAttack="

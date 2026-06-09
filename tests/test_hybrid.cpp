@@ -2256,6 +2256,49 @@ void test_hybrid_config() {
                    2, -20, true, false, 58884, 2, 4, 0.116f, 0.615f));
   }
   {
+    TestCase tc("Rook endgame quiet rook MCTS override stays narrow");
+
+    EXPECT(tc, HybridMCTSRookEndgameQuietRookOverride(
+                   true, true, true, true, 17, 17, 17, 17, 1.000f, 1.658f, 354,
+                   380, 6, -VALUE_INFINITE, 27, 3, 0));
+    EXPECT(tc, HybridMCTSRookEndgameQuietRookOverride(
+                   true, true, true, true, 12, 12, 12, 12, 1.000f, 1.585f, 321,
+                   369, 5, -VALUE_INFINITE, 14, 2, 0));
+    EXPECT(tc, !HybridMCTSRookEndgameQuietRookOverride(
+                   false, true, true, true, 17, 17, 17, 17, 1.000f, 1.658f, 354,
+                   380, 6, -VALUE_INFINITE, 27, 3, 0));
+    EXPECT(tc, !HybridMCTSRookEndgameQuietRookOverride(
+                   true, true, false, true, 17, 17, 17, 17, 1.000f, 1.658f, 354,
+                   380, 6, -VALUE_INFINITE, 27, 3, 0));
+    EXPECT(tc, !HybridMCTSRookEndgameQuietRookOverride(
+                   true, true, true, false, 17, 17, 17, 17, 1.000f, 1.658f, 354,
+                   380, 6, -VALUE_INFINITE, 27, 3, 0));
+    EXPECT(tc, !HybridMCTSRookEndgameQuietRookOverride(
+                   true, true, true, true, 11, 11, 11, 11, 1.000f, 1.658f, 354,
+                   380, 6, -VALUE_INFINITE, 27, 3, 0));
+    EXPECT(tc, !HybridMCTSRookEndgameQuietRookOverride(
+                   true, true, true, true, 17, 17, 17, 17, 0.970f, 1.658f, 354,
+                   380, 6, -VALUE_INFINITE, 27, 3, 0));
+    EXPECT(tc, !HybridMCTSRookEndgameQuietRookOverride(
+                   true, true, true, true, 17, 17, 17, 17, 1.000f, 1.540f, 354,
+                   380, 6, -VALUE_INFINITE, 27, 3, 0));
+    EXPECT(tc, !HybridMCTSRookEndgameQuietRookOverride(
+                   true, true, true, true, 17, 17, 17, 17, 1.000f, 1.658f, 299,
+                   380, 6, -VALUE_INFINITE, 27, 3, 0));
+    EXPECT(tc, !HybridMCTSRookEndgameQuietRookOverride(
+                   true, true, true, true, 17, 17, 17, 17, 1.000f, 1.658f, 354,
+                   299, 6, -VALUE_INFINITE, 27, 3, 0));
+    EXPECT(tc, !HybridMCTSRookEndgameQuietRookOverride(
+                   true, true, true, true, 17, 17, 17, 17, 1.000f, 1.658f, 354,
+                   380, 3, -VALUE_INFINITE, 27, 3, 0));
+    EXPECT(tc, !HybridMCTSRookEndgameQuietRookOverride(
+                   true, true, true, true, 17, 17, 17, 17, 1.000f, 1.658f, 354,
+                   380, 6, -VALUE_INFINITE, 101, 3, 0));
+    EXPECT(tc, !HybridMCTSRookEndgameQuietRookOverride(
+                   true, true, true, true, 17, 17, 17, 17, 1.000f, 1.658f, 354,
+                   380, 6, -VALUE_INFINITE, 27, 3, 1));
+  }
+  {
     TestCase tc("Quiet queen move can bypass stale low-effort AB root reject");
 
     EXPECT(tc, HybridMCTSRootRejectQuietQueenMoveOverride(
