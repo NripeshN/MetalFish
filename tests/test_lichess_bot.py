@@ -503,6 +503,56 @@ def test_should_seek_respects_resource_gate() -> None:
     expect("busy resources reschedule seek", scheduled == [30])
 
 
+def test_seek_rechecks_game_slot_before_challenge_post() -> None:
+    class Args:
+        quit_after_games = 0
+        seek = True
+        max_games = 1
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot._completed_games = 0
+    bot._draining = threading.Event()
+    bot._pending_challenge_id = None
+    bot._pending_challenge_target = None
+    bot._pending_challenge_speed = None
+    bot._challenge_sent_at = 0.0
+    bot._rate_limit_count = 0
+    bot._accepted_challenge_reservations = {}
+    bot.active_games = {}
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._persist_challenge_cooldowns = False
+    bot._resources_allow_new_game = lambda: True
+    bot._next_tc = lambda: (300, 3)
+    bot._tc_to_speed = lambda limit, inc: "blitz"
+    bot._seek_is_rated = lambda: False
+    bot._seek_candidates = lambda bots, speed, rated: (["targetbot"], None)
+    bot._audit_seek = lambda event, **fields: None
+    scheduled: list[float] = []
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+
+    def online_bots():
+        bot.active_games["started"] = object()
+        return ([{"id": "targetbot"}], None)
+
+    posted: list[str] = []
+
+    def api_post(path: str, **kwargs):
+        posted.append(path)
+        return types.SimpleNamespace(status_code=500, text="slot already full")
+
+    bot._online_bots = online_bots
+    bot.api_post = api_post
+
+    with redirect_stdout(io.StringIO()):
+        bot._seek_game_once()
+
+    expect("slot filled by game start", not bot._should_seek())
+    expect("no challenge posted after slot filled", posted == [])
+    expect("seek retry not scheduled for full slot", scheduled == [])
+
+
 def test_seek_dry_run_does_not_post_challenge() -> None:
     class Args:
         seek = True
@@ -4108,6 +4158,7 @@ def main() -> int:
     test_bot_config_rejects_invalid_common_modes()
     test_config_check_prints_without_api_or_engine_launch()
     test_should_seek_respects_resource_gate()
+    test_seek_rechecks_game_slot_before_challenge_post()
     test_seek_dry_run_does_not_post_challenge()
     test_seek_dry_run_reports_rating_floor_block()
     test_seek_candidates_tolerate_malformed_perf_records()

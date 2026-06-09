@@ -3224,6 +3224,15 @@ class LichessBot:
                 self._schedule_retry(retry_s)
                 return
 
+            if not self._should_seek():
+                self._audit_seek(
+                    "seek_aborted",
+                    reason="slot_filled",
+                    speed=speed,
+                    rated=rated,
+                )
+                return
+
             target = candidates[0]
             r = self.api_post(
                 f"/challenge/{target}",
