@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Fetch inputs for the direct Windows CUDA runtime gate."""
+
 from __future__ import annotations
 
 import argparse

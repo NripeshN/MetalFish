@@ -2543,7 +2543,8 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
     const int policy_rank_limit = std::min(num_edges, 12);
     const bool best_is_capture = ctx.pos.capture(edges[best_idx].move);
     const Piece best_captured =
-        best_is_capture ? ctx.pos.piece_on(edges[best_idx].move.to_sq()) : NO_PIECE;
+        best_is_capture ? ctx.pos.piece_on(edges[best_idx].move.to_sq())
+                        : NO_PIECE;
     const bool best_captures_major =
         best_captured != NO_PIECE &&
         (type_of(best_captured) == ROOK || type_of(best_captured) == QUEEN);
@@ -2562,9 +2563,8 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
       Node *child = edges[i].child.load(std::memory_order_acquire);
       const bool attacks_queen =
           attacks_major && MCTSIsMinorQuietAttacksQueen(ctx.pos, edges[i].move);
-      if (best_is_capture &&
-          (!params_.capture_leader_quiet_major_probe || !attacks_queen ||
-           best_captures_major)) {
+      if (best_is_capture && (!params_.capture_leader_quiet_major_probe ||
+                              !attacks_queen || best_captures_major)) {
         continue;
       }
       const uint32_t target_visits =
@@ -2577,10 +2577,10 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
       const bool candidate_ok =
           attacks_major ? MCTSRootQuietMajorAttackProbeCandidate(
                               children_visits, i + 1, policy)
-          : fifth_rank  ? MCTSRootFifthRankQuietProbeCandidate(children_visits,
-                                                               i + 1, policy)
-                        : MCTSRootDeepTacticalQuietProbeCandidate(
-                              children_visits, i + 1, policy);
+          : fifth_rank ? MCTSRootFifthRankQuietProbeCandidate(children_visits,
+                                                              i + 1, policy)
+                       : MCTSRootDeepTacticalQuietProbeCandidate(
+                             children_visits, i + 1, policy);
       if (!candidate_ok) {
         continue;
       }
@@ -3580,11 +3580,10 @@ bool Search::TryGetRootTablebaseMoveStatsLocked(RootMoveStats *out) const {
     Node *child = edges[edge_idx].child.load(std::memory_order_acquire);
     const uint32_t visits = child ? child->GetN() : 0;
     const float policy = edges[edge_idx].GetP();
-    const bool prefer =
-        best_idx < 0 || ranked.tbRank > best_tb_rank ||
-        (ranked.tbRank == best_tb_rank &&
-         (visits > best_visits ||
-          (visits == best_visits && policy > best_policy)));
+    const bool prefer = best_idx < 0 || ranked.tbRank > best_tb_rank ||
+                        (ranked.tbRank == best_tb_rank &&
+                         (visits > best_visits ||
+                          (visits == best_visits && policy > best_policy)));
 
     if (prefer) {
       best_idx = edge_idx;

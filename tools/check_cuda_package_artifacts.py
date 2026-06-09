@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate packaged Linux and Windows CUDA release artifacts."""
+
 from __future__ import annotations
 
 import argparse

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Write Linux and Windows CUDA runtime gate manifests from gate environment."""
+
 from __future__ import annotations
 
 import argparse

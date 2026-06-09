@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate Linux and Windows CUDA runtime gate manifests."""
+
 from __future__ import annotations
 
 import argparse

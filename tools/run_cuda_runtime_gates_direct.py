@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run same-commit CUDA runtime gates directly from a clean worktree."""
+
 from __future__ import annotations
 
 import argparse

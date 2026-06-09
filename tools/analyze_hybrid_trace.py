@@ -230,9 +230,7 @@ def collect_trace_log_stats(results_paths: list[pathlib.Path]) -> TraceLogStats:
         if str(search.get("hybrid_ane_top", "none")) not in {"", "none"}:
             stats.ane_top_entries += 1
         stats.ane_agrees_mcts += int(search.get("hybrid_ane_agrees_mcts") or 0)
-        stats.ane_confirmed_mcts += int(
-            search.get("hybrid_ane_confirmed_mcts") or 0
-        )
+        stats.ane_confirmed_mcts += int(search.get("hybrid_ane_confirmed_mcts") or 0)
         stats.ane_failures += int(search.get("ane_failures") or 0)
         stats.ane_hints += int(search.get("ane_hints") or 0)
         stats.ane_hint_moves += int(search.get("ane_hint_moves") or 0)

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Fetch Metal comparison inputs for the direct Linux CUDA GPU gate."""
+
 from __future__ import annotations
 
 import argparse

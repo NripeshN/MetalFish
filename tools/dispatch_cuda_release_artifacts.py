@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Dispatch same-commit CUDA release artifact promotion."""
+
 from __future__ import annotations
 
 import argparse

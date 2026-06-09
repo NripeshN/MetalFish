@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Fetch and validate same-commit CUDA release packages."""
+
 from __future__ import annotations
 
 import argparse

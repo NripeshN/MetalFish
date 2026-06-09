@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Extract semantic CUDA runtime facts from gate artifacts."""
+
 from __future__ import annotations
 
 import json

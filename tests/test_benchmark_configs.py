@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Regression checks for benchmark UCI option drift."""
+
 from __future__ import annotations
 
 import json

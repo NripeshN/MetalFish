@@ -1865,8 +1865,8 @@ void test_hybrid_config() {
                    pos, UCIEngine::to_move(pos, "b3c4"),
                    UCIEngine::to_move(pos, "d4c4")));
 
-    pos.set("2b2k2/2q2p2/p1p2Ppr/4p3/2r1B3/5Q2/P1P4P/R2R3K w - - 0 25",
-            false, &st);
+    pos.set("2b2k2/2q2p2/p1p2Ppr/4p3/2r1B3/5Q2/P1P4P/R2R3K w - - 0 25", false,
+            &st);
     EXPECT(tc, !HybridIsPawnOnlyEndgame(pos));
     EXPECT(tc, HybridANEProbeAllowedForPosition(pos, true));
     EXPECT(tc, HybridANEProbeAllowedForPosition(pos, false));

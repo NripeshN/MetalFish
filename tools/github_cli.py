@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Resolve the GitHub CLI consistently for local and CI helper scripts."""
+
 from __future__ import annotations
 
 import os
