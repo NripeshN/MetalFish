@@ -2547,6 +2547,18 @@ bool HybridPawnOnlyMCTSOverride(
   }
 
   if (king_recapture_shape) {
+    const bool short_stable_king_recapture =
+        mcts_root_visits >= 35 && mcts_root_visits <= 50 &&
+        mcts_best_visits >= 32 && mcts_current_root_visits >= 28 &&
+        mcts_current_best_visits >= 28 && visit_share >= 0.92f &&
+        root_q_gap >= 0.50f && q_gap_to_ab >= 0.50f && mcts_cp >= 150 &&
+        eval_delta >= 150 && ab_mcts_visits <= 3 && ab_in_mcts_rank == 2 &&
+        mcts_in_ab_rank == 2 && mcts_in_ab_score == -VALUE_INFINITE &&
+        mcts_in_ab_upperbound && mcts_in_ab_effort >= 50000 &&
+        mcts_in_ab_effort <= 120000;
+    if (short_stable_king_recapture)
+      return true;
+
     return mcts_root_visits >= 20 && mcts_root_visits <= 32 &&
            mcts_best_visits >= 18 && mcts_current_root_visits >= 12 &&
            mcts_current_best_visits >= 11 && visit_share >= 0.88f &&
@@ -2557,6 +2569,18 @@ bool HybridPawnOnlyMCTSOverride(
   }
 
   if (pawn_lever_shape) {
+    const bool short_stable_pawn_lever =
+        mcts_root_visits >= 28 && mcts_root_visits <= 40 &&
+        mcts_best_visits >= 20 && mcts_current_root_visits >= 28 &&
+        mcts_current_best_visits >= 20 && visit_share >= 0.70f &&
+        root_q_gap >= 0.40f && q_gap_to_ab >= 0.40f && mcts_cp >= 80 &&
+        eval_delta >= 80 && ab_mcts_visits <= 3 && ab_in_mcts_rank == 3 &&
+        mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 3 &&
+        mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_upperbound &&
+        mcts_in_ab_effort >= 35000 && mcts_in_ab_effort <= 220000;
+    if (short_stable_pawn_lever)
+      return true;
+
     return mcts_root_visits >= 17 && mcts_root_visits <= 24 &&
            mcts_best_visits >= 10 && mcts_current_root_visits >= 17 &&
            mcts_current_best_visits >= 10 && visit_share >= 0.58f &&

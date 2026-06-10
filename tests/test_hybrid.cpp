@@ -2994,10 +2994,18 @@ void test_hybrid_config() {
                                           18, 16, 2, 0.880f, 0.463f, 0.464f,
                                           124, 146, -1, -1, 2, -VALUE_INFINITE,
                                           true, 45755, 2));
+    EXPECT(tc, HybridPawnOnlyMCTSOverride(true, true, true, true, false, 45, 42,
+                                          31, 30, 1, 0.968f, 0.565f, 0.565f,
+                                          163, 163, 0, 0, 2, -VALUE_INFINITE,
+                                          true, 78414, 2));
     EXPECT(tc, HybridPawnOnlyMCTSOverride(true, true, true, false, true, 22, 15,
                                           22, 15, 3, 0.682f, 0.226f, 0.239f, 23,
                                           23, -46, -46, 2, -VALUE_INFINITE,
                                           true, 84043, 3));
+    EXPECT(tc, HybridPawnOnlyMCTSOverride(true, true, true, false, true, 37, 29,
+                                          37, 29, 3, 0.784f, 0.538f, 0.551f,
+                                          123, 123, 0, 0, 2, -VALUE_INFINITE,
+                                          true, 97305, 3));
     EXPECT(tc, HybridPawnOnlyMCTSOverride(true, true, true, false, true, 23, 23,
                                           13, 13, 0, 1.000f, 0.000f, 1.078f,
                                           724, 657, 210, 30, 2, -VALUE_INFINITE,
@@ -3042,6 +3050,10 @@ void test_hybrid_config() {
                                            15, 22, 15, 3, 0.682f, 0.226f,
                                            0.239f, 23, 23, -46, -46, 2,
                                            -VALUE_INFINITE, false, 84043, 3));
+    EXPECT(tc, !HybridPawnOnlyMCTSOverride(true, true, true, false, true, 37,
+                                           29, 37, 29, 3, 0.784f, 0.538f,
+                                           0.551f, 123, 123, 0, 0, 2,
+                                           -VALUE_INFINITE, false, 97305, 3));
     EXPECT(tc, !HybridPawnOnlyMCTSOverride(true, false, true, true, false, 31,
                                            29, 19, 19, 0, 0.935f, 0.000f,
                                            0.449f, 111, 133, -1, -1, 2,
