@@ -4253,8 +4253,7 @@ Move ParallelHybridSearch::make_final_decision() {
         ab_best != Move::none() && ab_best != first_ab_hint;
     ss << " FirstABHint=" << move_to_string(first_ab_hint)
        << " FirstABVerifiedHint=" << move_to_string(first_verified_ab_hint)
-       << " ABMCTSAgreeOffFirstHint="
-       << (engines_agree_off_first_hint ? 1 : 0);
+       << " ABMCTSAgreeOffFirstHint=" << (engines_agree_off_first_hint ? 1 : 0);
   };
   struct MCTSRootLookup {
     int rank = -1;
