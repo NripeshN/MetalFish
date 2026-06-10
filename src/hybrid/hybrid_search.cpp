@@ -1691,7 +1691,7 @@ bool HybridANERootHintMarginClear(size_t hint_count, float top_score,
     return true;
   if (!std::isfinite(top_score) || !std::isfinite(second_score))
     return false;
-  return top_score - second_score >= 0.015f;
+  return top_score - second_score >= 0.080f;
 }
 
 bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
