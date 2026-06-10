@@ -1214,24 +1214,24 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(MCTSIsMinorQuietAttacksMajor(bk07, bk07_tactic),
          "BK.07 Nf6 is a quiet minor attack on major material", tc);
   expect(MCTSRootMinorQuietMajorAttackQOverrideCandidate(
-             bk07, bk07_policy_leader, bk07_tactic, 68, 32, 12, 0.120f,
-             0.421f, 0.050f, 0.636f),
+             bk07, bk07_policy_leader, bk07_tactic, 68, 32, 12, 0.120f, 0.421f,
+             0.050f, 0.636f),
          "BK.07 12-visit high-Q Nf6 can override the policy visit leader", tc);
   expect(MCTSRootMinorQuietMajorAttackQOverrideCandidate(
-             bk07, bk07_policy_leader, bk07_tactic, 58, 30, 4, 0.120f,
-             0.402f, 0.050f, 0.581f),
+             bk07, bk07_policy_leader, bk07_tactic, 58, 30, 4, 0.120f, 0.402f,
+             0.050f, 0.581f),
          "BK.07 4-visit high-Q Nf6 can override in the low-node window", tc);
   expect(!MCTSRootMinorQuietMajorAttackQOverrideCandidate(
-             bk07, bk07_policy_leader, bk07_tactic, 68, 32, 12, 0.120f,
-             0.421f, 0.050f, 0.600f),
+             bk07, bk07_policy_leader, bk07_tactic, 68, 32, 12, 0.120f, 0.421f,
+             0.050f, 0.600f),
          "BK.07 quiet minor override requires a clear Q gap", tc);
   expect(!MCTSRootMinorQuietMajorAttackQOverrideCandidate(
-             bk07, bk07_policy_leader, bk07_tactic, 58, 30, 4, 0.120f,
-             0.402f, 0.050f, 0.540f),
+             bk07, bk07_policy_leader, bk07_tactic, 58, 30, 4, 0.120f, 0.402f,
+             0.050f, 0.540f),
          "BK.07 low-sample quiet minor override requires a Q gap", tc);
   expect(!MCTSRootMinorQuietMajorAttackQOverrideCandidate(
-             bk07, bk07_policy_leader, bk07_tactic, 58, 40, 4, 0.120f,
-             0.402f, 0.050f, 0.581f),
+             bk07, bk07_policy_leader, bk07_tactic, 58, 40, 4, 0.120f, 0.402f,
+             0.050f, 0.581f),
          "BK.07 low-sample quiet minor override avoids established leaders",
          tc);
   expect(MCTSRootClockLowVisitQOverrideCandidate(91, 37, 21, 0.400f, 0.475f,
