@@ -1314,6 +1314,7 @@ void test_hybrid_config() {
     EXPECT(tc, HybridANERootHintMarginClear(0, 0.0f, 0.0f));
     EXPECT(tc, HybridANERootHintMarginClear(1, 0.438f, 0.436f));
     EXPECT(tc, HybridANERootHintMarginClear(2, 0.438f, 0.350f));
+    EXPECT(tc, !HybridANERootHintMarginClear(2, 0.234f, 0.000f));
     EXPECT(tc, !HybridANERootHintMarginClear(2, 0.438f, 0.436f));
     EXPECT(tc, !HybridANERootHintMarginClear(2, 0.438f, 0.424f));
     EXPECT(tc, !HybridANERootHintMarginClear(2, 0.528f, 0.487f));
