@@ -30,6 +30,8 @@ from tools.lichess_puzzle_runner import (  # noqa: E402
     parse_auto_int,
     parse_setoptions,
     parse_theme_filter,
+    resolve_syzygy_path,
+    syzygy_path_has_tables,
     tag_repeat_result,
     update_answer_from_info,
     wait_after_rate_limit,
@@ -231,6 +233,44 @@ def test_hybrid_mode_keeps_transformer_active() -> None:
         "hybrid benchmark disables low-time fallback",
         options["TransformerLowTimeFallbackMs"] == "0",
     )
+
+
+def test_syzygy_auto_explicit_and_disable() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tb_path = pathlib.Path(tmp)
+        marker = tb_path / "KQvK.rtbw"
+        marker.write_bytes(b"tb")
+
+        expect("syzygy table marker detected", syzygy_path_has_tables(tb_path))
+
+        old_env = os.environ.get("METALFISH_SYZYGY_PATH")
+        os.environ["METALFISH_SYZYGY_PATH"] = str(tb_path)
+        try:
+            args = puzzle_runner.parse_args(["--mode", "hybrid", "--no-syzygy"])
+            options = puzzle_runner.engine_options(args)
+            expect("no-syzygy disables auto path", "SyzygyPath" not in options)
+            expect("no-syzygy resolver returns none", resolve_syzygy_path(args) is None)
+
+            args = puzzle_runner.parse_args(["--mode", "hybrid"])
+            options = puzzle_runner.engine_options(args)
+            expect("env syzygy auto path", options["SyzygyPath"] == str(tb_path))
+            expect("env syzygy probe depth", options["SyzygyProbeDepth"] == "2")
+            expect("env syzygy probe limit", options["SyzygyProbeLimit"] == "6")
+
+            explicit_path = tb_path / "explicit"
+            args = puzzle_runner.parse_args(
+                ["--mode", "hybrid", "--syzygy-path", str(explicit_path)]
+            )
+            options = puzzle_runner.engine_options(args)
+            expect(
+                "explicit syzygy path wins",
+                options["SyzygyPath"] == str(explicit_path),
+            )
+        finally:
+            if old_env is None:
+                os.environ.pop("METALFISH_SYZYGY_PATH", None)
+            else:
+                os.environ["METALFISH_SYZYGY_PATH"] = old_env
 
 
 def test_mcts_mode_keeps_transformer_active() -> None:

@@ -31,6 +31,7 @@ RESULTS_DIR = ROOT / "results" / "lichess_puzzles"
 LICHESS_API = "https://lichess.org/api"
 DEFAULT_ANE_WEIGHTS = ROOT / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz"
 DEFAULT_ANE_MODEL = ROOT / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc"
+DEFAULT_SYZYGY_PATH = ROOT / "syzygy"
 DEFAULT_ANE_ROOT_HINTS = False
 DEFAULT_ANE_ONLY_PAWN_ENDGAMES = True
 DEFAULT_ANE_ROOT_HINT_WAIT_MS = 0
@@ -178,6 +179,33 @@ def validate_engine_binary(args) -> None:
     reason = stale_engine_reason(args.engine, [ROOT / "src", ROOT / "CMakeLists.txt"])
     if reason:
         raise RuntimeError(reason)
+
+
+def syzygy_path_has_tables(path: pathlib.Path) -> bool:
+    if not path.is_dir():
+        return False
+    try:
+        return any(
+            child.is_file() and child.suffix in {".rtbw", ".rtbz"}
+            for child in path.iterdir()
+        )
+    except OSError:
+        return False
+
+
+def resolve_syzygy_path(args) -> pathlib.Path | None:
+    if getattr(args, "no_syzygy", False):
+        return None
+    explicit = getattr(args, "syzygy_path", None)
+    if explicit:
+        return explicit
+    env_path = os.environ.get("METALFISH_SYZYGY_PATH")
+    candidates = [pathlib.Path(env_path)] if env_path else []
+    candidates.append(DEFAULT_SYZYGY_PATH)
+    for path in candidates:
+        if syzygy_path_has_tables(path):
+            return path
+    return None
 
 
 def load_token() -> str:
@@ -491,8 +519,9 @@ def engine_options(args) -> dict[str, str]:
                     "HybridANEMinBudgetMs": str(args.hybrid_ane_min_budget_ms),
                 }
             )
-    if args.syzygy_path:
-        options["SyzygyPath"] = str(args.syzygy_path)
+    syzygy_path = resolve_syzygy_path(args)
+    if syzygy_path:
+        options["SyzygyPath"] = str(syzygy_path)
         options["SyzygyProbeDepth"] = "2"
         options["SyzygyProbeLimit"] = "6"
     options.update(parse_setoptions(args.setoption))
@@ -969,6 +998,7 @@ def write_summary(path: pathlib.Path, stats: dict) -> None:
         f"- Threads: {stats.get('threads')}",
         f"- Hash: {stats.get('hash_mb')} MB",
         f"- Movetime: {stats.get('movetime_ms')} ms",
+        f"- Syzygy: {stats.get('syzygy_path') or 'disabled'}",
         f"- Rated submission: {stats.get('rated')}",
         f"- Duration: {stats.get('duration_s', 0):.1f}s",
     ]
@@ -1069,6 +1099,7 @@ def run(args) -> int:
                 "threads": threads,
                 "hash_mb": hash_mb,
                 "movetime_ms": args.movetime_ms,
+                "syzygy_path": options.get("SyzygyPath", ""),
                 "rated": args.rated,
                 "duration_s": 0.0,
                 "ended": "rate_limited",
@@ -1095,6 +1126,7 @@ def run(args) -> int:
         f"movetime={args.movetime_ms} ms, batch={args.batch_size}, rated={args.rated}",
         flush=True,
     )
+    print(f"Syzygy: {options.get('SyzygyPath', 'disabled')}", flush=True)
     print(
         f"Resources: logical={os.cpu_count() or 1}, available_memory={available_memory_mb()} MB, "
         f"thread_reserve={os.environ.get('METALFISH_PUZZLE_THREAD_RESERVE', '1')}, "
@@ -1186,6 +1218,7 @@ def run(args) -> int:
         "threads": threads,
         "hash_mb": hash_mb,
         "movetime_ms": args.movetime_ms,
+        "syzygy_path": options.get("SyzygyPath", ""),
         "rated": args.rated,
         "duration_s": duration_s,
         "ended": ended,
@@ -1248,6 +1281,7 @@ def run_offline(args) -> int:
         f"source={args.offline_csv}",
         flush=True,
     )
+    print(f"Syzygy: {options.get('SyzygyPath', 'disabled')}", flush=True)
     try:
         with jsonl_path.open("w") as out:
             for repeat_idx in range(args.repeat_puzzles):
@@ -1293,6 +1327,7 @@ def run_offline(args) -> int:
         "threads": threads,
         "hash_mb": hash_mb,
         "movetime_ms": args.movetime_ms,
+        "syzygy_path": options.get("SyzygyPath", ""),
         "rated": False,
         "duration_s": duration_s,
         "ended": ended,
@@ -1337,7 +1372,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=pathlib.Path,
         default=ROOT / "networks" / "BT4-1024x15x32h-swa-6147500.pb",
     )
-    parser.add_argument("--syzygy-path", type=pathlib.Path, default=None)
+    parser.add_argument(
+        "--syzygy-path",
+        type=pathlib.Path,
+        default=None,
+        help="Use a specific Syzygy tablebase path; defaults to METALFISH_SYZYGY_PATH or ./syzygy when valid.",
+    )
+    parser.add_argument(
+        "--no-syzygy",
+        action="store_true",
+        default=False,
+        help="Disable automatic Syzygy tablebase use for controlled no-tablebase runs.",
+    )
     parser.add_argument(
         "--hybrid-ane-root-probe",
         action="store_true",
