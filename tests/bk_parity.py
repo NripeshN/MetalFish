@@ -705,6 +705,18 @@ def print_repeat_summary(
             )
 
 
+def aggregate_scores(
+    aggregate: Dict[str, Dict[str, AggregateStats]],
+) -> Dict[str, Tuple[int, int]]:
+    scores: Dict[str, Tuple[int, int]] = {}
+    for engine_name, engine_stats in aggregate.items():
+        scores[engine_name] = (
+            sum(stats.passes for stats in engine_stats.values()),
+            sum(stats.runs for stats in engine_stats.values()),
+        )
+    return scores
+
+
 def expected_uci_moves(fen: str, expected_sans: Sequence[str]) -> List[str]:
     moves: List[str] = []
     for san in expected_sans:
@@ -1286,6 +1298,12 @@ def main() -> int:
         help="Exit non-zero if any selected engine scores below this many positions",
     )
     parser.add_argument(
+        "--aggregate-fail-under",
+        type=int,
+        default=None,
+        help="Exit non-zero if any selected engine scores below this many total passes across repeats",
+    )
+    parser.add_argument(
         "--json-out",
         type=pathlib.Path,
         default=None,
@@ -1298,7 +1316,13 @@ def main() -> int:
         print(warning, file=sys.stderr, flush=True)
 
     aggregate: Optional[Dict[str, Dict[str, AggregateStats]]] = (
-        {} if args.repeat_summary or args.repeat > 1 else None
+        {}
+        if (
+            args.repeat_summary
+            or args.repeat > 1
+            or args.aggregate_fail_under is not None
+        )
+        else None
     )
     rc = 0
     for i in range(args.repeat):
@@ -1309,6 +1333,19 @@ def main() -> int:
             return rc
     if aggregate:
         print_repeat_summary(aggregate, select_positions(args.positions))
+        if args.aggregate_fail_under is not None:
+            below_threshold = []
+            for name, (passed, total) in aggregate_scores(aggregate).items():
+                if passed < args.aggregate_fail_under:
+                    below_threshold.append(f"{name}={passed}/{total}")
+            if below_threshold:
+                print(
+                    "ERROR: aggregate score below --aggregate-fail-under "
+                    f"{args.aggregate_fail_under}: {', '.join(below_threshold)}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return 1
     return 0
 
 
