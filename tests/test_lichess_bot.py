@@ -8,6 +8,7 @@ import queue
 import sys
 import tempfile
 import threading
+import time
 import types
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -62,6 +63,17 @@ def test_live_defaults_avoid_crash_prone_resources() -> None:
 def test_runtime_ane_options_are_explicitly_opt_in() -> None:
     base_options, _ = lichess_bot.build_engine_options()
     disabled = types.SimpleNamespace(ponder=True, hybrid_ane_root_probe=False)
+    default_no_hints = types.SimpleNamespace(
+        ponder=True,
+        hybrid_ane_root_probe=True,
+        hybrid_ane_root_hints=False,
+        hybrid_ane_weights=pathlib.Path("networks/t1.pb.gz"),
+        hybrid_ane_model_path=pathlib.Path("build/coreml/t1.mlmodelc"),
+        hybrid_ane_compute_units="cpu-ne",
+        hybrid_ane_root_hint_count=10,
+        hybrid_ane_root_hint_wait_ms=250,
+        hybrid_ane_min_budget_ms=500,
+    )
     enabled = types.SimpleNamespace(
         ponder=True,
         hybrid_ane_root_probe=True,
@@ -70,29 +82,52 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
         hybrid_ane_weights=pathlib.Path("networks/t1.pb.gz"),
         hybrid_ane_model_path=pathlib.Path("build/coreml/t1.mlmodelc"),
         hybrid_ane_compute_units="cpu-ne",
+        hybrid_ane_only_pawn_endgames=False,
         hybrid_ane_root_hint_count=10,
-        hybrid_ane_root_hint_wait_ms=0,
-        hybrid_ane_min_budget_ms=1000,
+        hybrid_ane_root_hint_wait_ms=250,
+        hybrid_ane_min_budget_ms=500,
     )
 
     no_ane = lichess_bot.apply_runtime_engine_options(base_options, disabled)
+    with_default_no_hints = lichess_bot.apply_runtime_engine_options(
+        base_options, default_no_hints
+    )
     with_ane = lichess_bot.apply_runtime_engine_options(base_options, enabled)
 
     expect("ANE probe is opt-in", "HybridANERootProbe" not in no_ane)
-    expect("ANE probe option enabled", with_ane["HybridANERootProbe"] == "true")
-    expect("ANE root hints passed", with_ane["HybridANERootHints"] == "true")
     expect(
-        "ANE confirmation toggle passed",
+        "ANE root hints default off with ANE probe",
+        with_default_no_hints["HybridANERootHints"] == "false",
+    )
+    expect("ANE probe option enabled", with_ane["HybridANERootProbe"] == "true")
+    expect("ANE root hints option enabled", with_ane["HybridANERootHints"] == "true")
+    expect(
+        "ANE confirmation defaults on with ANE probe",
+        with_default_no_hints["HybridANEConfirmMCTSOverride"] == "true",
+    )
+    expect(
+        "ANE confirmation explicit opt-out passed",
         with_ane["HybridANEConfirmMCTSOverride"] == "false",
+    )
+    expect(
+        "ANE default scope stays pawn-endgame only",
+        with_default_no_hints["HybridANEOnlyPawnEndgames"] == "true",
+    )
+    expect(
+        "ANE all-root explicit opt-out passed",
+        with_ane["HybridANEOnlyPawnEndgames"] == "false",
     )
     expect("ANE weights passed", with_ane["HybridANEWeights"] == "networks/t1.pb.gz")
     expect(
         "ANE model passed", with_ane["HybridANEModelPath"] == "build/coreml/t1.mlmodelc"
     )
-    expect("ANE wait uses retained profile", with_ane["HybridANERootHintWaitMs"] == "0")
+    expect(
+        "ANE wait uses retained profile",
+        with_ane["HybridANERootHintWaitMs"] == "250",
+    )
     expect(
         "ANE min budget uses retained profile",
-        with_ane["HybridANEMinBudgetMs"] == "1000",
+        with_ane["HybridANEMinBudgetMs"] == "500",
     )
 
 
@@ -102,18 +137,23 @@ def test_verbose_runtime_enables_trace_without_forcing_ane_hints() -> None:
         ponder=True,
         verbose=True,
         hybrid_ane_root_probe=True,
+        hybrid_ane_root_hints=False,
         hybrid_ane_weights=pathlib.Path("networks/t1.pb.gz"),
         hybrid_ane_model_path=pathlib.Path("build/coreml/t1.mlmodelc"),
         hybrid_ane_compute_units="cpu-ne",
+        hybrid_ane_only_pawn_endgames=True,
         hybrid_ane_root_hint_count=10,
-        hybrid_ane_root_hint_wait_ms=0,
+        hybrid_ane_root_hint_wait_ms=250,
         hybrid_ane_min_budget_ms=1000,
     )
 
     options = lichess_bot.apply_runtime_engine_options(base_options, args)
 
     expect("verbose enables HybridTrace", options["HybridTrace"] == "true")
-    expect("verbose does not force ANE root hints", "HybridANERootHints" not in options)
+    expect(
+        "verbose does not force ANE root hints",
+        options["HybridANERootHints"] == "false",
+    )
     expect("ANE root probe stays enabled", options["HybridANERootProbe"] == "true")
 
 
@@ -463,6 +503,56 @@ def test_should_seek_respects_resource_gate() -> None:
     expect("busy resources reschedule seek", scheduled == [30])
 
 
+def test_seek_rechecks_game_slot_before_challenge_post() -> None:
+    class Args:
+        quit_after_games = 0
+        seek = True
+        max_games = 1
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot._completed_games = 0
+    bot._draining = threading.Event()
+    bot._pending_challenge_id = None
+    bot._pending_challenge_target = None
+    bot._pending_challenge_speed = None
+    bot._challenge_sent_at = 0.0
+    bot._rate_limit_count = 0
+    bot._accepted_challenge_reservations = {}
+    bot.active_games = {}
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._persist_challenge_cooldowns = False
+    bot._resources_allow_new_game = lambda: True
+    bot._next_tc = lambda: (300, 3)
+    bot._tc_to_speed = lambda limit, inc: "blitz"
+    bot._seek_is_rated = lambda: False
+    bot._seek_candidates = lambda bots, speed, rated: (["targetbot"], None)
+    bot._audit_seek = lambda event, **fields: None
+    scheduled: list[float] = []
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+
+    def online_bots():
+        bot.active_games["started"] = object()
+        return ([{"id": "targetbot"}], None)
+
+    posted: list[str] = []
+
+    def api_post(path: str, **kwargs):
+        posted.append(path)
+        return types.SimpleNamespace(status_code=500, text="slot already full")
+
+    bot._online_bots = online_bots
+    bot.api_post = api_post
+
+    with redirect_stdout(io.StringIO()):
+        bot._seek_game_once()
+
+    expect("slot filled by game start", not bot._should_seek())
+    expect("no challenge posted after slot filled", posted == [])
+    expect("seek retry not scheduled for full slot", scheduled == [])
+
+
 def test_seek_dry_run_does_not_post_challenge() -> None:
     class Args:
         seek = True
@@ -534,6 +624,8 @@ def test_seek_dry_run_reports_rating_floor_block() -> None:
 def test_seek_candidates_tolerate_malformed_perf_records() -> None:
     class Args:
         elo_seek = False
+        seek_highest_rated = False
+        avoid_repeat_format = False
 
     bot = object.__new__(lichess_bot.LichessBot)
     bot.args = Args()
@@ -550,6 +642,27 @@ def test_seek_candidates_tolerate_malformed_perf_records() -> None:
 
     expect("malformed perf records skipped", reason is None)
     expect("valid active speed retained", candidates == ["good"])
+
+
+def test_seek_candidates_do_not_fallback_to_inactive_speed_bots() -> None:
+    class Args:
+        elo_seek = False
+        seek_highest_rated = False
+        avoid_repeat_format = False
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bots = [
+        {"id": "rapid-only", "perfs": {"rapid": {"games": 20, "rating": 2300}}},
+        {"id": "malformed", "perfs": "not-a-dict"},
+    ]
+
+    candidates, reason = bot._seek_candidates(bots, "blitz", rated=False)
+
+    expect("inactive speed bots not challenged", candidates == [])
+    expect("inactive speed reason", reason == "No eligible bots active in blitz")
 
 
 def test_seek_candidates_filter_cached_cooldowns_case_insensitively() -> None:
@@ -577,6 +690,452 @@ def test_seek_candidates_filter_cached_cooldowns_case_insensitively() -> None:
 
     expect("cooldown candidate skipped", reason is None)
     expect("non-cooldown candidate remains", candidates == ["otherbot"])
+
+
+def test_seek_candidates_filter_time_control_cooldown_by_speed_only() -> None:
+    class Args:
+        elo_seek = False
+        seek_highest_rated = True
+        avoid_repeat_format = False
+        min_rated_opponent_elo = 0
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._cooldown_bot_speed("TargetBot", "rapid", duration=600)
+    bots = [
+        {"id": "targetbot", "perfs": {"rapid": {"games": 20, "rating": 2800}}},
+        {"id": "freshbot", "perfs": {"rapid": {"games": 20, "rating": 2600}}},
+    ]
+
+    candidates, reason = bot._seek_candidates(bots, "rapid", rated=False)
+    expect("rapid speed cooldown filters target", reason is None)
+    expect("fresh rapid remains after speed cooldown", candidates == ["freshbot"])
+
+    bots[0]["perfs"]["blitz"] = {"games": 20, "rating": 2800}
+    bots[1]["perfs"]["blitz"] = {"games": 20, "rating": 2600}
+    candidates, reason = bot._seek_candidates(bots, "blitz", rated=False)
+    expect("speed cooldown does not filter blitz", reason is None)
+    expect("target returns for different speed", candidates[0] == "targetbot")
+
+
+def _seek_test_args(**overrides):
+    defaults = {
+        "seek": True,
+        "max_games": 1,
+        "quit_after_games": 0,
+        "accept_rated": False,
+        "accept_casual": True,
+        "tc": "15+10",
+        "rotate": False,
+        "elo_seek": False,
+        "elo_range": 200,
+        "seek_highest_rated": True,
+        "min_rated_opponent_elo": 0,
+        "include_zero_increment": False,
+        "include_bullet": False,
+        "avoid_repeat_format": False,
+    }
+    defaults.update(overrides)
+    return types.SimpleNamespace(**defaults)
+
+
+def _seek_test_bot(args, bots):
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = args
+    bot.active_games = {}
+    bot._completed_games = 0
+    bot._pending_challenge_id = None
+    bot._pending_challenge_target = None
+    bot._pending_challenge_speed = None
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._persist_challenge_cooldowns = False
+    bot._rotation_idx = 0
+    bot._draining = threading.Event()
+    bot._shutdown = threading.Event()
+    bot._resources_allow_new_game = lambda: True
+    bot._online_bots = lambda: (bots, None)
+    scheduled: list[float] = []
+    audit: list[tuple[str, dict]] = []
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+    bot._audit_seek = lambda event, **fields: audit.append((event, fields))
+    return bot, scheduled, audit
+
+
+def _targetbot_speed_perfs():
+    return {
+        "id": "targetbot",
+        "perfs": {
+            "rapid": {"games": 20, "rating": 2800},
+            "blitz": {"games": 20, "rating": 2800},
+        },
+    }
+
+
+def test_seek_candidates_reports_specific_cooldown_reason() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = _seek_test_args()
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._cooldown_bot_speed("TargetBot", "rapid", duration=600)
+    bots = [
+        {"id": "targetbot", "perfs": {"rapid": {"games": 20, "rating": 2800}}},
+    ]
+
+    candidates, reason = bot._seek_candidates(bots, "rapid", rated=False)
+
+    expect("speed cooldown removes candidate", candidates == [])
+    expect(
+        "speed cooldown reason is speed-specific",
+        reason == "All eligible bots are cooling down for rapid",
+    )
+
+    bot._speed_declined_cooldown = {}
+    bot._cooldown_bot("TargetBot", duration=600)
+    candidates, reason = bot._seek_candidates(bots, "rapid", rated=False)
+
+    expect("global cooldown removes candidate", candidates == [])
+    expect(
+        "global cooldown reason is distinct",
+        reason == "All eligible bots are cooling down after prior refusals",
+    )
+
+
+def test_seek_cooldown_retry_delay_tracks_nearest_relevant_cooldown() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    now = time.time()
+    bot._declined_cooldown = {"globalbot": now + 3600}
+    bot._speed_declined_cooldown = {
+        "rapid": {"soonbot": now + 3},
+        "blitz": {"irrelevantbot": now + 1},
+    }
+
+    delay = bot._seek_no_candidate_retry_delay(
+        "All eligible bots are cooling down for rapid", "rapid"
+    )
+
+    expect(
+        "speed cooldown retry uses relevant minimum clamp",
+        lichess_bot.SEEK_COOLDOWN_RETRY_MIN_S
+        <= delay
+        <= lichess_bot.SEEK_COOLDOWN_RETRY_MIN_S + 1.0,
+    )
+
+    delay = bot._seek_no_candidate_retry_delay(
+        "All eligible bots are cooling down after prior refusals", "rapid"
+    )
+
+    expect(
+        "global cooldown retry ignores irrelevant speed cooldown",
+        delay == lichess_bot.SEEK_COOLDOWN_RETRY_MAX_S,
+    )
+
+
+def test_seek_no_candidate_retry_uses_reason_aware_delay() -> None:
+    bot, scheduled, audit = _seek_test_bot(
+        _seek_test_args(accept_rated=True, accept_casual=False),
+        [
+            {
+                "id": "targetbot",
+                "perfs": {"rapid": {"games": 20, "rating": 2800}},
+            }
+        ],
+    )
+    bot._declined_cooldown = {"targetbot": time.time() + 3600}
+
+    with redirect_stdout(io.StringIO()):
+        bot._seek_game_once()
+
+    expect("cooldown-only seek schedules one retry", len(scheduled) == 1)
+    expect(
+        "cooldown-only seek avoids tight polling",
+        scheduled[0] == lichess_bot.SEEK_COOLDOWN_RETRY_MAX_S,
+    )
+    expect("cooldown-only seek audited", audit and audit[0][0] == "seek_no_candidates")
+    expect(
+        "cooldown-only seek audit has dynamic retry",
+        audit[0][1]["retry_s"] == lichess_bot.SEEK_COOLDOWN_RETRY_MAX_S,
+    )
+
+
+def test_played_format_no_candidate_rotates_to_next_speed() -> None:
+    bot, scheduled, audit = _seek_test_bot(
+        _seek_test_args(tc=None, rotate=True, avoid_repeat_format=True),
+        [_targetbot_speed_perfs()],
+    )
+    bot._played_by_speed = {"rapid": {"targetbot": 1.0}}
+
+    with redirect_stdout(io.StringIO()):
+        bot._seek_game_once()
+
+    limit, inc = bot._next_tc()
+    expect("played-format no-candidate schedules retry", len(scheduled) == 1)
+    expect(
+        "played-format retry is immediate enough",
+        scheduled[0] == max(1.0, lichess_bot.CHALLENGE_CANCEL_GRACE_S),
+    )
+    expect("played-format skips to next speed", bot._tc_to_speed(limit, inc) == "blitz")
+    expect("played-format skips same-speed tc", bot._rotation_idx == 2)
+    expect(
+        "played-format rotation audited",
+        audit and audit[0][0] == "seek_no_candidates" and audit[0][1]["rotated"],
+    )
+
+
+def test_speed_cooldown_no_candidate_rotates_to_next_speed() -> None:
+    bot, scheduled, audit = _seek_test_bot(
+        _seek_test_args(tc=None, rotate=True),
+        [_targetbot_speed_perfs()],
+    )
+    bot._speed_declined_cooldown = {"rapid": {"targetbot": time.time() + 3600}}
+
+    with redirect_stdout(io.StringIO()):
+        bot._seek_game_once()
+
+    limit, inc = bot._next_tc()
+    expect("speed-cooldown no-candidate schedules retry", len(scheduled) == 1)
+    expect(
+        "speed-cooldown retry is immediate enough",
+        scheduled[0] == max(1.0, lichess_bot.CHALLENGE_CANCEL_GRACE_S),
+    )
+    expect(
+        "speed-cooldown skips to next speed", bot._tc_to_speed(limit, inc) == "blitz"
+    )
+    expect(
+        "speed-cooldown rotation audited",
+        audit and audit[0][0] == "seek_no_candidates" and audit[0][1]["rotated"],
+    )
+
+
+def test_inactive_speed_no_candidate_rotates_to_next_speed() -> None:
+    bot, scheduled, audit = _seek_test_bot(
+        _seek_test_args(tc=None, rotate=True),
+        [
+            {
+                "id": "blitzbot",
+                "perfs": {"blitz": {"games": 20, "rating": 2600}},
+            }
+        ],
+    )
+
+    with redirect_stdout(io.StringIO()):
+        bot._seek_game_once()
+
+    limit, inc = bot._next_tc()
+    expect("inactive-speed no-candidate schedules retry", len(scheduled) == 1)
+    expect(
+        "inactive-speed retry is immediate enough",
+        scheduled[0] == max(1.0, lichess_bot.CHALLENGE_CANCEL_GRACE_S),
+    )
+    expect(
+        "inactive-speed skips to next speed", bot._tc_to_speed(limit, inc) == "blitz"
+    )
+    expect(
+        "inactive-speed rotation audited",
+        audit and audit[0][0] == "seek_no_candidates" and audit[0][1]["rotated"],
+    )
+
+
+def test_elo_seek_inactive_speed_rotates_before_widening_range() -> None:
+    bot, scheduled, audit = _seek_test_bot(
+        _seek_test_args(
+            tc=None,
+            rotate=True,
+            elo_seek=True,
+            seek_highest_rated=False,
+            accept_rated=True,
+            accept_casual=False,
+            min_rated_opponent_elo=2200,
+        ),
+        [
+            {
+                "id": "blitzbot",
+                "perfs": {"blitz": {"games": 20, "rating": 2600}},
+            }
+        ],
+    )
+    bot._elo_widen_steps = 0
+
+    with redirect_stdout(io.StringIO()):
+        bot._seek_game_once()
+
+    limit, inc = bot._next_tc()
+    expect("elo inactive-speed no-candidate schedules retry", len(scheduled) == 1)
+    expect(
+        "elo inactive-speed retry is immediate enough",
+        scheduled[0] == max(1.0, lichess_bot.CHALLENGE_CANCEL_GRACE_S),
+    )
+    expect(
+        "elo inactive-speed skips to next speed",
+        bot._tc_to_speed(limit, inc) == "blitz",
+    )
+    expect("elo inactive-speed does not widen range", bot._elo_widen_steps == 0)
+    expect(
+        "elo inactive-speed rotation audited",
+        audit and audit[0][0] == "seek_no_candidates" and audit[0][1]["rotated"],
+    )
+
+
+def test_rated_floor_no_candidate_rotates_to_next_speed() -> None:
+    bot, scheduled, audit = _seek_test_bot(
+        _seek_test_args(
+            tc=None,
+            rotate=True,
+            accept_rated=True,
+            accept_casual=False,
+            seek_highest_rated=True,
+            min_rated_opponent_elo=3000,
+        ),
+        [
+            {
+                "id": "rapid-low",
+                "perfs": {"rapid": {"games": 20, "rating": 2800}},
+            },
+            {
+                "id": "blitz-high",
+                "perfs": {"blitz": {"games": 20, "rating": 3100}},
+            },
+        ],
+    )
+
+    with redirect_stdout(io.StringIO()):
+        bot._seek_game_once()
+
+    limit, inc = bot._next_tc()
+    expect("rated-floor no-candidate schedules retry", len(scheduled) == 1)
+    expect(
+        "rated-floor retry is immediate enough",
+        scheduled[0] == max(1.0, lichess_bot.CHALLENGE_CANCEL_GRACE_S),
+    )
+    expect("rated-floor skips to next speed", bot._tc_to_speed(limit, inc) == "blitz")
+    expect(
+        "rated-floor rotation audited",
+        audit and audit[0][0] == "seek_no_candidates" and audit[0][1]["rotated"],
+    )
+
+
+def test_elo_range_no_candidate_rotates_after_widening_range() -> None:
+    bot, scheduled, audit = _seek_test_bot(
+        _seek_test_args(
+            tc=None,
+            rotate=True,
+            elo_seek=True,
+            seek_highest_rated=False,
+            accept_rated=True,
+            accept_casual=False,
+            min_rated_opponent_elo=2200,
+        ),
+        [
+            {
+                "id": "rapid-far",
+                "perfs": {"rapid": {"games": 20, "rating": 3000}},
+            },
+            {
+                "id": "blitz-close",
+                "perfs": {"blitz": {"games": 20, "rating": 2600}},
+            },
+        ],
+    )
+    bot._cached_ratings = {"rapid": 2600, "blitz": 2600}
+    bot._elo_widen_steps = 0
+
+    with redirect_stdout(io.StringIO()):
+        bot._seek_game_once()
+
+    limit, inc = bot._next_tc()
+    expect("elo-range no-candidate schedules retry", len(scheduled) == 1)
+    expect(
+        "elo-range retry is immediate enough",
+        scheduled[0] == max(1.0, lichess_bot.CHALLENGE_CANCEL_GRACE_S),
+    )
+    expect("elo-range skips to next speed", bot._tc_to_speed(limit, inc) == "blitz")
+    expect("elo-range still widens range", bot._elo_widen_steps == 1)
+    expect(
+        "elo-range rotation audited",
+        audit and audit[0][0] == "seek_no_candidates" and audit[0][1]["rotated"],
+    )
+
+
+def test_global_cooldown_no_candidate_does_not_rotate() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = _seek_test_args(rotate=True)
+    bot._rotation_idx = 0
+    bot._declined_cooldown = {"targetbot": time.time() + 3600}
+    bot._speed_declined_cooldown = {}
+
+    should_rotate = bot._seek_no_candidate_should_rotate(
+        "All eligible bots are cooling down after declines/timeouts", "rapid"
+    )
+
+    expect("global-only cooldown does not rotate", not should_rotate)
+    expect("global-only cooldown preserves rotation", bot._rotation_idx == 0)
+
+
+def test_speed_challenge_cooldowns_persist_between_runs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "speed-cooldowns.json"
+        old_path = lichess_bot.SPEED_CHALLENGE_COOLDOWN_PATH
+        try:
+            lichess_bot.SPEED_CHALLENGE_COOLDOWN_PATH = path
+
+            bot = object.__new__(lichess_bot.LichessBot)
+            bot._persist_challenge_cooldowns = True
+            bot._speed_declined_cooldown = {}
+            bot._cooldown_bot_speed("TargetBot", "rapid", duration=600)
+
+            loaded_bot = object.__new__(lichess_bot.LichessBot)
+            loaded = loaded_bot._load_speed_challenge_cooldowns()
+            file_created = path.exists()
+        finally:
+            lichess_bot.SPEED_CHALLENGE_COOLDOWN_PATH = old_path
+
+    expect("speed cooldown file created", file_created)
+    expect("rapid cooldown persisted", "targetbot" in loaded.get("rapid", {}))
+    expect("global speeds not invented", "blitz" not in loaded)
+
+
+def test_cleanup_cooldowns_prunes_and_persists_expired_entries() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        global_path = pathlib.Path(tmp) / "global-cooldowns.json"
+        speed_path = pathlib.Path(tmp) / "speed-cooldowns.json"
+        old_global_path = lichess_bot.CHALLENGE_COOLDOWN_PATH
+        old_speed_path = lichess_bot.SPEED_CHALLENGE_COOLDOWN_PATH
+        now = time.time()
+        try:
+            lichess_bot.CHALLENGE_COOLDOWN_PATH = global_path
+            lichess_bot.SPEED_CHALLENGE_COOLDOWN_PATH = speed_path
+
+            bot = object.__new__(lichess_bot.LichessBot)
+            bot._persist_challenge_cooldowns = True
+            bot._declined_cooldown = {
+                "ExpiredBot": now - 10,
+                "LiveBot": now + 600,
+                "broken": "not-a-time",
+            }
+            bot._speed_declined_cooldown = {
+                "rapid": {
+                    "ExpiredSpeedBot": now - 10,
+                    "LiveSpeedBot": now + 600,
+                },
+                "unsupported": {"other": now + 600},
+            }
+
+            changed = bot._cleanup_cooldowns()
+            global_data = json.loads(global_path.read_text())
+            speed_data = json.loads(speed_path.read_text())
+        finally:
+            lichess_bot.CHALLENGE_COOLDOWN_PATH = old_global_path
+            lichess_bot.SPEED_CHALLENGE_COOLDOWN_PATH = old_speed_path
+
+    expect("cleanup changed dirty cooldowns", changed)
+    expect("expired global pruned", "expiredbot" not in bot._declined_cooldown)
+    expect("live global normalized", "livebot" in bot._declined_cooldown)
+    expect("expired speed pruned", "expiredspeedbot" not in speed_data.get("rapid", {}))
+    expect("live speed normalized", "livespeedbot" in speed_data.get("rapid", {}))
+    expect("unsupported speed pruned", "unsupported" not in speed_data)
+    expect("global cooldown persisted clean", list(global_data) == ["livebot"])
 
 
 def test_highest_rated_seek_orders_candidates_descending() -> None:
@@ -675,6 +1234,108 @@ def test_challenge_failure_ratelimit_sets_long_cooldown() -> None:
     cooldown = bot._challenge_failure_cooldown_seconds(Response())
 
     expect("ratelimit cooldown includes server seconds", cooldown == 50267)
+
+
+def test_challenge_failure_static_rejections_set_long_cooldowns() -> None:
+    class FriendsOnlyResponse:
+        status_code = 400
+        text = '{"error":"BOT Classic_BOT-v2 only accepts challenges from friends."}'
+
+        def json(self) -> dict:
+            return {"error": "BOT Classic_BOT-v2 only accepts challenges from friends."}
+
+    class StaticPolicyResponse:
+        status_code = 400
+        text = '{"error":"Please send me a casual challenge instead."}'
+
+        def json(self) -> dict:
+            return {"error": "Please send me a casual challenge instead."}
+
+    class TemporarilyClosedResponse:
+        status_code = 400
+        text = '{"error":"I am not accepting challenges at the moment."}'
+
+        def json(self) -> dict:
+            return {"error": "I am not accepting challenges at the moment."}
+
+    bot = object.__new__(lichess_bot.LichessBot)
+
+    expect(
+        "friends-only rejection uses day cooldown",
+        bot._challenge_failure_cooldown_seconds(FriendsOnlyResponse())
+        == lichess_bot.FRIENDS_ONLY_CHALLENGE_COOLDOWN_S,
+    )
+    expect(
+        "mode-preference rejection uses static cooldown",
+        bot._challenge_failure_cooldown_seconds(StaticPolicyResponse())
+        == lichess_bot.STATIC_CHALLENGE_DECLINE_COOLDOWN_S,
+    )
+    expect(
+        "closed-challenges rejection uses static cooldown",
+        bot._challenge_failure_cooldown_seconds(TemporarilyClosedResponse())
+        == lichess_bot.STATIC_CHALLENGE_DECLINE_COOLDOWN_S,
+    )
+
+
+def test_retry_after_can_use_structured_ratelimit_body_for_challenges() -> None:
+    class Response:
+        headers = {}
+
+        def json(self) -> dict:
+            return {"ratelimit": {"seconds": 50207}}
+
+    expect(
+        "generic 429 keeps minimum backoff",
+        int(lichess_bot._retry_after_seconds(Response()))
+        == int(lichess_bot.LICHESS_429_BACKOFF_S),
+    )
+    expect(
+        "challenge 429 honors structured ratelimit seconds",
+        int(lichess_bot._retry_after_seconds(Response(), include_body=True)) == 50207,
+    )
+
+
+def test_retry_after_prefers_header_when_larger_than_body() -> None:
+    class Response:
+        headers = {"retry-after": "120"}
+
+        def json(self) -> dict:
+            return {"ratelimit": {"seconds": 30}}
+
+    expect(
+        "lower-case retry-after header is honored",
+        int(lichess_bot._retry_after_seconds(Response(), include_body=True)) == 120,
+    )
+
+
+def test_seek_rate_limit_uses_server_backoff_body() -> None:
+    class Response:
+        status_code = 429
+        headers = {}
+        text = '{"ratelimit":{"seconds":600}}'
+
+        def json(self) -> dict:
+            return {"ratelimit": {"seconds": 600}}
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._rate_limit_count = 0
+    bot._pending_challenge_id = None
+    bot._challenge_sent_at = 0.0
+    bot._resources_allow_new_game = lambda: True
+    bot._should_seek = lambda: True
+    bot._next_tc = lambda: (300, 3)
+    bot._tc_to_speed = lambda limit, inc: "blitz"
+    bot._seek_is_rated = lambda: False
+    bot._online_bots = lambda: ([{"id": "targetbot"}], None)
+    bot._seek_candidates = lambda bots, speed, rated: (["targetbot"], None)
+    bot.api_post = lambda path, **kwargs: Response()
+    scheduled: list[float] = []
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+
+    with redirect_stdout(io.StringIO()):
+        bot._seek_game_once()
+
+    expect("seek 429 schedules server body backoff", scheduled == [600])
 
 
 def test_opening_book_does_not_send_bot_token_to_explorer() -> None:
@@ -1232,7 +1893,7 @@ def test_duplicate_game_state_does_not_resubmit() -> None:
     bot._ponder_disabled_lock = threading.Lock()
     submitted: list[str] = []
 
-    def make_move(game_id: str, move: str) -> bool:
+    def make_move(game_id: str, move: str, **kwargs) -> bool:
         submitted.append(move)
         return True
 
@@ -1283,7 +1944,7 @@ def test_stale_stream_ply_does_not_search_old_position() -> None:
     bot._ponder_disabled_lock = threading.Lock()
     submitted: list[str] = []
 
-    bot.make_move = lambda game_id, move: submitted.append(move) or True
+    bot.make_move = lambda game_id, move, **kwargs: submitted.append(move) or True
     engine = Engine()
     state = {"wtime": 900000, "btime": 900000, "winc": 10000, "binc": 10000}
 
@@ -1331,7 +1992,7 @@ def test_stale_move_rejection_suppresses_duplicate_turn() -> None:
     bot._last_move_failure_detail = ""
     submitted: list[str] = []
 
-    def make_move(game_id: str, move: str) -> bool:
+    def make_move(game_id: str, move: str, **kwargs) -> bool:
         submitted.append(move)
         bot._last_move_failure_detail = '400: {"error":"Not your turn"}'
         return False
@@ -1347,6 +2008,293 @@ def test_stale_move_rejection_suppresses_duplicate_turn() -> None:
     expect("single stale submit attempt", submitted == ["e2e4"])
     expect("duplicate stale turn skipped", engine.go_calls == 1)
     expect("stale rejected turn recorded", bot._already_submitted_for_turn("game", []))
+
+
+def test_game_over_move_rejection_marks_completed() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._playing_status_cache = {}
+    bot._last_move_failure_detail = ""
+    records: list[dict] = []
+
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+
+    def make_move(game_id: str, move: str, **kwargs) -> bool:
+        bot._last_move_failure_detail = (
+            '400: {"error":"Not your turn, or game already over"}'
+        )
+        return False
+
+    bot.make_move = make_move
+
+    with redirect_stdout(io.StringIO()):
+        result = bot._submit_move("game", [], "e2e4")
+
+    expect("game-over submit rejected", not result)
+    expect("game-over rejection marks completed", bot._game_was_completed("game"))
+    expect(
+        "game-over rejection caches inactive",
+        bot._playing_status_cache.get("game", (0, True))[1] is False,
+    )
+    expect(
+        "game-over rejection audited as stale",
+        any(
+            record["event"] == "move_submit"
+            and record.get("stale") is True
+            and record.get("result") == "rejected"
+            for record in records
+        ),
+    )
+
+
+def test_completed_game_turn_is_not_searched() -> None:
+    class Engine:
+        ponder_move = None
+
+        def go(self, **kwargs):
+            raise AssertionError("completed game should not search")
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._max_seen_ply = {}
+    records: list[dict] = []
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+    bot._mark_game_completed("game")
+    state = {"wtime": 900000, "btime": 900000, "winc": 10000, "binc": 10000}
+
+    with redirect_stdout(io.StringIO()):
+        bot._try_move("game", Engine(), "startpos", [], "white", state)
+
+    expect(
+        "completed turn skip audited",
+        any(record["event"] == "turn_completed_skip" for record in records),
+    )
+
+
+def test_pre_submit_active_check_skips_inactive_draw_state() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    records: list[dict] = []
+    submitted: list[str] = []
+
+    def audit(game_id: str, event: str, **fields) -> None:
+        records.append({"event": event, **fields})
+
+    bot._audit = audit
+    bot._pre_submit_active_check_needed = lambda board: True
+    bot._game_active_status = lambda game_id: False
+    bot.make_move = lambda game_id, move, **kwargs: submitted.append(move) or True
+
+    with redirect_stdout(io.StringIO()):
+        result = bot._submit_move_if_active(
+            "game", [], "e2e4", lichess_bot.chess.Board()
+        )
+
+    expect("inactive draw state not submitted", not result)
+    expect("move API not called", submitted == [])
+    expect(
+        "turn recorded after inactive skip",
+        bot._already_submitted_for_turn("game", []),
+    )
+    expect(
+        "active check audited",
+        any(
+            record["event"] == "pre_submit_active_check"
+            and record.get("active") is False
+            for record in records
+        ),
+    )
+    expect(
+        "inactive skip audited",
+        any(record["event"] == "move_submit_skipped_inactive" for record in records),
+    )
+
+
+def test_pre_submit_active_check_is_not_used_for_normal_state() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._last_move_failure_detail = ""
+    records: list[dict] = []
+    active_checks: list[str] = []
+
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+    bot._pre_submit_active_check_needed = lambda board: False
+    bot._game_active_status = lambda game_id: active_checks.append(game_id) or True
+    bot.make_move = lambda game_id, move, **kwargs: True
+
+    result = bot._submit_move_if_active("game", [], "e2e4", lichess_bot.chess.Board())
+
+    expect("normal state submitted", result)
+    expect("active endpoint not called", active_checks == [])
+    expect(
+        "normal submit audited",
+        any(
+            record["event"] == "move_submit" and record["result"] == "accepted"
+            for record in records
+        ),
+    )
+
+
+def test_submit_skips_locally_completed_game_without_api_call() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    records: list[dict] = []
+    active_checks: list[str] = []
+    submitted: list[str] = []
+
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+    bot._pre_submit_active_check_needed = lambda board: False
+    bot._game_active_status = lambda game_id: active_checks.append(game_id) or True
+    bot.make_move = lambda game_id, move, **kwargs: submitted.append(move) or True
+    bot._mark_game_completed("game")
+
+    with redirect_stdout(io.StringIO()):
+        result = bot._submit_move_if_active(
+            "game", [], "e2e4", lichess_bot.chess.Board()
+        )
+
+    expect("completed game submit skipped", not result)
+    expect("completed game did not call move API", submitted == [])
+    expect("completed game did not call active API", active_checks == [])
+    expect(
+        "completed skip recorded submitted turn",
+        bot._already_submitted_for_turn("game", []),
+    )
+    expect(
+        "completed skip audited",
+        any(
+            record["event"] == "move_submit_skipped_inactive"
+            and record.get("source") == "local_completed"
+            for record in records
+        ),
+    )
+
+
+def test_make_move_can_offer_draw_on_same_request() -> None:
+    class Response:
+        status_code = 200
+        text = ""
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    calls: list[dict] = []
+
+    def api_post(path: str, **kwargs):
+        calls.append({"path": path, **kwargs})
+        return Response()
+
+    bot.api_post = api_post
+
+    expect(
+        "draw offer move accepted", bot.make_move("game", "e2e4", offering_draw=True)
+    )
+    expect(
+        "draw offer uses move endpoint",
+        calls
+        == [
+            {
+                "path": "/bot/game/game/move/e2e4",
+                "params": {"offeringDraw": "true"},
+            }
+        ],
+    )
+
+
+def test_draw_offer_reason_requires_claim_and_tablebase_draw() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    board = lichess_bot.chess.Board()
+
+    bot._draw_claim_available = lambda candidate: True
+    bot._tablebase_wdl = lambda candidate: 0
+    expect(
+        "tb draw claim offers draw", bot._draw_offer_reason(board) == "tb_draw_claim"
+    )
+
+    bot._tablebase_wdl = lambda candidate: 2
+    expect("tb win does not offer draw", bot._draw_offer_reason(board) is None)
+
+    bot._draw_claim_available = lambda candidate: False
+    bot._tablebase_wdl = lambda candidate: 0
+    expect("no claim does not offer draw", bot._draw_offer_reason(board) is None)
+
+
+def test_draw_offer_caps_search_and_marks_move_request() -> None:
+    class Engine:
+        ponder_move = None
+
+        def __init__(self) -> None:
+            self.timeout: float | None = None
+
+        def alive(self) -> bool:
+            return True
+
+        def stop_pondering(self, timeout: float) -> bool:
+            return True
+
+        def set_position(self, initial_fen: str, moves: list[str]) -> None:
+            return None
+
+        def go(self, **kwargs):
+            self.timeout = kwargs.get("timeout")
+            return "e2e4", None
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._max_seen_ply = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._completed_game_ids = set()
+    bot._completed_game_order = []
+    records: list[dict] = []
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+    bot._should_query_book = lambda board, my_color, wtime, btime: False
+    bot._draw_claim_available = lambda board: True
+    bot._tablebase_wdl = lambda board: 0
+    bot._pre_submit_active_check_needed = lambda board: False
+
+    submitted: list[dict] = []
+
+    def make_move(game_id: str, move: str, *, offering_draw: bool = False) -> bool:
+        submitted.append({"move": move, "offering_draw": offering_draw})
+        return True
+
+    bot.make_move = make_move
+    engine = Engine()
+    state = {"wtime": 600000, "btime": 600000, "winc": 10000, "binc": 10000}
+
+    with redirect_stdout(io.StringIO()):
+        bot._try_move("game", engine, "startpos", [], "white", state)
+
+    expect(
+        "draw offer search capped",
+        engine.timeout is not None
+        and engine.timeout <= lichess_bot.DRAW_OFFER_SEARCH_CAP_MS / 1000.0,
+    )
+    expect(
+        "draw offer submitted on move request",
+        submitted == [{"move": "e2e4", "offering_draw": True}],
+    )
+    expect(
+        "draw state audited",
+        any(
+            record["event"] == "draw_state"
+            and record.get("draw_offer_eligible") is True
+            for record in records
+        ),
+    )
 
 
 def test_ponderhit_audit_records_elapsed_ms() -> None:
@@ -1377,7 +2325,7 @@ def test_ponderhit_audit_records_elapsed_ms() -> None:
         records.append({"event": event, **fields})
 
     bot._audit = audit
-    bot.make_move = lambda game_id, move: True
+    bot.make_move = lambda game_id, move, **kwargs: True
     state = {"wtime": 900000, "btime": 900000, "winc": 10000, "binc": 10000}
 
     with redirect_stdout(io.StringIO()):
@@ -1518,6 +2466,43 @@ def test_should_accept_respects_resource_gate() -> None:
     expect(
         "busy resources reason",
         bot._challenge_reject_reason(challenge) == "resources busy",
+    )
+
+
+def test_should_accept_checks_max_games_before_resources() -> None:
+    class Args:
+        accept_rated = False
+        accept_casual = True
+        include_bullet = False
+        include_zero_increment = False
+        max_games = 1
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.bot_id = "metalfish"
+    bot._draining = threading.Event()
+    bot.active_games = {"active": object()}
+    bot._pending_challenge_id = None
+
+    def resources_allow_new_game() -> bool:
+        raise AssertionError("resource probe should not run when max games is full")
+
+    bot._resources_allow_new_game = resources_allow_new_game
+
+    challenge = {
+        "challenge": {
+            "challenger": {"id": "otherbot"},
+            "variant": {"key": "standard"},
+            "rated": False,
+            "speed": "rapid",
+            "timeControl": {"type": "clock", "increment": 10},
+        }
+    }
+
+    expect("full bot rejects challenge", not bot.should_accept(challenge))
+    expect(
+        "full bot reason is max games",
+        bot._challenge_reject_reason(challenge) == "max games reached",
     )
 
 
@@ -1673,6 +2658,163 @@ def test_challenge_handler_tolerates_malformed_time_control() -> None:
     )
 
 
+def test_accepted_incoming_challenge_reserves_game_slot() -> None:
+    class Args:
+        accept_rated = False
+        accept_casual = True
+        include_bullet = False
+        include_zero_increment = False
+        max_games = 1
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.bot_id = "metalfish"
+    bot._draining = threading.Event()
+    bot.active_games = {}
+    bot._pending_challenge_id = None
+    bot._accepted_challenge_reservations = {}
+    resource_checks = 0
+
+    def resources_allow_new_game() -> bool:
+        nonlocal resource_checks
+        resource_checks += 1
+        return True
+
+    accepted: list[str] = []
+    declined: list[str] = []
+    bot._resources_allow_new_game = resources_allow_new_game
+    bot.accept_challenge = lambda challenge_id: accepted.append(challenge_id) or True
+    bot.decline_challenge = lambda challenge_id: declined.append(challenge_id)
+
+    def event(challenge_id: str) -> dict:
+        return {
+            "type": "challenge",
+            "challenge": {
+                "id": challenge_id,
+                "challenger": {"id": f"{challenge_id}-bot", "name": challenge_id},
+                "variant": {"key": "standard"},
+                "rated": False,
+                "speed": "rapid",
+                "timeControl": {"type": "clock", "limit": 600, "increment": 5},
+            },
+        }
+
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(event("c1"))
+        bot._handle_event(event("c2"))
+
+    expect("first incoming challenge accepted", accepted == ["c1"])
+    expect("second incoming challenge declined", declined == ["c2"])
+    expect("accepted challenge reserves slot", bot._reserved_games() == 1)
+    expect("second challenge skipped resource probe", resource_checks == 1)
+
+
+def test_incoming_game_start_consumes_accepted_challenge_reservation() -> None:
+    class Args:
+        seek = True
+        max_games = 1
+        include_zero_increment = False
+        include_bullet = False
+        avoid_repeat_format = False
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {}
+    bot._pending_challenge_id = None
+    bot._pending_challenge_target = None
+    bot._pending_challenge_speed = None
+    bot._challenge_sent_at = 0.0
+    bot._rotation_idx = 0
+    bot._tc_failures = 0
+    bot._draining = threading.Event()
+    bot._shutdown = threading.Event()
+    bot._seek_timer = None
+    bot._accepted_challenge_reservations = {"incoming-challenge": time.time() + 30}
+    bot._persist_played_format_history = False
+    bot._played_by_speed = {}
+
+    played: list[str] = []
+    bot.play_game = lambda game_id: played.append(game_id)
+
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(
+            {
+                "type": "gameStart",
+                "game": {
+                    "gameId": "newgame",
+                    "speed": "rapid",
+                    "opponent": {"id": "incoming-bot"},
+                },
+            }
+        )
+
+    thread = bot.active_games.get("newgame")
+    if thread is not None:
+        thread.join(timeout=1)
+
+    expect("incoming game started", played == ["newgame"])
+    expect(
+        "accepted incoming reservation consumed",
+        bot._accepted_challenge_reservations == {},
+    )
+    expect("active game blocks seeking", not bot._should_seek())
+
+
+def test_incoming_challenge_waits_for_seek_lock_before_accepting() -> None:
+    class Args:
+        accept_rated = False
+        accept_casual = True
+        include_bullet = False
+        include_zero_increment = False
+        max_games = 1
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.bot_id = "metalfish"
+    bot._draining = threading.Event()
+    bot.active_games = {}
+    bot._pending_challenge_id = None
+    bot._accepted_challenge_reservations = {}
+    bot._seek_lock = threading.Lock()
+    bot._resources_allow_new_game = lambda: True
+
+    accepted: list[str] = []
+    declined: list[str] = []
+    bot.accept_challenge = lambda challenge_id: accepted.append(challenge_id) or True
+    bot.decline_challenge = lambda challenge_id: declined.append(challenge_id)
+
+    event = {
+        "type": "challenge",
+        "challenge": {
+            "id": "incoming",
+            "challenger": {"id": "incoming-bot", "name": "IncomingBot"},
+            "variant": {"key": "standard"},
+            "rated": False,
+            "speed": "rapid",
+            "timeControl": {"type": "clock", "limit": 600, "increment": 5},
+        },
+    }
+
+    bot._seek_lock.acquire()
+    worker = threading.Thread(
+        target=lambda: bot._handle_event(event),
+        daemon=True,
+    )
+    with redirect_stdout(io.StringIO()):
+        worker.start()
+        time.sleep(0.05)
+        bot._pending_challenge_id = "outgoing"
+        bot._pending_challenge_target = "outgoing-bot"
+        bot._seek_lock.release()
+        worker.join(timeout=1)
+
+    expect("incoming challenge thread finished", not worker.is_alive())
+    expect("incoming challenge waited for seek lock", accepted == [])
+    expect(
+        "incoming challenge declined after pending appeared", declined == ["incoming"]
+    )
+
+
 def test_transient_move_rejection_remains_retryable() -> None:
     bot = object.__new__(lichess_bot.LichessBot)
     bot._submitted_turns = {}
@@ -1680,7 +2822,7 @@ def test_transient_move_rejection_remains_retryable() -> None:
     bot._last_move_failure_detail = "503: service unavailable"
     submitted: list[str] = []
 
-    def make_move(game_id: str, move: str) -> bool:
+    def make_move(game_id: str, move: str, **kwargs) -> bool:
         submitted.append(move)
         return False
 
@@ -1740,6 +2882,59 @@ def test_stale_challenge_event_preserves_current_pending() -> None:
     expect("stale event does not count tc failure", bot._tc_failures == 0)
 
 
+def test_challenge_resolution_waits_for_seek_lock_before_clearing_pending() -> None:
+    class Args:
+        seek = True
+        max_games = 1
+        rotate = False
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.bot_id = "metalfish"
+    bot.active_games = {}
+    bot._completed_games = 0
+    bot._pending_challenge_id = "old-challenge"
+    bot._pending_challenge_target = "oldbot"
+    bot._challenge_sent_at = 0
+    bot._tc_failures = 0
+    bot._declined_cooldown = {}
+    bot._draining = threading.Event()
+    bot._seek_lock = threading.Lock()
+
+    scheduled: list[float] = []
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+
+    event = {
+        "type": "challengeCanceled",
+        "challenge": {"id": "old-challenge", "destUser": {"id": "oldbot"}},
+    }
+
+    bot._seek_lock.acquire()
+    worker = threading.Thread(
+        target=lambda: bot._handle_event(event),
+        daemon=True,
+    )
+    with redirect_stdout(io.StringIO()):
+        worker.start()
+        time.sleep(0.05)
+        bot._pending_challenge_id = "new-challenge"
+        bot._pending_challenge_target = "newbot"
+        bot._seek_lock.release()
+        worker.join(timeout=1)
+
+    expect("challenge resolution thread finished", not worker.is_alive())
+    expect(
+        "new pending preserved after stale resolution",
+        bot._pending_challenge_id == "new-challenge",
+    )
+    expect(
+        "old target cooled after stale resolution",
+        "oldbot" in bot._declined_cooldown,
+    )
+    expect("stale resolution does not retry", scheduled == [])
+    expect("stale resolution does not count tc failure", bot._tc_failures == 0)
+
+
 def test_matching_challenge_event_clears_pending() -> None:
     class Args:
         seek = True
@@ -1770,6 +2965,104 @@ def test_matching_challenge_event_clears_pending() -> None:
 
     expect("pending cleared", bot._pending_challenge_id is None)
     expect("target cooled down", "targetbot" in bot._declined_cooldown)
+    expect("retry scheduled", scheduled == [2])
+    expect("tc failure counted", bot._tc_failures == 1)
+
+
+def test_static_decline_event_uses_global_long_cooldown() -> None:
+    class Args:
+        seek = True
+        max_games = 1
+        rotate = False
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.bot_id = "metalfish"
+    bot.active_games = {}
+    bot._completed_games = 0
+    bot._pending_challenge_id = "current"
+    bot._pending_challenge_target = "targetbot"
+    bot._pending_challenge_speed = "rapid"
+    bot._challenge_sent_at = 0
+    bot._tc_failures = 0
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._draining = threading.Event()
+
+    scheduled: list[float] = []
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+
+    event = {
+        "type": "challengeDeclined",
+        "challenge": {
+            "id": "current",
+            "destUser": {"id": "targetbot"},
+            "reason": "I'm not accepting challenges from bots.",
+        },
+    }
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(event)
+
+    expect("pending cleared", bot._pending_challenge_id is None)
+    expect("target globally cooled", "targetbot" in bot._declined_cooldown)
+    expect(
+        "target not speed cooled",
+        "targetbot" not in bot._speed_declined_cooldown.get("rapid", {}),
+    )
+    expires = bot._declined_cooldown["targetbot"]
+    expect(
+        "static rejection cooldown is long enough",
+        expires - time.time() >= lichess_bot.STATIC_CHALLENGE_DECLINE_COOLDOWN_S - 5,
+    )
+    expect("retry scheduled", scheduled == [2])
+    expect("tc failure counted", bot._tc_failures == 1)
+
+
+def test_time_control_decline_uses_speed_cooldown() -> None:
+    class Args:
+        seek = True
+        max_games = 1
+        rotate = False
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.bot_id = "metalfish"
+    bot.active_games = {}
+    bot._completed_games = 0
+    bot._pending_challenge_id = "current"
+    bot._pending_challenge_target = "targetbot"
+    bot._pending_challenge_speed = "rapid"
+    bot._challenge_sent_at = 0
+    bot._tc_failures = 0
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._draining = threading.Event()
+
+    scheduled: list[float] = []
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+
+    event = {
+        "type": "challengeDeclined",
+        "challenge": {
+            "id": "current",
+            "destUser": {"id": "targetbot"},
+            "reason": "This time control is too slow for me.",
+        },
+    }
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(event)
+
+    expect("pending cleared", bot._pending_challenge_id is None)
+    expect("target not globally cooled", "targetbot" not in bot._declined_cooldown)
+    expect(
+        "target cooled only for rapid",
+        "targetbot" in bot._speed_declined_cooldown.get("rapid", {}),
+    )
+    expires = bot._speed_declined_cooldown["rapid"]["targetbot"]
+    expect(
+        "time control cooldown is long enough",
+        expires - time.time() >= lichess_bot.TIME_CONTROL_DECLINE_COOLDOWN_S - 5,
+    )
     expect("retry scheduled", scheduled == [2])
     expect("tc failure counted", bot._tc_failures == 1)
 
@@ -1807,6 +3100,75 @@ def test_unrelated_challenge_event_without_pending_is_ignored() -> None:
     expect("unrelated event does not count tc failure", bot._tc_failures == 0)
 
 
+def test_untracked_static_challenge_event_uses_reason_cooldown() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.bot_id = "metalfish"
+    bot.active_games = {}
+    bot._pending_challenge_id = None
+    bot._pending_challenge_target = None
+    bot._challenge_sent_at = 0
+    bot._tc_failures = 0
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._draining = threading.Event()
+
+    event = {
+        "type": "challengeDeclined",
+        "challenge": {
+            "id": "late",
+            "destUser": {"id": "targetbot"},
+            "reason": "I'm not accepting challenges from bots.",
+        },
+    }
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(event)
+
+    expect("target globally cooled", "targetbot" in bot._declined_cooldown)
+    expires = bot._declined_cooldown["targetbot"]
+    expect(
+        "untracked static rejection cooldown is long enough",
+        expires - time.time() >= lichess_bot.STATIC_CHALLENGE_DECLINE_COOLDOWN_S - 5,
+    )
+    expect("untracked static event does not count tc failure", bot._tc_failures == 0)
+
+
+def test_untracked_time_control_event_uses_event_speed_cooldown() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.bot_id = "metalfish"
+    bot.active_games = {}
+    bot._pending_challenge_id = None
+    bot._pending_challenge_target = None
+    bot._challenge_sent_at = 0
+    bot._tc_failures = 0
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._draining = threading.Event()
+
+    event = {
+        "type": "challengeDeclined",
+        "challenge": {
+            "id": "late",
+            "destUser": {"id": "targetbot"},
+            "reason": "This time control is too slow for me.",
+            "timeControl": {"type": "clock", "limit": 600, "increment": 5},
+        },
+    }
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(event)
+
+    expect("target not globally cooled", "targetbot" not in bot._declined_cooldown)
+    expect(
+        "target speed cooled from event clock",
+        "targetbot" in bot._speed_declined_cooldown.get("rapid", {}),
+    )
+    expires = bot._speed_declined_cooldown["rapid"]["targetbot"]
+    expect(
+        "untracked time-control cooldown is long enough",
+        expires - time.time() >= lichess_bot.TIME_CONTROL_DECLINE_COOLDOWN_S - 5,
+    )
+    expect("untracked tc event does not count tc failure", bot._tc_failures == 0)
+
+
 def test_challenge_event_identity_accepts_string_users() -> None:
     bot = object.__new__(lichess_bot.LichessBot)
     bot.bot_id = "metalfish"
@@ -1822,7 +3184,63 @@ def test_challenge_event_identity_accepts_string_users() -> None:
     expect("string target parsed", target == "targetbot")
 
 
-def test_challenge_timeout_does_not_post_cancel_after_auto_expiry() -> None:
+def test_pending_challenge_resolution_without_id_matches_target() -> None:
+    class Args:
+        seek = True
+        rotate = False
+        max_games = 1
+        quit_after_games = 0
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.bot_id = "metalfish"
+    bot.active_games = {}
+    bot._pending_challenge_id = "challenge"
+    bot._pending_challenge_target = "targetbot"
+    bot._pending_challenge_speed = "rapid"
+    bot._challenge_sent_at = 123.0
+    bot._tc_failures = 0
+    bot._completed_games = 0
+    bot._accepted_challenge_reservations = {}
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._persist_challenge_cooldowns = False
+    bot._draining = threading.Event()
+
+    audit: list[tuple[str, dict]] = []
+    scheduled: list[float] = []
+    bot._audit_seek = lambda event, **fields: audit.append((event, fields))
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+
+    with redirect_stdout(io.StringIO()):
+        bot._handle_challenge_resolution_event(
+            {
+                "type": "challengeDeclined",
+                "challenge": {
+                    "destUser": {"id": "TargetBot"},
+                    "reason": "I'm not accepting challenges with this time control.",
+                    "timeControl": {
+                        "type": "clock",
+                        "limit": 600,
+                        "increment": 5,
+                    },
+                },
+            },
+            "challengeDeclined",
+        )
+
+    expect("id-less target match clears pending", bot._pending_challenge_id is None)
+    expect("id-less target match counts tc failure", bot._tc_failures == 1)
+    expect("id-less target match retries", scheduled == [2])
+    expect("id-less target match audited", audit and audit[0][0] == "challenge_event")
+    expect("event attributed to pending id", audit[0][1]["challenge_id"] == "challenge")
+    expect(
+        "target speed cooled from id-less event",
+        "targetbot" in bot._speed_declined_cooldown.get("rapid", {}),
+    )
+
+
+def test_challenge_timeout_cancels_server_side_challenge() -> None:
     class Args:
         seek = False
         rotate = False
@@ -1840,17 +3258,145 @@ def test_challenge_timeout_does_not_post_cancel_after_auto_expiry() -> None:
     bot._declined_cooldown = {}
     bot._persist_challenge_cooldowns = False
 
-    def api_post(*args, **kwargs):
-        raise AssertionError("timed-out challenges should auto-expire")
-
-    bot.api_post = api_post
+    posted: list[str] = []
+    bot.api_post = lambda path, **kwargs: posted.append(path)
 
     with redirect_stdout(io.StringIO()):
         bot._challenge_timed_out()
 
     expect("timeout clears pending challenge", bot._pending_challenge_id is None)
+    expect("timeout posts cancel", posted == ["/challenge/challenge/cancel"])
     expect("timeout cools target", "targetbot" in bot._declined_cooldown)
     expect("timeout counts tc failure", bot._tc_failures == 1)
+
+
+def test_challenge_timeout_with_active_slot_does_not_cool_or_rotate() -> None:
+    class Args:
+        seek = True
+        rotate = True
+        max_games = 1
+        quit_after_games = 0
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {"active": object()}
+    bot._pending_challenge_id = "challenge"
+    bot._pending_challenge_target = "targetbot"
+    bot._pending_challenge_speed = "rapid"
+    bot._challenge_retries = 0
+    bot._tc_failures = 2
+    bot._rotation_idx = 0
+    bot._completed_games = 0
+    bot._draining = threading.Event()
+    bot._declined_cooldown = {}
+    bot._persist_challenge_cooldowns = False
+
+    posted: list[str] = []
+    audit: list[tuple[str, dict]] = []
+    scheduled: list[float] = []
+    bot.api_post = lambda path, **kwargs: posted.append(path)
+    bot._audit_seek = lambda event, **fields: audit.append((event, fields))
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+
+    with redirect_stdout(io.StringIO()):
+        bot._challenge_timed_out()
+
+    expect("slot-filled timeout clears pending", bot._pending_challenge_id is None)
+    expect(
+        "slot-filled timeout posts cancel", posted == ["/challenge/challenge/cancel"]
+    )
+    expect("slot-filled timeout does not cool target", bot._declined_cooldown == {})
+    expect("slot-filled timeout does not count tc failure", bot._tc_failures == 2)
+    expect("slot-filled timeout does not rotate", bot._rotation_idx == 0)
+    expect("slot-filled timeout does not retry", scheduled == [])
+    expect(
+        "slot-filled timeout audited",
+        audit and audit[0][0] == "challenge_canceled_slot_filled",
+    )
+
+
+def test_challenge_timeout_waits_for_cancel_grace_before_retry() -> None:
+    class Args:
+        seek = True
+        rotate = False
+        max_games = 1
+        quit_after_games = 0
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {}
+    bot._pending_challenge_id = "challenge"
+    bot._pending_challenge_target = "targetbot"
+    bot._pending_challenge_speed = "rapid"
+    bot._challenge_retries = 0
+    bot._tc_failures = 0
+    bot._completed_games = 0
+    bot._draining = threading.Event()
+    bot._declined_cooldown = {}
+    bot._persist_challenge_cooldowns = False
+    bot._seek_lock = threading.Lock()
+
+    posted: list[str] = []
+    scheduled: list[float] = []
+    bot.api_post = lambda path, **kwargs: posted.append(path)
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+    bot._audit_seek = lambda event, **fields: None
+
+    with redirect_stdout(io.StringIO()):
+        bot._challenge_timed_out()
+
+    expect("timeout cancel posted", posted == ["/challenge/challenge/cancel"])
+    expect("timeout pending cleared", bot._pending_challenge_id is None)
+    expect(
+        "timeout retry delayed by cancel grace",
+        scheduled == [lichess_bot.OUTGOING_CANCEL_RESERVE_TTL_S],
+    )
+    expect("timeout cancel reserves game slot", bot._reserved_games() == 1)
+    expect("timeout cancel blocks immediate seek", not bot._should_seek())
+
+
+def test_expired_challenge_waits_for_cancel_grace_before_next_api_call() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._pending_challenge_id = "challenge"
+    bot._pending_challenge_target = "targetbot"
+    bot._pending_challenge_speed = "rapid"
+    bot._challenge_sent_at = time.time() - lichess_bot.CHALLENGE_TIMEOUT - 1
+    bot._seek_timer = None
+    bot.active_games = {}
+    bot._accepted_challenge_reservations = {}
+
+    posted: list[str] = []
+    cooled: list[str | None] = []
+    scheduled: list[float] = []
+    audited: list[tuple[str, dict]] = []
+
+    bot._should_seek = lambda: True
+    bot._cleanup_cooldowns = lambda: False
+    bot._resources_allow_new_game = lambda: True
+    bot.api_post = lambda path, **kwargs: posted.append(path)
+    bot._cooldown_bot = lambda target, duration=600: cooled.append(target)
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+    bot._audit_seek = lambda event, **fields: audited.append((event, fields))
+
+    def fail_online_bots(*args, **kwargs):
+        raise AssertionError(
+            "expired challenge should not fetch online bots immediately"
+        )
+
+    bot._online_bots = fail_online_bots
+
+    with redirect_stdout(io.StringIO()):
+        bot._seek_game_once()
+
+    expect("expired cancel posted", posted == ["/challenge/challenge/cancel"])
+    expect("expired challenge cooled", cooled == ["targetbot"])
+    expect("expired pending cleared", bot._pending_challenge_id is None)
+    expect(
+        "expired retry delayed by cancel grace",
+        scheduled == [lichess_bot.OUTGOING_CANCEL_RESERVE_TTL_S],
+    )
+    expect("expired event audited", audited and audited[0][0] == "challenge_expired")
+    expect("expired cancel reserves game slot", bot._reserved_games() == 1)
 
 
 def test_game_start_claims_slot_and_clears_pending() -> None:
@@ -1881,6 +3427,10 @@ def test_game_start_claims_slot_and_clears_pending() -> None:
     bot._seek_timer = Timer()
     bot._played_by_speed = {}
     bot._persist_played_format_history = False
+    bot._accepted_challenge_reservations = {
+        "g1": time.time() + 30,
+        "incoming": time.time() + 30,
+    }
 
     posted: list[str] = []
     played: list[str] = []
@@ -1895,14 +3445,140 @@ def test_game_start_claims_slot_and_clears_pending() -> None:
         thread.join(timeout=1)
 
     expect("pending cleared", bot._pending_challenge_id is None)
+    expect(
+        "matching accepted challenge reservation cleared",
+        "g1" not in bot._accepted_challenge_reservations,
+    )
+    expect(
+        "unrelated accepted challenge reservation preserved",
+        "incoming" in bot._accepted_challenge_reservations,
+    )
     expect("seek timer canceled", bot._seek_timer is None)
     expect("no challenge cancel for accepted game", posted == [])
     expect("game slot reserved", "g1" in bot.active_games)
     expect("game thread ran", played == ["g1"])
     expect("tc failures reset", bot._tc_failures == 0)
     expect("seek blocked by active game", not bot._should_seek())
+    bot.active_games.pop("g1", None)
+    expect("seek blocked by unrelated accepted reservation", not bot._should_seek())
     expect(
         "target marked as played in speed",
+        "targetbot" in bot._played_by_speed.get("rapid", {}),
+    )
+
+
+def test_game_start_claims_recently_canceled_outgoing_challenge() -> None:
+    class Args:
+        seek = True
+        max_games = 1
+        include_zero_increment = False
+        include_bullet = False
+        avoid_repeat_format = True
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {}
+    bot._pending_challenge_id = None
+    bot._pending_challenge_target = None
+    bot._pending_challenge_speed = None
+    bot._challenge_sent_at = 0.0
+    bot._rotation_idx = 0
+    bot._tc_failures = 2
+    bot._draining = threading.Event()
+    bot._shutdown = threading.Event()
+    bot._seek_timer = None
+    bot._played_by_speed = {}
+    bot._persist_played_format_history = False
+    bot._accepted_challenge_reservations = {}
+    bot._outgoing_cancel_reservations = {
+        "challenge-id": {
+            "expires_at": time.time() + 30,
+            "target": "TargetBot",
+            "speed": "rapid",
+        }
+    }
+
+    played: list[str] = []
+    bot.play_game = lambda game_id: played.append(game_id)
+
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(
+            {
+                "type": "gameStart",
+                "game": {
+                    "gameId": "lategame",
+                    "opponent": {"id": "targetbot"},
+                    "speed": "rapid",
+                },
+            }
+        )
+
+    thread = bot.active_games.get("lategame")
+    if thread is not None:
+        thread.join(timeout=1)
+
+    expect("late outgoing game started", played == ["lategame"])
+    expect(
+        "late outgoing reservation cleared",
+        bot._outgoing_cancel_reservations == {},
+    )
+    expect("late outgoing game occupies slot", not bot._should_seek())
+    expect(
+        "late outgoing target marked played",
+        "targetbot" in bot._played_by_speed.get("rapid", {}),
+    )
+
+
+def test_game_start_matches_pending_challenge_by_opponent_when_ids_differ() -> None:
+    class Args:
+        seek = True
+        max_games = 1
+        include_zero_increment = False
+        include_bullet = False
+        avoid_repeat_format = True
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {}
+    bot._pending_challenge_id = "challenge-id"
+    bot._pending_challenge_target = "TargetBot"
+    bot._pending_challenge_speed = "rapid"
+    bot._challenge_sent_at = 123.0
+    bot._rotation_idx = 0
+    bot._tc_failures = 2
+    bot._draining = threading.Event()
+    bot._shutdown = threading.Event()
+    bot._seek_timer = None
+    bot._played_by_speed = {}
+    bot._persist_played_format_history = False
+    bot._accepted_challenge_reservations = {}
+
+    posted: list[str] = []
+    played: list[str] = []
+    bot.api_post = lambda path, **kwargs: posted.append(path)
+    bot.play_game = lambda game_id: played.append(game_id)
+
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(
+            {
+                "type": "gameStart",
+                "game": {
+                    "gameId": "newgame",
+                    "opponent": {"id": "targetbot"},
+                    "speed": "rapid",
+                },
+            }
+        )
+
+    thread = bot.active_games.get("newgame")
+    if thread is not None:
+        thread.join(timeout=1)
+
+    expect("pending cleared by opponent match", bot._pending_challenge_id is None)
+    expect("no cancel for accepted challenge with different id", posted == [])
+    expect("game started after opponent match", played == ["newgame"])
+    expect(
+        "opponent-match target marked played",
         "targetbot" in bot._played_by_speed.get("rapid", {}),
     )
 
@@ -1947,6 +3623,58 @@ def test_game_start_cancels_unrelated_pending_challenge() -> None:
     expect("seek blocked after race", not bot._should_seek())
 
 
+def test_overflow_game_start_is_audited_and_marks_format_played() -> None:
+    class Args:
+        seek = True
+        max_games = 1
+        include_zero_increment = False
+        include_bullet = False
+        avoid_repeat_format = True
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {"active": object()}
+    bot._pending_challenge_id = None
+    bot._pending_challenge_target = None
+    bot._pending_challenge_speed = None
+    bot._challenge_sent_at = 0.0
+    bot._rotation_idx = 0
+    bot._tc_failures = 2
+    bot._draining = threading.Event()
+    bot._shutdown = threading.Event()
+    bot._seek_timer = None
+    bot._played_by_speed = {}
+    bot._persist_played_format_history = False
+
+    aborted: list[str] = []
+    audit: list[tuple[str, dict]] = []
+    bot.abort_or_resign = lambda game_id: aborted.append(game_id)
+    bot._audit_seek = lambda event, **fields: audit.append((event, fields))
+
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(
+            {
+                "type": "gameStart",
+                "game": {
+                    "gameId": "overflow",
+                    "speed": "blitz",
+                    "opponent": {"id": "latebot"},
+                },
+            }
+        )
+
+    expect("overflow game aborted", aborted == ["overflow"])
+    expect("overflow game not started", "overflow" not in bot.active_games)
+    expect("overflow event audited", audit and audit[0][0] == "game_start_aborted")
+    expect("overflow audit reason", audit[0][1]["reason"] == "max_games")
+    expect("overflow audit target", audit[0][1]["target"] == "latebot")
+    expect("overflow audit speed", audit[0][1]["speed"] == "blitz")
+    expect(
+        "overflow target marked as played",
+        "latebot" in bot._played_by_speed.get("blitz", {}),
+    )
+
+
 def test_malformed_global_events_are_ignored() -> None:
     bot = object.__new__(lichess_bot.LichessBot)
     bot.active_games = {}
@@ -1968,11 +3696,16 @@ def test_game_finish_marks_game_completed() -> None:
     bot.active_games = {}
     bot._draining = threading.Event()
     bot._shutdown = threading.Event()
+    bot._playing_status_cache = {}
 
     with redirect_stdout(io.StringIO()):
         bot._handle_event({"type": "gameFinish", "game": {"gameId": "g1"}})
 
     expect("game finish remembered", bot._game_was_completed("g1"))
+    expect(
+        "game finish caches inactive status",
+        bot._playing_status_cache.get("g1", (0, True))[1] is False,
+    )
 
 
 def test_stale_game_start_for_completed_game_is_ignored() -> None:
@@ -2112,6 +3845,52 @@ def test_play_game_stream_inactive_status_is_completed() -> None:
     expect("inactive stream counted", bot._completed_games == 1)
     expect("inactive stream marked complete", bot._game_was_completed("g1"))
     expect("inactive stream does not force shutdown", not bot._shutdown.is_set())
+
+
+def test_play_game_completed_event_skips_active_status_probe() -> None:
+    class Args:
+        quit_after_games = 0
+        seek = False
+        max_games = 1
+
+    class Engine:
+        def new_game(self) -> None:
+            return None
+
+        def quit(self) -> None:
+            return None
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {"g1": threading.current_thread()}
+    bot._submitted_turns = {}
+    bot._max_seen_ply = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._ponder_disabled_games = set()
+    bot._ponder_disabled_lock = threading.Lock()
+    bot._completed_games = 0
+    bot._completed_game_ids = set()
+    bot._completed_game_order = []
+    bot._draining = threading.Event()
+    bot._shutdown = threading.Event()
+    bot._acquire_engine = lambda game_id: Engine()
+
+    def game_loop(game_id: str, engine) -> bool:
+        bot._mark_game_completed(game_id)
+        return False
+
+    def active_status(game_id: str) -> bool:
+        raise AssertionError("completed event should avoid active status API")
+
+    bot._game_loop = game_loop
+    bot._game_active_status = active_status
+
+    with redirect_stdout(io.StringIO()):
+        bot.play_game("g1")
+
+    expect("completed event stream counted", bot._completed_games == 1)
+    expect("completed event stream marked complete", bot._game_was_completed("g1"))
+    expect("completed event stream does not force shutdown", not bot._shutdown.is_set())
 
 
 def test_play_game_stream_active_status_extends_reconnects() -> None:
@@ -2352,6 +4131,7 @@ def test_game_loop_skips_malformed_stream_frames() -> None:
 
     expect("malformed stream frames still reach terminal state", finished)
     expect("malformed move fields become empty move lists", calls == [[], []])
+    expect("terminal stream frame marks game completed", bot._game_was_completed("g1"))
 
 
 def test_audit_writes_bounded_jsonl() -> None:
@@ -2387,6 +4167,41 @@ def test_audit_writes_bounded_jsonl() -> None:
     expect("audit list bounded", len(records[1]["moves"]) == 32)
 
 
+def test_seek_audit_writes_bounded_jsonl() -> None:
+    old_path = lichess_bot.LICHESS_SEEK_AUDIT_PATH
+    old_limit = lichess_bot.LICHESS_AUDIT_EVENT_LIMIT
+    old_field_limit = lichess_bot.LICHESS_AUDIT_FIELD_LIMIT
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            lichess_bot.LICHESS_SEEK_AUDIT_PATH = pathlib.Path(tmp) / "seek.jsonl"
+            lichess_bot.LICHESS_AUDIT_EVENT_LIMIT = 2
+            lichess_bot.LICHESS_AUDIT_FIELD_LIMIT = 16
+
+            bot = object.__new__(lichess_bot.LichessBot)
+            bot._audit_enabled = True
+            bot._audit_lock = threading.Lock()
+            bot._audit_counts = {}
+            bot._seek_audit_count = 0
+
+            bot._audit_seek("challenge_sent", target="targetbot")
+            bot._audit_seek("challenge_failed", reason="x" * 64)
+            bot._audit_seek("dropped")
+
+            records = [
+                json.loads(line)
+                for line in lichess_bot.LICHESS_SEEK_AUDIT_PATH.read_text().splitlines()
+            ]
+    finally:
+        lichess_bot.LICHESS_SEEK_AUDIT_PATH = old_path
+        lichess_bot.LICHESS_AUDIT_EVENT_LIMIT = old_limit
+        lichess_bot.LICHESS_AUDIT_FIELD_LIMIT = old_field_limit
+
+    expect("seek audit event limit enforced", len(records) == 2)
+    expect("seek audit event serialized", records[0]["event"] == "challenge_sent")
+    expect("seek audit field truncated", records[1]["reason"].endswith("..."))
+
+
 def test_submit_move_writes_audit_result() -> None:
     old_dir = lichess_bot.LICHESS_AUDIT_DIR
 
@@ -2403,7 +4218,7 @@ def test_submit_move_writes_audit_result() -> None:
             bot._last_move_failure_detail = ""
             calls = iter([True, False])
 
-            def make_move(game_id: str, move: str) -> bool:
+            def make_move(game_id: str, move: str, **kwargs) -> bool:
                 ok = next(calls)
                 if not ok:
                     bot._last_move_failure_detail = '400: {"error":"Not your turn"}'
@@ -2461,14 +4276,33 @@ def main() -> int:
     test_bot_config_rejects_invalid_common_modes()
     test_config_check_prints_without_api_or_engine_launch()
     test_should_seek_respects_resource_gate()
+    test_seek_rechecks_game_slot_before_challenge_post()
     test_seek_dry_run_does_not_post_challenge()
     test_seek_dry_run_reports_rating_floor_block()
     test_seek_candidates_tolerate_malformed_perf_records()
+    test_seek_candidates_do_not_fallback_to_inactive_speed_bots()
     test_seek_candidates_filter_cached_cooldowns_case_insensitively()
+    test_seek_candidates_filter_time_control_cooldown_by_speed_only()
+    test_seek_candidates_reports_specific_cooldown_reason()
+    test_seek_cooldown_retry_delay_tracks_nearest_relevant_cooldown()
+    test_seek_no_candidate_retry_uses_reason_aware_delay()
+    test_played_format_no_candidate_rotates_to_next_speed()
+    test_speed_cooldown_no_candidate_rotates_to_next_speed()
+    test_inactive_speed_no_candidate_rotates_to_next_speed()
+    test_elo_seek_inactive_speed_rotates_before_widening_range()
+    test_rated_floor_no_candidate_rotates_to_next_speed()
+    test_elo_range_no_candidate_rotates_after_widening_range()
+    test_global_cooldown_no_candidate_does_not_rotate()
+    test_speed_challenge_cooldowns_persist_between_runs()
+    test_cleanup_cooldowns_prunes_and_persists_expired_entries()
     test_highest_rated_seek_orders_candidates_descending()
     test_avoid_repeat_format_filters_only_matching_speed()
     test_online_bots_uses_documented_fetch_limit()
     test_challenge_failure_ratelimit_sets_long_cooldown()
+    test_challenge_failure_static_rejections_set_long_cooldowns()
+    test_retry_after_can_use_structured_ratelimit_body_for_challenges()
+    test_retry_after_prefers_header_when_larger_than_body()
+    test_seek_rate_limit_uses_server_backoff_body()
     test_opening_book_does_not_send_bot_token_to_explorer()
     test_opening_book_scores_for_side_to_move()
     test_opening_book_local_reader_uses_entry_move_attribute()
@@ -2491,31 +4325,56 @@ def main() -> int:
     test_duplicate_game_state_does_not_resubmit()
     test_stale_stream_ply_does_not_search_old_position()
     test_stale_move_rejection_suppresses_duplicate_turn()
+    test_game_over_move_rejection_marks_completed()
+    test_completed_game_turn_is_not_searched()
+    test_pre_submit_active_check_skips_inactive_draw_state()
+    test_pre_submit_active_check_is_not_used_for_normal_state()
     test_ponderhit_audit_records_elapsed_ms()
     test_elo_seek_does_not_fallback_to_random_low_rated_bots()
     test_rated_seek_rating_floor()
     test_rated_challenge_rating_floor_uses_direct_rating()
     test_should_accept_handles_sparse_challenge_users()
     test_should_accept_respects_resource_gate()
+    test_should_accept_checks_max_games_before_resources()
     test_rated_challenge_respects_elo_seek_range()
     test_casual_challenge_ignores_elo_seek_range()
     test_challenge_decline_logs_reason()
     test_challenge_handler_tolerates_malformed_time_control()
+    test_accepted_incoming_challenge_reserves_game_slot()
+    test_incoming_game_start_consumes_accepted_challenge_reservation()
+    test_incoming_challenge_waits_for_seek_lock_before_accepting()
     test_transient_move_rejection_remains_retryable()
     test_ponder_game_circuit_breaker()
+    test_submit_skips_locally_completed_game_without_api_call()
+    test_make_move_can_offer_draw_on_same_request()
+    test_draw_offer_reason_requires_claim_and_tablebase_draw()
+    test_draw_offer_caps_search_and_marks_move_request()
     test_stale_challenge_event_preserves_current_pending()
+    test_challenge_resolution_waits_for_seek_lock_before_clearing_pending()
     test_matching_challenge_event_clears_pending()
+    test_static_decline_event_uses_global_long_cooldown()
+    test_time_control_decline_uses_speed_cooldown()
     test_unrelated_challenge_event_without_pending_is_ignored()
+    test_untracked_static_challenge_event_uses_reason_cooldown()
+    test_untracked_time_control_event_uses_event_speed_cooldown()
     test_challenge_event_identity_accepts_string_users()
-    test_challenge_timeout_does_not_post_cancel_after_auto_expiry()
+    test_pending_challenge_resolution_without_id_matches_target()
+    test_challenge_timeout_cancels_server_side_challenge()
+    test_challenge_timeout_with_active_slot_does_not_cool_or_rotate()
+    test_challenge_timeout_waits_for_cancel_grace_before_retry()
+    test_expired_challenge_waits_for_cancel_grace_before_next_api_call()
     test_game_start_claims_slot_and_clears_pending()
+    test_game_start_claims_recently_canceled_outgoing_challenge()
+    test_game_start_matches_pending_challenge_by_opponent_when_ids_differ()
     test_game_start_cancels_unrelated_pending_challenge()
+    test_overflow_game_start_is_audited_and_marks_format_played()
     test_malformed_global_events_are_ignored()
     test_game_finish_marks_game_completed()
     test_stale_game_start_for_completed_game_is_ignored()
     test_completed_game_history_is_bounded()
     test_play_game_stream_failure_is_not_completed()
     test_play_game_stream_inactive_status_is_completed()
+    test_play_game_completed_event_skips_active_status_probe()
     test_play_game_stream_active_status_extends_reconnects()
     test_play_game_transient_unknown_status_extends_reconnects()
     test_play_game_finished_stream_is_completed()
@@ -2523,6 +4382,7 @@ def main() -> int:
     test_game_loop_uses_long_read_timeout_tuple()
     test_game_loop_skips_malformed_stream_frames()
     test_audit_writes_bounded_jsonl()
+    test_seek_audit_writes_bounded_jsonl()
     test_submit_move_writes_audit_result()
     test_quit_after_games_limit()
     print("Lichess bot tests: OK")

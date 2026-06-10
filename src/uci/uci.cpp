@@ -989,6 +989,14 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
   config.policy_softmax_temp = get_float_option_alias(
       engine, "MCTSPolicyTemperature", "MCTSPolicySoftmaxTemp",
       config.policy_softmax_temp);
+  config.root_policy_softmax_temp = get_float_option(
+      engine, "MCTSRootPolicySoftmaxTemp", config.root_policy_softmax_temp);
+  config.high_policy_root_lever_selection =
+      engine.get_options()["MCTSHighPolicyRootLever"];
+  config.low_policy_root_lever_selection =
+      engine.get_options()["MCTSLowPolicyRootLever"];
+  config.root_tactical_capture_probe =
+      engine.get_options()["MCTSRootTacticalCaptureProbe"];
   config.moves_left_max_effect = get_float_option(
       engine, "MCTSMovesLeftMaxEffect", config.moves_left_max_effect);
   config.moves_left_threshold = get_float_option(
@@ -1067,6 +1075,22 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
   return config;
 }
 
+static void apply_pure_mcts_strength_overrides(Engine &engine,
+                                               MCTS::SearchParams &config) {
+  const float pure_mcts_smart_pruning =
+      get_float_option(engine, "PureMCTSSmartPruningFactor", -1.0f);
+  if (pure_mcts_smart_pruning >= 0.0f) {
+    config.smart_pruning_factor = pure_mcts_smart_pruning;
+  }
+  const float pure_mcts_cpuct_at_root =
+      get_float_option(engine, "PureMCTSCPuctAtRoot", -1.0f);
+  if (pure_mcts_cpuct_at_root >= 0.0f) {
+    config.cpuct_at_root = pure_mcts_cpuct_at_root;
+  }
+  config.fixed_movetime_q_override_cap = 384;
+  config.capture_leader_quiet_major_probe = true;
+}
+
 struct HybridThreadSplit {
   int mcts_threads = 1;
   int ab_threads = 1;
@@ -1093,6 +1117,8 @@ static int auto_hybrid_mcts_threads(Engine &engine, int available) {
     return 1;
   if (available >= 12)
     return std::clamp(available / 4, 2, 4);
+  if (available >= 8)
+    return 3;
   if (available >= 6)
     return 2;
   return 1;
@@ -1154,6 +1180,14 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   auto split = compute_hybrid_thread_split(engine, limits);
 
   config.mcts_config = make_mcts_config(engine, nn_weights, split.mcts_threads);
+  if (limits && limits->movetime > 0 && limits->movetime < 1000 &&
+      config.mcts_config.minibatch_size > 1) {
+    config.mcts_config.minibatch_size = 1;
+    config.mcts_config.minibatch_size_auto = false;
+  }
+  config.mcts_config.high_policy_root_lever_selection = false;
+  config.mcts_config.low_policy_root_lever_selection = false;
+  config.mcts_config.low_visit_q_override_rescan = false;
   config.mcts_config.kld_gain_min =
       get_float_option(engine, "HybridMCTSMinimumKLDGainPerNode", 0.0f);
   config.mcts_threads = split.mcts_threads;
@@ -1188,6 +1222,8 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   config.ane_root_hints = engine.get_options()["HybridANERootHints"];
   config.ane_confirm_mcts_override =
       engine.get_options()["HybridANEConfirmMCTSOverride"];
+  config.ane_only_pawn_endgames =
+      engine.get_options()["HybridANEOnlyPawnEndgames"];
   config.ane_weights_path =
       std::string(engine.get_options()["HybridANEWeights"]);
   config.ane_model_path =
@@ -1229,10 +1265,10 @@ make_hybrid_cache_key(const std::string &nn_weights,
       << config.ab_candidate_verify_count << "|"
       << config.root_pawn_lever_tiebreak << "|" << config.ane_root_probe << "|"
       << config.ane_root_hints << "|" << config.ane_confirm_mcts_override << "|"
-      << config.ane_weights_path << "|" << config.ane_model_path << "|"
-      << config.ane_compute_units << "|" << config.ane_root_hint_count << "|"
-      << config.ane_root_hint_wait_ms << "|" << config.ane_min_budget_ms << "|"
-      << config.trace_decisions;
+      << config.ane_only_pawn_endgames << "|" << config.ane_weights_path << "|"
+      << config.ane_model_path << "|" << config.ane_compute_units << "|"
+      << config.ane_root_hint_count << "|" << config.ane_root_hint_wait_ms
+      << "|" << config.ane_min_budget_ms << "|" << config.trace_decisions;
   return key.str();
 }
 
@@ -1399,12 +1435,19 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
       << config.fpu_absolute_at_root << "|" << config.fpu_value << "|"
       << config.fpu_value_at_root << "|" << config.fpu_reduction << "|"
       << config.fpu_reduction_at_root << "|" << config.policy_softmax_temp
-      << "|" << config.moves_left_max_effect << "|"
-      << config.moves_left_threshold << "|" << config.moves_left_slope << "|"
+      << "|" << config.root_policy_softmax_temp << "|"
+      << config.moves_left_max_effect << "|" << config.moves_left_threshold
+      << "|" << config.moves_left_slope << "|"
       << config.moves_left_constant_factor << "|"
       << config.moves_left_scaled_factor << "|"
       << config.moves_left_quadratic_factor << "|" << config.temperature << "|"
-      << config.temp_winpct_cutoff << "|" << config.draw_score << "|"
+      << config.temp_winpct_cutoff << "|"
+      << config.high_policy_root_lever_selection << "|"
+      << config.low_policy_root_lever_selection << "|"
+      << config.root_tactical_capture_probe << "|"
+      << config.low_visit_q_override_rescan << "|"
+      << config.capture_leader_quiet_major_probe << "|"
+      << config.fixed_movetime_q_override_cap << "|" << config.draw_score << "|"
       << config.wdl_rescale_ratio << "|" << config.wdl_rescale_diff << "|"
       << config.two_fold_draws << "|" << config.sticky_endgames << "|"
       << config.virtual_loss << "|" << config.minibatch_size << "|"
@@ -1519,11 +1562,13 @@ static void preload_search_objects(Engine &engine) {
         resolve_mcts_thread_count(engine, false, requested_threads, false);
     MCTS::SearchParams config =
         make_mcts_config(engine, nn_weights, num_threads);
+    apply_pure_mcts_strength_overrides(engine, config);
     const std::string cache_key = make_mcts_cache_key(nn_weights, config);
 
     bool created = false;
     auto mcts = get_or_create_cached_mcts(config, cache_key, &created);
     if (mcts && created) {
+      mcts->NewGame();
       sync_cout << "info string MCTS search preloaded (transformer ready)"
                 << sync_endl;
     }
@@ -1596,7 +1641,11 @@ void MetalFish::cleanup_parallel_hybrid_search() {
 namespace MetalFish {
 
 void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
-  Search::LimitsType limits = parse_limits(is);
+  std::string args;
+  std::getline(is, args, '\0');
+
+  std::istringstream limit_args(args);
+  Search::LimitsType limits = parse_limits(limit_args);
 
   if (!limits.ponderMode) {
     if (auto reason = transformer_low_time_fallback_reason(engine, limits)) {
@@ -1605,6 +1654,15 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
       engine.go(limits);
       return;
     }
+  }
+
+  if (MCTS::HybridUseMCTSPrimaryForFixedNodeBudget(limits)) {
+    sync_cout << "info string Hybrid fixed-node budget is tiny; using "
+                 "MCTS-primary route"
+              << sync_endl;
+    std::istringstream mcts_args(args);
+    mcts_mt_go(mcts_args);
+    return;
   }
 
   sync_cout << "info string Starting Parallel Hybrid Search (MCTS + AB)..."
@@ -1743,6 +1801,7 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   }
 
   MCTS::SearchParams config = make_mcts_config(engine, nn_weights, num_threads);
+  apply_pure_mcts_strength_overrides(engine, config);
   log_mcts_runtime_config("MCTS runtime", config);
 
   std::shared_ptr<MCTS::Search> mcts;

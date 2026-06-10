@@ -76,7 +76,7 @@ def assert_paper_hybrid_env_overrides() -> None:
         "HYBRID_MCTS_ROOT_REJECT": "false",
         "HYBRID_MCTS_AB_ROOT_HINTS": "true",
         "HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS": "50",
-        "HYBRID_AB_CANDIDATE_VERIFY_MS": "120",
+        "HYBRID_AB_CANDIDATE_VERIFY_MS": "240",
         "HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "1.5",
         "HYBRID_ROOT_PAWN_LEVER_TIEBREAK": "false",
     }
@@ -100,7 +100,7 @@ def assert_paper_hybrid_env_overrides() -> None:
             "HybridMCTSRootReject": "false",
             "HybridMCTSABRootHints": "true",
             "HybridMCTSABRootHintDelayMs": "50",
-            "HybridABCandidateVerifyMs": "120",
+            "HybridABCandidateVerifyMs": "240",
             "MCTSMaxOutOfOrderEvalsFactor": "1.5",
             "HybridRootPawnLeverTieBreak": "false",
         },
@@ -144,6 +144,111 @@ def assert_hybrid_trace_final_decision_only() -> None:
         raise AssertionError(
             "trace analyzer did not keep the final HybridTrace decision"
         )
+
+
+def assert_hybrid_trace_jsonl_decisions() -> None:
+    records = [
+        {
+            "id": "puzzle-a",
+            "searches": [
+                {
+                    "ply": 0,
+                    "actual": "g6g5",
+                    "hybrid_trace": (
+                        "HybridTrace: reason=engines_agree selected=g6g5 "
+                        "ABMove=g6g5 MCTSMove=g6g5 MCTSBestVisits=22"
+                    ),
+                }
+            ],
+        },
+        {
+            "id": "puzzle-b",
+            "searches": [
+                {
+                    "ply": 2,
+                    "actual": "f6f5",
+                    "hybrid_trace": (
+                        "HybridTrace: reason=mcts_root_reject_q_gap "
+                        "selected=f6f5 ABMove=g6g5 MCTSMove=f6f5 "
+                        "MCTSBestVisits=81 ANETop=f6f5 ANEAgreesMCTS=1 "
+                        "ANEConfirmedMCTS=1 PawnOnlyANEMCTS=1 "
+                        "MCTSUltraLowNodeRootConfidence=1 "
+                        "ABMCTSAgreeOffFirstHint=1"
+                    ),
+                    "ane_hints": 1,
+                    "ane_hint_moves": 3,
+                }
+            ],
+        },
+        {
+            "id": "puzzle-c",
+            "searches": [
+                {
+                    "ply": 0,
+                    "actual": "a2a4",
+                    "hybrid_ane_top": "a2a4",
+                    "hybrid_ane_agrees_mcts": 1,
+                    "hybrid_ane_confirmed_mcts": 0,
+                    "ane_failures": 1,
+                    "ane_hints": 1,
+                    "ane_hint_moves": 6,
+                }
+            ],
+        },
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "puzzles.jsonl"
+        path.write_text("\n".join(json.dumps(record) for record in records))
+        decisions = list(analyze_hybrid_trace.iter_trace_decisions(path))
+        stats = analyze_hybrid_trace.collect_trace_log_stats([path])
+    if [d.selected for d in decisions] != ["g6g5", "f6f5"]:
+        raise AssertionError("trace analyzer did not parse puzzle JSONL decisions")
+    if decisions[1].fields.get("PuzzleId") != "puzzle-b":
+        raise AssertionError("trace analyzer did not keep puzzle id in trace fields")
+    if stats.search_entries != 3 or stats.trace_entries != 2:
+        raise AssertionError("trace analyzer did not count puzzle JSONL coverage")
+    if (
+        stats.ane_top_entries != 2
+        or stats.ane_agrees_mcts != 2
+        or stats.ane_confirmed_mcts != 1
+        or stats.ane_pawn_only_mcts != 1
+        or stats.ane_failures != 1
+        or stats.ane_hints != 2
+        or stats.ane_hint_moves != 9
+        or stats.mcts_ultra_low_root_confidence != 1
+        or stats.ab_mcts_agree_off_first_hint != 1
+    ):
+        raise AssertionError("trace analyzer did not count ANE puzzle coverage")
+
+
+def assert_hybrid_trace_directory_expansion() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        result = root / "puzzles.jsonl"
+        result.write_text(
+            json.dumps(
+                {
+                    "id": "puzzle-a",
+                    "searches": [
+                        {
+                            "ply": 0,
+                            "actual": "a2a4",
+                            "hybrid_trace": (
+                                "HybridTrace: reason=engines_agree selected=a2a4 "
+                                "ABMove=a2a4 MCTSMove=a2a4"
+                            ),
+                        }
+                    ],
+                }
+            )
+        )
+        ignored = root / "summary.md"
+        ignored.write_text("# ignored\n")
+        expanded = analyze_hybrid_trace.expand_results_paths([root])
+        if [path.name for path in expanded] != [result.name]:
+            raise AssertionError("trace analyzer did not expand result directories")
+        if not expanded[0].is_file():
+            raise AssertionError("trace analyzer returned a non-file result")
 
 
 def assert_tournament_draw_reason_precision() -> None:
@@ -196,6 +301,28 @@ def assert_bk_hybrid_fallback_warning() -> None:
         raise AssertionError("BK parity warned after fallback was disabled")
 
 
+def assert_bk_ane_scope_default() -> None:
+    text = (PROJ / "tests/bk_parity.py").read_text()
+    expected = (
+        '"--hybrid-ane-only-pawn-endgames",\n'
+        "        action=argparse.BooleanOptionalAction,\n"
+        "        default=False,"
+    )
+    if expected not in text:
+        raise AssertionError("BK parity ANE scope default drifted from all-root")
+
+
+def assert_bk_ane_root_hints_default() -> None:
+    text = (PROJ / "tests/bk_parity.py").read_text()
+    expected = (
+        '"--hybrid-ane-root-hints",\n'
+        "        action=argparse.BooleanOptionalAction,\n"
+        "        default=False,"
+    )
+    if expected not in text:
+        raise AssertionError("BK parity ANE root hints default drifted from off")
+
+
 def assert_tactical_fail_under_guard() -> None:
     selected = ["metalfish-hybrid"]
     if paper_benchmarks.parse_tactical_fail_under("", selected) != {}:
@@ -241,6 +368,21 @@ def assert_tactical_fail_under_guard() -> None:
         raise AssertionError(f"unexpected tactical floor failures: {failures!r}")
 
 
+def assert_bk_aggregate_fail_under_guard() -> None:
+    aggregate = {
+        "metalfish-mcts": {
+            "BK.07": bk_parity.AggregateStats(runs=10, passes=10, nodes_total=500),
+            "BK.17": bk_parity.AggregateStats(runs=10, passes=9, nodes_total=650),
+        },
+        "metalfish-hybrid": {
+            "BK.07": bk_parity.AggregateStats(runs=8, passes=8, nodes_total=144),
+        },
+    }
+    scores = bk_parity.aggregate_scores(aggregate)
+    if scores != {"metalfish-mcts": (19, 20), "metalfish-hybrid": (8, 8)}:
+        raise AssertionError(f"unexpected aggregate BK scores: {scores!r}")
+
+
 def detect_paper_engines_clean() -> dict[str, paper_benchmarks.EngineConfig]:
     return with_clean_hybrid_env(
         lambda: paper_benchmarks.detect_engines(threads=8, hash_mb=4096)
@@ -249,6 +391,9 @@ def detect_paper_engines_clean() -> dict[str, paper_benchmarks.EngineConfig]:
 
 def main() -> int:
     assert_tactical_fail_under_guard()
+    assert_bk_aggregate_fail_under_guard()
+    assert_bk_ane_scope_default()
+    assert_bk_ane_root_hints_default()
     paper = detect_paper_engines_clean()
     expected_pure_mcts_threads = "1" if platform.system() == "Darwin" else "8"
 
@@ -263,8 +408,11 @@ def main() -> int:
             "UseHybridSearch": "false",
             "UseMCTS": "true",
             "MultiPV": "1",
+            "TransformerLowTimeFallbackMs": "0",
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
+            "PureMCTSSmartPruningFactor": "0.5",
+            "PureMCTSCPuctAtRoot": "2.4",
             "MCTSMinimumKLDGainPerNode": "0.00005",
         },
     )
@@ -301,13 +449,13 @@ def main() -> int:
             "TransformerMinMoveBudgetMs": "400",
             "HybridMCTSMinimumKLDGainPerNode": "0.0",
             "HybridABRootRejectMCTS": "true",
-            "HybridMCTSRootReject": "true",
+            "HybridMCTSRootReject": "false",
             "HybridMCTSUseSharedTT": "false",
             "HybridMCTSABRootHints": "true",
-            "HybridMCTSABRootHintDelayMs": "25",
+            "HybridMCTSABRootHintDelayMs": "0",
             "HybridMCTSABRootHintCount": "8",
-            "HybridABCandidateVerifyMs": "120",
-            "HybridABCandidateVerifyCount": "4",
+            "HybridABCandidateVerifyMs": "240",
+            "HybridABCandidateVerifyCount": "5",
             "HybridABPolicyWeight": "0.0",
             "HybridRootPawnLeverTieBreak": "true",
             "HybridTrace": "false",
@@ -325,6 +473,8 @@ def main() -> int:
     )
     assert_paper_hybrid_env_overrides()
     assert_hybrid_trace_final_decision_only()
+    assert_hybrid_trace_jsonl_decisions()
+    assert_hybrid_trace_directory_expansion()
     assert_tournament_draw_reason_precision()
     assert_transformer_low_time_warnings_cover_mcts()
     assert_bk_hybrid_fallback_warning()
@@ -334,6 +484,8 @@ def main() -> int:
         [
             'options.add("MCTSPolicySoftmaxTemp"',
             'options.add("MCTSPolicyTemperature"',
+            'options.add("MCTSRootPolicySoftmaxTemp"',
+            'options.add("PureMCTSCPuctAtRoot"',
             'options.add("MCTSMaxOutOfOrderFactor"',
             'options.add("MCTSMaxOutOfOrderEvalsFactor"',
             'options.add("MCTSCudaAutoMinibatchSize"',
@@ -349,7 +501,8 @@ def main() -> int:
             'options.add("HybridABRootRejectMCTS"',
             'options.add("HybridRootPawnLeverTieBreak"',
             'options.add("HybridANERootProbe"',
-            'options.add("HybridANEConfirmMCTSOverride"',
+            'options.add("HybridANEConfirmMCTSOverride", Option(false))',
+            'options.add("HybridANEOnlyPawnEndgames"',
             'options.add("HybridANEModelPath"',
             'options.add("HybridANEMinBudgetMs"',
         ],
@@ -360,6 +513,7 @@ def main() -> int:
             "get_float_option_alias(",
             '"MCTSPolicyTemperature"',
             '"MCTSPolicySoftmaxTemp"',
+            '"MCTSRootPolicySoftmaxTemp"',
             '"MCTSMaxOutOfOrderEvalsFactor"',
             '"MCTSMaxOutOfOrderFactor"',
             "backend_can_select_cuda",
@@ -396,6 +550,7 @@ def main() -> int:
             '"HybridRootPawnLeverTieBreak"',
             '"HybridANERootProbe"',
             '"HybridANEConfirmMCTSOverride"',
+            '"HybridANEOnlyPawnEndgames"',
             '"HybridANEModelPath"',
             '"HybridANEMinBudgetMs"',
         ],
@@ -442,6 +597,8 @@ def main() -> int:
             "MCTSParallelSearch": "false",
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
+            "PureMCTSSmartPruningFactor": "0.5",
+            "PureMCTSCPuctAtRoot": "2.4",
             "MCTSMinimumKLDGainPerNode": "0.00005",
             "TransformerLowTimeFallbackMs": "0",
         },
@@ -460,13 +617,13 @@ def main() -> int:
             "TransformerMinMoveBudgetMs": "400",
             "HybridMCTSMinimumKLDGainPerNode": "0.0",
             "HybridABRootRejectMCTS": "true",
-            "HybridMCTSRootReject": "true",
+            "HybridMCTSRootReject": "false",
             "HybridMCTSUseSharedTT": "false",
             "HybridMCTSABRootHints": "true",
-            "HybridMCTSABRootHintDelayMs": "25",
+            "HybridMCTSABRootHintDelayMs": "0",
             "HybridMCTSABRootHintCount": "8",
-            "HybridABCandidateVerifyMs": "120",
-            "HybridABCandidateVerifyCount": "4",
+            "HybridABCandidateVerifyMs": "240",
+            "HybridABCandidateVerifyCount": "5",
             "HybridABPolicyWeight": "0.0",
             "HybridRootPawnLeverTieBreak": "true",
             "HybridAutoABThreadsCap": "0",
@@ -483,6 +640,8 @@ def main() -> int:
         "option.MCTSMinimumKLDGainPerNode=0.00005",
         "option.TransformerLowTimeFallbackMs=0",
         "option.MCTSParallelSearch=$MCTS_PARALLEL_SEARCH",
+        "option.PureMCTSSmartPruningFactor=0.5",
+        "option.PureMCTSCPuctAtRoot=2.4",
         "option.HybridMCTSMinimumKLDGainPerNode=$HYBRID_MCTS_KLD",
         "option.HybridABRootRejectMCTS=$HYBRID_AB_ROOT_REJECT_MCTS",
         "option.HybridMCTSRootReject=$HYBRID_MCTS_ROOT_REJECT",
@@ -508,10 +667,10 @@ def main() -> int:
             'MCTS_PARALLEL_SEARCH="${MCTS_PARALLEL_SEARCH:-false}"',
             'HYBRID_MCTS_KLD="${HYBRID_MCTS_KLD:-0.0}"',
             'HYBRID_AB_ROOT_REJECT_MCTS="${HYBRID_AB_ROOT_REJECT_MCTS:-true}"',
-            'HYBRID_MCTS_ROOT_REJECT="${HYBRID_MCTS_ROOT_REJECT:-true}"',
+            'HYBRID_MCTS_ROOT_REJECT="${HYBRID_MCTS_ROOT_REJECT:-false}"',
             'HYBRID_MCTS_SHARED_TT="${HYBRID_MCTS_SHARED_TT:-false}"',
             'HYBRID_MCTS_AB_ROOT_HINTS="${HYBRID_MCTS_AB_ROOT_HINTS:-true}"',
-            'HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS="${HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS:-25}"',
+            'HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS="${HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS:-0}"',
             'HYBRID_MCTS_AB_ROOT_HINT_COUNT="${HYBRID_MCTS_AB_ROOT_HINT_COUNT:-8}"',
             'HYBRID_AB_POLICY_WEIGHT="${HYBRID_AB_POLICY_WEIGHT:-0.0}"',
             'HYBRID_ROOT_PAWN_LEVER_TIEBREAK="${HYBRID_ROOT_PAWN_LEVER_TIEBREAK:-true}"',
@@ -531,11 +690,12 @@ def main() -> int:
             'env_int("METALFISH_TRANSFORMER_MIN_MOVE_BUDGET_MS", 400)',
             'env_float("METALFISH_HYBRID_MCTS_KLD", 0.0)',
             '"METALFISH_HYBRID_AB_ROOT_REJECT_MCTS", True',
-            '"METALFISH_HYBRID_MCTS_ROOT_REJECT", True',
+            '"METALFISH_HYBRID_MCTS_ROOT_REJECT", False',
             '"METALFISH_HYBRID_MCTS_SHARED_TT", False',
             '"METALFISH_HYBRID_MCTS_AB_ROOT_HINTS", True',
-            'env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS", 25)',
+            'env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS", 0)',
             'env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_COUNT", 8)',
+            'env_int("METALFISH_HYBRID_AB_CANDIDATE_VERIFY_COUNT", 5)',
             'env_float("METALFISH_HYBRID_AB_POLICY_WEIGHT", 0.0)',
             '"METALFISH_HYBRID_ROOT_PAWN_LEVER_TIEBREAK", True',
             'env_bool_string("METALFISH_HYBRID_TRACE", False)',
@@ -567,6 +727,7 @@ def main() -> int:
             '"HybridRootPawnLeverTieBreak": HYBRID_ROOT_PAWN_LEVER_TIEBREAK',
             '"HybridTrace": HYBRID_TRACE',
             '"MCTSMinibatchSize": str(HYBRID_MCTS_MINIBATCH)',
+            '"MCTSRootPolicySoftmaxTemp": "1.6"',
             "if SYZYGY_PATH:",
             "dynamic up to {MAX_SEARCH_WORKERS}",
             "Syzygy:   {SYZYGY_PATH if SYZYGY_PATH else 'disabled'}",
@@ -617,17 +778,40 @@ def main() -> int:
             "not full Hybrid MCTS",
             "METALFISH_MCTS_ROOT_TRACE_MOVES",
             "--root-trace-moves",
+            "--aggregate-fail-under",
             "--mcts-minibatch-size",
             "--mcts-kld",
+            "--mcts-policy-temperature",
+            "--mcts-cpuct-at-root",
+            "--mcts-fpu-reduction",
+            "--mcts-fpu-reduction-at-root",
+            "--mcts-fpu-value",
+            "--mcts-fpu-value-at-root",
+            "--mcts-fpu-absolute",
+            "--mcts-fpu-absolute-at-root",
+            "--mcts-cache-history-length",
+            "--mcts-nn-cache-size",
             "--mcts-parallel-search",
             "--hybrid-ab-root-reject-mcts",
             "--hybrid-mcts-minibatch-size",
             "--hybrid-ane-root-probe",
+            "--hybrid-ane-only-pawn-endgames",
+            '"HybridANEOnlyPawnEndgames"',
             'sess.setoption("TransformerLowTimeFallbackMs", "0")',
             'sess.setoption("MCTSMaxThreads", str(mcts_threads))',
             '"MCTSParallelSearch", "true" if mcts_parallel_search else "false"',
             'sess.setoption("MCTSMinimumKLDGainPerNode", str(mcts_kld))',
             'sess.setoption("MCTSMinibatchSize", str(minibatch_size))',
+            'sess.setoption("MCTSPolicyTemperature", str(mcts_policy_temperature))',
+            'sess.setoption("MCTSCPuctAtRoot", str(mcts_cpuct_at_root))',
+            'sess.setoption("MCTSFpuReduction", str(mcts_fpu_reduction))',
+            'sess.setoption("MCTSFpuReductionAtRoot", str(mcts_fpu_reduction_at_root))',
+            'sess.setoption("MCTSFpuValue", str(mcts_fpu_value))',
+            'sess.setoption("MCTSFpuValueAtRoot", str(mcts_fpu_value_at_root))',
+            'sess.setoption("MCTSFpuAbsolute", "true" if mcts_fpu_absolute else "false")',
+            '"MCTSFpuAbsoluteAtRoot"',
+            'sess.setoption("MCTSCacheHistoryLength", str(mcts_cache_history_length))',
+            'sess.setoption("MCTSNNCacheSize", str(mcts_nn_cache_size))',
             '"HybridABRootRejectMCTS"',
         ],
     )
@@ -693,6 +877,9 @@ def main() -> int:
             "MCTSInABScore=",
             "MCTSInABAvg=",
             "MCTSInABEffort=",
+            "FirstABHint=",
+            "FirstABVerifiedHint=",
+            "ABMCTSAgreeOffFirstHint=",
         ],
     )
     assert_file_contains(
@@ -724,7 +911,12 @@ def main() -> int:
             "MCTSParallelSearch=false",
             "TransformerLowTimeFallbackMs=0",
             'go "nodes 50"',
+            '--expect-output "Hybrid fixed-node budget is tiny"',
+            '--expect-output "MCTS runtime: backend=metal"',
             "--expect-bestmove h5f6",
+            "--expect-min-nodes 50",
+            '--expect-output "Hybrid MCTS runtime: backend=metal"',
+            '--expect-output "Final: MCTSPlayouts="',
             "Run Apple accelerator tool tests",
             "tools/lc0_coreml_root_value_probe.py",
             "tests/test_lc0_coreml_root_value_probe.py",
@@ -773,7 +965,7 @@ def main() -> int:
             "Run ANE option/config smoke",
             "--hybrid-ane-root-probe",
             "--hybrid-ane-compute-units cpu-ne",
-            "--hybrid-ane-min-budget-ms 1000",
+            "--hybrid-ane-min-budget-ms 500",
         ],
     )
     assert_file_contains(
@@ -1448,6 +1640,7 @@ def main() -> int:
             "PROMOTION_FEN",
             "EN_PASSANT_FEN",
             "--expect-bestmove h5f6",
+            "--expect-min-nodes 50",
             '--go "${MCTS_TIMED_GO}"',
             '--go "nodes 50"',
             "METALFISH_CUDA_MCTS_TIMED_GO:-movetime 500",
@@ -2072,6 +2265,8 @@ def main() -> int:
             "hybrid-cuda-promotion",
             "hybrid-cuda-en-passant",
             "bestmove h5f6",
+            "MinNodes 50",
+            "searched fewer nodes than expected",
             "cuda_bk07_mcts",
             "cuda_kiwipete_mcts",
             "cuda_after_e4_mcts",
@@ -2460,6 +2655,11 @@ def main() -> int:
             "MCTS-to-AB root hint events",
             "MCTS-to-AB root hint avg moves",
             "MCTS-to-AB root hint sizes",
+            "MCTS arbitration",
+            "ultra-low root confidence overrides",
+            "Root hint diagnostics",
+            "AB/MCTS agreed off first root hint",
+            "expand_results_paths",
             "MCTSBestCurrentVisits",
             "MCTSRootCurrentVisits",
             "MCTSConfidenceVisits",

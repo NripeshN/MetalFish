@@ -23,6 +23,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--expect-bestmove")
     parser.add_argument(
+        "--expect-min-nodes",
+        type=int,
+        help="Fail unless the last search info reports at least this many nodes.",
+    )
+    parser.add_argument(
         "--expect-output",
         action="append",
         default=[],
@@ -290,6 +295,18 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+    if args.expect_min_nodes is not None:
+        search_info = extract_last_search_info(uci.output) or {}
+        nodes = search_info.get("nodes")
+        if not isinstance(nodes, int) or nodes < args.expect_min_nodes:
+            tail = "\n".join(uci.output[-80:])
+            print(
+                f"Expected at least {args.expect_min_nodes} searched nodes, "
+                f"got {nodes!r}. Tail:\n{tail}",
+                file=sys.stderr,
+            )
+            return 1
 
     output = "\n".join(uci.output)
     for expected in args.expect_output:

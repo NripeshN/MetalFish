@@ -84,6 +84,13 @@ def warmup_movetime_ms(movetime_ms: int, *, hybrid: bool = False) -> int:
     return warmup_ms
 
 
+def warmup_session(
+    sess: "UCISession", mode: str, movetime_ms: int, nodes: int, repeats: int
+) -> None:
+    for _ in range(max(1, repeats)):
+        sess.warmup(mode, movetime_ms, nodes)
+
+
 @dataclass
 class SearchResult:
     bestmove: str
@@ -314,6 +321,18 @@ def setup_metalfish(
     minibatch_size: int,
     mcts_kld: float,
     mcts_parallel_search: bool,
+    mcts_policy_temperature: Optional[float],
+    mcts_cpuct_at_root: Optional[float],
+    pure_mcts_cpuct_at_root: Optional[float],
+    pure_mcts_smart_pruning_factor: Optional[float],
+    mcts_fpu_reduction: Optional[float],
+    mcts_fpu_reduction_at_root: Optional[float],
+    mcts_fpu_value: Optional[float],
+    mcts_fpu_value_at_root: Optional[float],
+    mcts_fpu_absolute: Optional[bool],
+    mcts_fpu_absolute_at_root: Optional[bool],
+    mcts_cache_history_length: Optional[int],
+    mcts_nn_cache_size: Optional[int],
 ) -> None:
     mcts_threads = max(1, threads) if mcts_parallel_search else 1
     sess.setoption("UseHybridSearch", "false")
@@ -328,6 +347,36 @@ def setup_metalfish(
     sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
     sess.setoption("MCTSAddDirichletNoise", "false")
     sess.setoption("MCTSMinimumKLDGainPerNode", str(mcts_kld))
+    if mcts_policy_temperature is not None:
+        sess.setoption("MCTSPolicyTemperature", str(mcts_policy_temperature))
+        sess.setoption("MCTSPolicySoftmaxTemp", str(mcts_policy_temperature))
+    if mcts_cpuct_at_root is not None:
+        sess.setoption("MCTSCPuctAtRoot", str(mcts_cpuct_at_root))
+    if pure_mcts_cpuct_at_root is not None:
+        sess.setoption("PureMCTSCPuctAtRoot", str(pure_mcts_cpuct_at_root))
+    if pure_mcts_smart_pruning_factor is not None:
+        sess.setoption(
+            "PureMCTSSmartPruningFactor", str(pure_mcts_smart_pruning_factor)
+        )
+    if mcts_fpu_reduction is not None:
+        sess.setoption("MCTSFpuReduction", str(mcts_fpu_reduction))
+    if mcts_fpu_reduction_at_root is not None:
+        sess.setoption("MCTSFpuReductionAtRoot", str(mcts_fpu_reduction_at_root))
+    if mcts_fpu_value is not None:
+        sess.setoption("MCTSFpuValue", str(mcts_fpu_value))
+    if mcts_fpu_value_at_root is not None:
+        sess.setoption("MCTSFpuValueAtRoot", str(mcts_fpu_value_at_root))
+    if mcts_fpu_absolute is not None:
+        sess.setoption("MCTSFpuAbsolute", "true" if mcts_fpu_absolute else "false")
+    if mcts_fpu_absolute_at_root is not None:
+        sess.setoption(
+            "MCTSFpuAbsoluteAtRoot",
+            "true" if mcts_fpu_absolute_at_root else "false",
+        )
+    if mcts_cache_history_length is not None:
+        sess.setoption("MCTSCacheHistoryLength", str(mcts_cache_history_length))
+    if mcts_nn_cache_size is not None:
+        sess.setoption("MCTSNNCacheSize", str(mcts_nn_cache_size))
     sess.send("isready")
     sess.wait_for("readyok", 120)
 
@@ -364,12 +413,25 @@ def setup_metalfish_hybrid(
     low_time_fallback_ms: int,
     root_pawn_lever_tiebreak: bool,
     ane_root_probe: bool,
+    ane_root_hints: bool,
+    ane_confirm_mcts_override: bool,
+    ane_only_pawn_endgames: bool,
     ane_weights: pathlib.Path,
     ane_model_path: pathlib.Path,
     ane_compute_units: str,
     ane_root_hint_count: int,
     ane_root_hint_wait_ms: int,
     ane_min_budget_ms: int,
+    mcts_policy_temperature: Optional[float],
+    mcts_cpuct_at_root: Optional[float],
+    mcts_fpu_reduction: Optional[float],
+    mcts_fpu_reduction_at_root: Optional[float],
+    mcts_fpu_value: Optional[float],
+    mcts_fpu_value_at_root: Optional[float],
+    mcts_fpu_absolute: Optional[bool],
+    mcts_fpu_absolute_at_root: Optional[bool],
+    mcts_cache_history_length: Optional[int],
+    mcts_nn_cache_size: Optional[int],
 ) -> None:
     total_threads = max(3, threads, mcts_threads + ab_threads)
     sess.setoption("UseMCTS", "false")
@@ -386,6 +448,30 @@ def setup_metalfish_hybrid(
     sess.setoption("MCTSMinibatchSize", str(mcts_minibatch))
     sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
     sess.setoption("MCTSAddDirichletNoise", "false")
+    if mcts_policy_temperature is not None:
+        sess.setoption("MCTSPolicyTemperature", str(mcts_policy_temperature))
+        sess.setoption("MCTSPolicySoftmaxTemp", str(mcts_policy_temperature))
+    if mcts_cpuct_at_root is not None:
+        sess.setoption("MCTSCPuctAtRoot", str(mcts_cpuct_at_root))
+    if mcts_fpu_reduction is not None:
+        sess.setoption("MCTSFpuReduction", str(mcts_fpu_reduction))
+    if mcts_fpu_reduction_at_root is not None:
+        sess.setoption("MCTSFpuReductionAtRoot", str(mcts_fpu_reduction_at_root))
+    if mcts_fpu_value is not None:
+        sess.setoption("MCTSFpuValue", str(mcts_fpu_value))
+    if mcts_fpu_value_at_root is not None:
+        sess.setoption("MCTSFpuValueAtRoot", str(mcts_fpu_value_at_root))
+    if mcts_fpu_absolute is not None:
+        sess.setoption("MCTSFpuAbsolute", "true" if mcts_fpu_absolute else "false")
+    if mcts_fpu_absolute_at_root is not None:
+        sess.setoption(
+            "MCTSFpuAbsoluteAtRoot",
+            "true" if mcts_fpu_absolute_at_root else "false",
+        )
+    if mcts_cache_history_length is not None:
+        sess.setoption("MCTSCacheHistoryLength", str(mcts_cache_history_length))
+    if mcts_nn_cache_size is not None:
+        sess.setoption("MCTSNNCacheSize", str(mcts_nn_cache_size))
     sess.setoption("HybridMCTSMinimumKLDGainPerNode", str(hybrid_mcts_kld))
     sess.setoption(
         "HybridABRootRejectMCTS",
@@ -403,6 +489,15 @@ def setup_metalfish_hybrid(
         "true" if root_pawn_lever_tiebreak else "false",
     )
     sess.setoption("HybridANERootProbe", "true" if ane_root_probe else "false")
+    sess.setoption("HybridANERootHints", "true" if ane_root_hints else "false")
+    sess.setoption(
+        "HybridANEConfirmMCTSOverride",
+        "true" if ane_confirm_mcts_override else "false",
+    )
+    sess.setoption(
+        "HybridANEOnlyPawnEndgames",
+        "true" if ane_only_pawn_endgames else "false",
+    )
     sess.setoption("HybridANEWeights", str(ane_weights))
     sess.setoption("HybridANEModelPath", str(ane_model_path))
     sess.setoption("HybridANEComputeUnits", ane_compute_units)
@@ -610,6 +705,18 @@ def print_repeat_summary(
             )
 
 
+def aggregate_scores(
+    aggregate: Dict[str, Dict[str, AggregateStats]],
+) -> Dict[str, Tuple[int, int]]:
+    scores: Dict[str, Tuple[int, int]] = {}
+    for engine_name, engine_stats in aggregate.items():
+        scores[engine_name] = (
+            sum(stats.passes for stats in engine_stats.values()),
+            sum(stats.runs for stats in engine_stats.values()),
+        )
+    return scores
+
+
 def expected_uci_moves(fen: str, expected_sans: Sequence[str]) -> List[str]:
     moves: List[str] = []
     for san in expected_sans:
@@ -667,6 +774,7 @@ def write_json_report(
         "nodes": args.nodes,
         "threads": args.threads,
         "deterministic": args.deterministic,
+        "hybrid_time_safety_fallback_active": hybrid_time_safety_fallback_active(args),
         "positions": [bk_id for _, _, bk_id in positions],
         "options": {
             "engine": args.engine,
@@ -689,12 +797,26 @@ def write_json_report(
             "hybrid_low_time_fallback_ms": args.hybrid_low_time_fallback_ms,
             "hybrid_root_pawn_lever_tiebreak": args.hybrid_root_pawn_lever_tiebreak,
             "hybrid_ane_root_probe": args.hybrid_ane_root_probe,
+            "hybrid_ane_root_hints": args.hybrid_ane_root_hints,
+            "hybrid_ane_confirm_mcts_override": args.hybrid_ane_confirm_mcts_override,
+            "hybrid_ane_only_pawn_endgames": args.hybrid_ane_only_pawn_endgames,
             "hybrid_ane_weights": str(args.hybrid_ane_weights),
             "hybrid_ane_model_path": str(args.hybrid_ane_model_path),
             "hybrid_ane_compute_units": args.hybrid_ane_compute_units,
             "hybrid_ane_root_hint_count": args.hybrid_ane_root_hint_count,
             "hybrid_ane_root_hint_wait_ms": args.hybrid_ane_root_hint_wait_ms,
             "hybrid_ane_min_budget_ms": args.hybrid_ane_min_budget_ms,
+            "mcts_policy_temperature": args.mcts_policy_temperature,
+            "mcts_cpuct_at_root": args.mcts_cpuct_at_root,
+            "pure_mcts_cpuct_at_root": args.pure_mcts_cpuct_at_root,
+            "mcts_fpu_reduction": args.mcts_fpu_reduction,
+            "mcts_fpu_reduction_at_root": args.mcts_fpu_reduction_at_root,
+            "mcts_fpu_value": args.mcts_fpu_value,
+            "mcts_fpu_value_at_root": args.mcts_fpu_value_at_root,
+            "mcts_fpu_absolute": args.mcts_fpu_absolute,
+            "mcts_fpu_absolute_at_root": args.mcts_fpu_absolute_at_root,
+            "mcts_cache_history_length": args.mcts_cache_history_length,
+            "mcts_nn_cache_size": args.mcts_nn_cache_size,
             "mcts_parallel_search": args.mcts_parallel_search,
         },
         "engines": {},
@@ -765,7 +887,13 @@ def run_once(
                 return 2
             s = UCISession([str(args.metalfish)], "metalfish-ab")
             setup_metalfish_ab(s, threads, args.multipv)
-            s.warmup(mode, warmup_movetime_ms(movetime_ms), min(200, nodes))
+            warmup_session(
+                s,
+                mode,
+                warmup_movetime_ms(movetime_ms),
+                min(200, nodes),
+                args.warmup_repeats,
+            )
             sessions["metalfish-ab"] = s
 
         if want_mcts:
@@ -786,8 +914,26 @@ def run_once(
                 args.mcts_minibatch_size,
                 args.mcts_kld,
                 args.mcts_parallel_search,
+                args.mcts_policy_temperature,
+                args.mcts_cpuct_at_root,
+                args.pure_mcts_cpuct_at_root,
+                args.pure_mcts_smart_pruning_factor,
+                args.mcts_fpu_reduction,
+                args.mcts_fpu_reduction_at_root,
+                args.mcts_fpu_value,
+                args.mcts_fpu_value_at_root,
+                args.mcts_fpu_absolute,
+                args.mcts_fpu_absolute_at_root,
+                args.mcts_cache_history_length,
+                args.mcts_nn_cache_size,
             )
-            s.warmup(mode, warmup_movetime_ms(movetime_ms), min(200, nodes))
+            warmup_session(
+                s,
+                mode,
+                warmup_movetime_ms(movetime_ms),
+                min(200, nodes),
+                args.warmup_repeats,
+            )
             sessions["metalfish-mcts"] = s
 
         if want_hybrid:
@@ -822,17 +968,32 @@ def run_once(
                 args.hybrid_low_time_fallback_ms,
                 args.hybrid_root_pawn_lever_tiebreak,
                 args.hybrid_ane_root_probe,
+                args.hybrid_ane_root_hints,
+                args.hybrid_ane_confirm_mcts_override,
+                args.hybrid_ane_only_pawn_endgames,
                 args.hybrid_ane_weights,
                 args.hybrid_ane_model_path,
                 args.hybrid_ane_compute_units,
                 args.hybrid_ane_root_hint_count,
                 args.hybrid_ane_root_hint_wait_ms,
                 args.hybrid_ane_min_budget_ms,
+                args.mcts_policy_temperature,
+                args.mcts_cpuct_at_root,
+                args.mcts_fpu_reduction,
+                args.mcts_fpu_reduction_at_root,
+                args.mcts_fpu_value,
+                args.mcts_fpu_value_at_root,
+                args.mcts_fpu_absolute,
+                args.mcts_fpu_absolute_at_root,
+                args.mcts_cache_history_length,
+                args.mcts_nn_cache_size,
             )
-            s.warmup(
+            warmup_session(
+                s,
                 mode,
                 warmup_movetime_ms(movetime_ms, hybrid=True),
                 min(200, nodes),
+                args.warmup_repeats,
             )
             sessions["metalfish-hybrid"] = s
 
@@ -849,7 +1010,13 @@ def run_once(
                 "lc0",
             )
             setup_lc0(s, threads)
-            s.warmup(mode, warmup_movetime_ms(movetime_ms), min(200, nodes))
+            warmup_session(
+                s,
+                mode,
+                warmup_movetime_ms(movetime_ms),
+                min(200, nodes),
+                args.warmup_repeats,
+            )
             sessions["lc0"] = s
 
         all_results: Dict[str, Dict[str, SearchResult]] = {}
@@ -933,6 +1100,12 @@ def main() -> int:
     parser.add_argument("--deterministic", action="store_true")
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument(
+        "--warmup-repeats",
+        type=int,
+        default=1,
+        help="Number of pre-benchmark warmup searches per engine session",
+    )
+    parser.add_argument(
         "--repeat-summary",
         action="store_true",
         help="Print per-engine move counts and pass rates across repeats",
@@ -974,7 +1147,7 @@ def main() -> int:
     parser.add_argument(
         "--hybrid-root-reject",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
     )
     parser.add_argument("--hybrid-shared-tt", action="store_true")
     parser.add_argument(
@@ -984,11 +1157,83 @@ def main() -> int:
     )
     parser.add_argument("--hybrid-ab-policy-weight", type=float, default=0.0)
     parser.add_argument("--hybrid-root-hint-delay-ms", type=int, default=25)
-    parser.add_argument("--hybrid-root-hint-count", type=int, default=4)
+    parser.add_argument("--hybrid-root-hint-count", type=int, default=8)
     parser.add_argument("--hybrid-ab-candidate-verify-ms", type=int, default=120)
-    parser.add_argument("--hybrid-ab-candidate-verify-count", type=int, default=4)
+    parser.add_argument("--hybrid-ab-candidate-verify-count", type=int, default=5)
     parser.add_argument("--mcts-minibatch-size", type=int, default=0)
     parser.add_argument("--mcts-kld", type=float, default=0.00005)
+    parser.add_argument(
+        "--mcts-policy-temperature",
+        type=float,
+        default=None,
+        help="Override MCTSPolicyTemperature/MCTSPolicySoftmaxTemp for allocation probes",
+    )
+    parser.add_argument(
+        "--mcts-cpuct-at-root",
+        type=float,
+        default=None,
+        help="Override MCTSCPuctAtRoot for root allocation probes",
+    )
+    parser.add_argument(
+        "--pure-mcts-cpuct-at-root",
+        type=float,
+        default=None,
+        help="Override PureMCTSCPuctAtRoot for pure-MCTS strength probes",
+    )
+    parser.add_argument(
+        "--pure-mcts-smart-pruning-factor",
+        type=float,
+        default=None,
+        help="Override PureMCTSSmartPruningFactor for pure-MCTS stopper probes",
+    )
+    parser.add_argument(
+        "--mcts-fpu-reduction",
+        type=float,
+        default=None,
+        help="Override MCTSFpuReduction for FPU allocation probes",
+    )
+    parser.add_argument(
+        "--mcts-fpu-reduction-at-root",
+        type=float,
+        default=None,
+        help="Override MCTSFpuReductionAtRoot for root FPU probes",
+    )
+    parser.add_argument(
+        "--mcts-fpu-value",
+        type=float,
+        default=None,
+        help="Override MCTSFpuValue for absolute-FPU probes",
+    )
+    parser.add_argument(
+        "--mcts-fpu-value-at-root",
+        type=float,
+        default=None,
+        help="Override MCTSFpuValueAtRoot for root absolute-FPU probes",
+    )
+    parser.add_argument(
+        "--mcts-fpu-absolute",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override MCTSFpuAbsolute for FPU probes",
+    )
+    parser.add_argument(
+        "--mcts-fpu-absolute-at-root",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override MCTSFpuAbsoluteAtRoot for root FPU probes",
+    )
+    parser.add_argument(
+        "--mcts-cache-history-length",
+        type=int,
+        default=None,
+        help="Override MCTSCacheHistoryLength for cache-key breadth probes",
+    )
+    parser.add_argument(
+        "--mcts-nn-cache-size",
+        type=int,
+        default=None,
+        help="Override MCTSNNCacheSize for cache pressure probes",
+    )
     parser.add_argument(
         "--mcts-parallel-search",
         action="store_true",
@@ -1013,6 +1258,21 @@ def main() -> int:
         default=False,
     )
     parser.add_argument(
+        "--hybrid-ane-root-hints",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    parser.add_argument(
+        "--hybrid-ane-confirm-mcts-override",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    parser.add_argument(
+        "--hybrid-ane-only-pawn-endgames",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    parser.add_argument(
         "--hybrid-ane-weights",
         type=pathlib.Path,
         default=PROJ / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz",
@@ -1020,11 +1280,11 @@ def main() -> int:
     parser.add_argument(
         "--hybrid-ane-model-path",
         type=pathlib.Path,
-        default=PROJ / "build" / "coreml" / "t1-512-heads-b8.mlpackage",
+        default=PROJ / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc",
     )
     parser.add_argument("--hybrid-ane-compute-units", default="cpu-ne")
     parser.add_argument("--hybrid-ane-root-hint-count", type=int, default=10)
-    parser.add_argument("--hybrid-ane-root-hint-wait-ms", type=int, default=250)
+    parser.add_argument("--hybrid-ane-root-hint-wait-ms", type=int, default=0)
     parser.add_argument("--hybrid-ane-min-budget-ms", type=int, default=1000)
     parser.add_argument("--multipv", type=int, default=1)
     parser.add_argument("--backend", default="metal")
@@ -1036,6 +1296,12 @@ def main() -> int:
         type=int,
         default=None,
         help="Exit non-zero if any selected engine scores below this many positions",
+    )
+    parser.add_argument(
+        "--aggregate-fail-under",
+        type=int,
+        default=None,
+        help="Exit non-zero if any selected engine scores below this many total passes across repeats",
     )
     parser.add_argument(
         "--json-out",
@@ -1050,7 +1316,13 @@ def main() -> int:
         print(warning, file=sys.stderr, flush=True)
 
     aggregate: Optional[Dict[str, Dict[str, AggregateStats]]] = (
-        {} if args.repeat_summary or args.repeat > 1 else None
+        {}
+        if (
+            args.repeat_summary
+            or args.repeat > 1
+            or args.aggregate_fail_under is not None
+        )
+        else None
     )
     rc = 0
     for i in range(args.repeat):
@@ -1061,6 +1333,19 @@ def main() -> int:
             return rc
     if aggregate:
         print_repeat_summary(aggregate, select_positions(args.positions))
+        if args.aggregate_fail_under is not None:
+            below_threshold = []
+            for name, (passed, total) in aggregate_scores(aggregate).items():
+                if passed < args.aggregate_fail_under:
+                    below_threshold.append(f"{name}={passed}/{total}")
+            if below_threshold:
+                print(
+                    "ERROR: aggregate score below --aggregate-fail-under "
+                    f"{args.aggregate_fail_under}: {', '.join(below_threshold)}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return 1
     return 0
 
 

@@ -31,8 +31,13 @@ RESULTS_DIR = ROOT / "results" / "lichess_puzzles"
 LICHESS_API = "https://lichess.org/api"
 DEFAULT_ANE_WEIGHTS = ROOT / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz"
 DEFAULT_ANE_MODEL = ROOT / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc"
+DEFAULT_SYZYGY_PATH = ROOT / "syzygy"
+DEFAULT_ANE_ROOT_HINTS = False
+DEFAULT_ANE_ONLY_PAWN_ENDGAMES = True
 DEFAULT_ANE_ROOT_HINT_WAIT_MS = 0
-DEFAULT_ANE_MIN_BUDGET_MS = 1000
+DEFAULT_ANE_MIN_BUDGET_MS = 0
+SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp", ".m", ".mm", ".metal"}
+SOURCE_FILENAMES = {"CMakeLists.txt"}
 SETOPTION_ALIASES = {
     "HybridANEWeightsPath": "HybridANEWeights",
 }
@@ -112,6 +117,95 @@ def auto_hash_mb() -> int:
         return 2048
     target = max(512, available - reserve_mb)
     return min(4096, (target // 256) * 256)
+
+
+def newest_source_mtime(paths: list[pathlib.Path]) -> tuple[float, pathlib.Path | None]:
+    newest_mtime = 0.0
+    newest_path: pathlib.Path | None = None
+    for path in paths:
+        if not path.exists():
+            continue
+        candidates = path.rglob("*") if path.is_dir() else [path]
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            if (
+                candidate.suffix not in SOURCE_SUFFIXES
+                and candidate.name not in SOURCE_FILENAMES
+            ):
+                continue
+            try:
+                mtime = candidate.stat().st_mtime
+            except OSError:
+                continue
+            if mtime > newest_mtime:
+                newest_mtime = mtime
+                newest_path = candidate
+    return newest_mtime, newest_path
+
+
+def stale_engine_reason(
+    engine: pathlib.Path,
+    source_paths: list[pathlib.Path],
+    *,
+    tolerance_s: float = 1.0,
+) -> str:
+    try:
+        engine_mtime = engine.stat().st_mtime
+    except OSError as exc:
+        raise RuntimeError(f"Engine not found at {engine}") from exc
+    source_mtime, source_path = newest_source_mtime(source_paths)
+    if source_path is None or engine_mtime + tolerance_s >= source_mtime:
+        return ""
+    return (
+        f"Engine binary {engine} is older than source file {source_path}. "
+        "Run `cmake --build build --target metalfish -j8` before benchmarking, "
+        "or pass --allow-stale-engine for an intentional stale-binary run."
+    )
+
+
+def validate_engine_binary(args) -> None:
+    if not args.engine.exists():
+        raise RuntimeError(f"Engine not found at {args.engine}")
+    if args.allow_stale_engine:
+        return
+    try:
+        default_engine = ENGINE.resolve()
+        selected_engine = args.engine.resolve()
+    except OSError:
+        return
+    if selected_engine != default_engine:
+        return
+    reason = stale_engine_reason(args.engine, [ROOT / "src", ROOT / "CMakeLists.txt"])
+    if reason:
+        raise RuntimeError(reason)
+
+
+def syzygy_path_has_tables(path: pathlib.Path) -> bool:
+    if not path.is_dir():
+        return False
+    try:
+        return any(
+            child.is_file() and child.suffix in {".rtbw", ".rtbz"}
+            for child in path.iterdir()
+        )
+    except OSError:
+        return False
+
+
+def resolve_syzygy_path(args) -> pathlib.Path | None:
+    if getattr(args, "no_syzygy", False):
+        return None
+    explicit = getattr(args, "syzygy_path", None)
+    if explicit:
+        return explicit
+    env_path = os.environ.get("METALFISH_SYZYGY_PATH")
+    candidates = [pathlib.Path(env_path)] if env_path else []
+    candidates.append(DEFAULT_SYZYGY_PATH)
+    for path in candidates:
+        if syzygy_path_has_tables(path):
+            return path
+    return None
 
 
 def load_token() -> str:
@@ -222,6 +316,8 @@ class SearchAnswer:
     hybrid_ane_top_score: str = ""
     hybrid_ane_score_margin: str = ""
     hybrid_ane_root: str = ""
+    hybrid_ab_hints: str = ""
+    hybrid_ab_verified_hints: str = ""
     final_summary: str = ""
 
 
@@ -356,6 +452,7 @@ def engine_options(args) -> dict[str, str]:
         "MCTSMinibatchSize": "0",
         "MCTSMinimumKLDGainPerNode": "0.00005",
         "MCTSPolicySoftmaxTemp": "1.359",
+        "MCTSRootPolicySoftmaxTemp": "1.6",
         "MCTSSmartPruningFactor": "1.33",
         "MCTSCacheHistoryLength": "0",
         "MCTSSolidTreeThreshold": "100",
@@ -370,6 +467,8 @@ def engine_options(args) -> dict[str, str]:
                 "NNWeights": str(args.weights),
                 "MCTSAddDirichletNoise": "false",
                 "MCTSParityPreset": "false",
+                "PureMCTSSmartPruningFactor": "0.5",
+                "PureMCTSCPuctAtRoot": "2.4",
                 "MCTSMaxThreads": "0",
                 "TransformerLowTimeFallbackMs": "0",
             }
@@ -382,12 +481,12 @@ def engine_options(args) -> dict[str, str]:
                 "NNWeights": str(args.weights),
                 "MCTSAddDirichletNoise": "false",
                 "HybridABRootRejectMCTS": "true",
-                "HybridMCTSRootReject": "true",
+                "HybridMCTSRootReject": "false",
                 "HybridMCTSABRootHints": "true",
-                "HybridMCTSABRootHintDelayMs": "25",
+                "HybridMCTSABRootHintDelayMs": "0",
                 "HybridMCTSABRootHintCount": "8",
-                "HybridABCandidateVerifyMs": "120",
-                "HybridABCandidateVerifyCount": "4",
+                "HybridABCandidateVerifyMs": "240",
+                "HybridABCandidateVerifyCount": "5",
                 "HybridMCTSUseSharedTT": "false",
                 "HybridMCTSMinimumKLDGainPerNode": "0.0",
                 "HybridMCTSThreads": "0",
@@ -397,12 +496,20 @@ def engine_options(args) -> dict[str, str]:
                 "TransformerLowTimeFallbackMs": "0",
             }
         )
+        if args.hybrid_trace:
+            options["HybridTrace"] = "true"
         if args.hybrid_ane_root_probe:
             options.update(
                 {
                     "HybridANERootProbe": "true",
                     "HybridANERootHints": (
                         "true" if args.hybrid_ane_root_hints else "false"
+                    ),
+                    "HybridANEConfirmMCTSOverride": (
+                        "true" if args.hybrid_ane_confirm_mcts_override else "false"
+                    ),
+                    "HybridANEOnlyPawnEndgames": (
+                        "true" if args.hybrid_ane_only_pawn_endgames else "false"
                     ),
                     "HybridANEWeights": str(args.hybrid_ane_weights),
                     "HybridANEModelPath": str(args.hybrid_ane_model_path),
@@ -412,8 +519,9 @@ def engine_options(args) -> dict[str, str]:
                     "HybridANEMinBudgetMs": str(args.hybrid_ane_min_budget_ms),
                 }
             )
-    if args.syzygy_path:
-        options["SyzygyPath"] = str(args.syzygy_path)
+    syzygy_path = resolve_syzygy_path(args)
+    if syzygy_path:
+        options["SyzygyPath"] = str(syzygy_path)
         options["SyzygyProbeDepth"] = "2"
         options["SyzygyProbeLimit"] = "6"
     options.update(parse_setoptions(args.setoption))
@@ -444,6 +552,8 @@ def update_answer_from_info(line: str, answer: SearchAnswer) -> None:
         answer.hybrid_ane_top_score = fields.get("ANETopScore", "")
         answer.hybrid_ane_score_margin = fields.get("ANEScoreMargin", "")
         answer.hybrid_ane_root = fields.get("ANERoot", "")
+        answer.hybrid_ab_hints = fields.get("ABHints", "")
+        answer.hybrid_ab_verified_hints = fields.get("ABVerifiedHints", "")
     elif line.startswith("info string Final:"):
         answer.final_summary = line.removeprefix("info string ").strip()
 
@@ -497,6 +607,10 @@ def search_trace_fields(answer: SearchAnswer) -> dict[str, str]:
         fields["hybrid_ane_score_margin"] = answer.hybrid_ane_score_margin
     if answer.hybrid_ane_root:
         fields["hybrid_ane_root"] = answer.hybrid_ane_root
+    if answer.hybrid_ab_hints:
+        fields["hybrid_ab_hints"] = answer.hybrid_ab_hints
+    if answer.hybrid_ab_verified_hints:
+        fields["hybrid_ab_verified_hints"] = answer.hybrid_ab_verified_hints
     if answer.final_summary:
         fields["final_summary"] = answer.final_summary
     return fields
@@ -506,7 +620,16 @@ def initial_ane_stats(args) -> dict[str, object]:
     requested = bool(getattr(args, "hybrid_ane_root_probe", False))
     return {
         "ane_probe_requested": requested,
+        "hybrid_trace_requested": bool(getattr(args, "hybrid_trace", False)),
         "ane_root_hints_requested": bool(getattr(args, "hybrid_ane_root_hints", False)),
+        "ane_confirm_mcts_override_requested": bool(
+            getattr(args, "hybrid_ane_confirm_mcts_override", False)
+        ),
+        "ane_only_pawn_endgames": bool(
+            getattr(
+                args, "hybrid_ane_only_pawn_endgames", DEFAULT_ANE_ONLY_PAWN_ENDGAMES
+            )
+        ),
         "ane_compute_units": (
             str(getattr(args, "hybrid_ane_compute_units", "")) if requested else ""
         ),
@@ -788,6 +911,8 @@ def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
         actual = normalize_move(answer.bestmove, board)
         search_record = {
             "ply": idx,
+            "side": "white" if board.turn == chess.WHITE else "black",
+            "fen": board.fen(),
             "expected": expected,
             "actual": actual or answer.bestmove,
             "nodes": answer.nodes,
@@ -842,6 +967,23 @@ def tag_repeat_result(result: dict, repeat_idx: int, repeat_count: int) -> dict:
     return tagged
 
 
+def fail_under_tripped(solved: int, total: int, target_total: int, floor: int) -> bool:
+    if floor <= 0:
+        return False
+    remaining = max(0, target_total - total)
+    return solved + remaining < floor
+
+
+def print_fail_under(solved: int, total: int, target_total: int, floor: int) -> None:
+    max_possible = solved + max(0, target_total - total)
+    print(
+        "Fail-under tripped: "
+        f"solved {solved}/{total}, max possible {max_possible}/{target_total} "
+        f"< floor {floor}",
+        flush=True,
+    )
+
+
 def write_summary(path: pathlib.Path, stats: dict) -> None:
     total = max(1, int(stats.get("puzzles", 0)))
     solved = int(stats.get("solved", 0))
@@ -856,6 +998,7 @@ def write_summary(path: pathlib.Path, stats: dict) -> None:
         f"- Threads: {stats.get('threads')}",
         f"- Hash: {stats.get('hash_mb')} MB",
         f"- Movetime: {stats.get('movetime_ms')} ms",
+        f"- Syzygy: {stats.get('syzygy_path') or 'disabled'}",
         f"- Rated submission: {stats.get('rated')}",
         f"- Duration: {stats.get('duration_s', 0):.1f}s",
     ]
@@ -865,13 +1008,19 @@ def write_summary(path: pathlib.Path, stats: dict) -> None:
         lines.append(f"- Source: {stats.get('source')}")
     if stats.get("ended"):
         lines.append(f"- Ended: {stats.get('ended')}")
+    if stats.get("fail_under"):
+        lines.append(f"- Fail-under floor: {stats.get('fail_under')}")
     if stats.get("rate_limit_events"):
         lines.append(f"- Rate-limit events: {stats.get('rate_limit_events')}")
     if stats.get("ane_probe_requested"):
         lines.extend(
             [
                 f"- ANE root probe: requested ({stats.get('ane_compute_units')})",
+                f"- HybridTrace requested: {stats.get('hybrid_trace_requested')}",
                 f"- ANE root hints requested: {stats.get('ane_root_hints_requested')}",
+                "- ANE-confirm MCTS override requested: "
+                f"{stats.get('ane_confirm_mcts_override_requested')}",
+                f"- ANE pawn-only gate: {stats.get('ane_only_pawn_endgames')}",
                 f"- ANE searches: {stats.get('ane_searches', 0)}",
                 f"- ANE trace fields: {stats.get('ane_trace_searches', 0)}",
                 f"- ANE non-empty roots: {stats.get('ane_root_nonempty', 0)}",
@@ -899,7 +1048,7 @@ def wait_after_rate_limit(
     remaining_s = deadline - time.monotonic()
     if events_seen >= max_events or remaining_s <= wait_s + 5.0:
         return False
-        print(f"Rate limited; waiting {wait_s:.0f}s before retrying", flush=True)
+    print(f"Rate limited; waiting {wait_s:.0f}s before retrying", flush=True)
     time.sleep(wait_s)
     return True
 
@@ -910,8 +1059,7 @@ def run(args) -> int:
     if requests is None:
         raise RuntimeError("Python package 'requests' is required")
     token = load_token()
-    if not args.engine.exists():
-        raise RuntimeError(f"Engine not found at {args.engine}")
+    validate_engine_binary(args)
     if args.mode in {"mcts", "hybrid"} and not args.weights.exists():
         raise RuntimeError(f"Transformer weights not found at {args.weights}")
     validate_ane_args(args)
@@ -951,6 +1099,7 @@ def run(args) -> int:
                 "threads": threads,
                 "hash_mb": hash_mb,
                 "movetime_ms": args.movetime_ms,
+                "syzygy_path": options.get("SyzygyPath", ""),
                 "rated": args.rated,
                 "duration_s": 0.0,
                 "ended": "rate_limited",
@@ -967,6 +1116,7 @@ def run(args) -> int:
     engine = UCIEngine(args.engine, options, args.engine_cwd)
     solved = 0
     total = 0
+    target_total = args.max_puzzles
     started = time.monotonic()
     ended = "completed"
     ane_stats = initial_ane_stats(args)
@@ -976,6 +1126,7 @@ def run(args) -> int:
         f"movetime={args.movetime_ms} ms, batch={args.batch_size}, rated={args.rated}",
         flush=True,
     )
+    print(f"Syzygy: {options.get('SyzygyPath', 'disabled')}", flush=True)
     print(
         f"Resources: logical={os.cpu_count() or 1}, available_memory={available_memory_mb()} MB, "
         f"thread_reserve={os.environ.get('METALFISH_PUZZLE_THREAD_RESERVE', '1')}, "
@@ -1011,6 +1162,10 @@ def run(args) -> int:
                             f"({solved / max(1, total):.1%})",
                             flush=True,
                         )
+                    if fail_under_tripped(solved, total, target_total, args.fail_under):
+                        ended = "fail_under"
+                        print_fail_under(solved, total, target_total, args.fail_under)
+                        break
 
                 solutions = [
                     {
@@ -1021,7 +1176,11 @@ def run(args) -> int:
                     for result in batch_results
                     if result.get("id")
                 ]
-                next_nb = args.batch_size if time.monotonic() < deadline else 0
+                next_nb = (
+                    args.batch_size
+                    if ended != "fail_under" and time.monotonic() < deadline
+                    else 0
+                )
                 while True:
                     try:
                         puzzles = client.submit_batch(
@@ -1045,6 +1204,9 @@ def run(args) -> int:
                         ended = "rate_limited"
                         puzzles = []
                         break
+                if ended == "fail_under":
+                    puzzles = []
+                    break
     finally:
         engine.close()
 
@@ -1056,9 +1218,11 @@ def run(args) -> int:
         "threads": threads,
         "hash_mb": hash_mb,
         "movetime_ms": args.movetime_ms,
+        "syzygy_path": options.get("SyzygyPath", ""),
         "rated": args.rated,
         "duration_s": duration_s,
         "ended": ended,
+        "fail_under": args.fail_under,
         "rate_limit_events": rate_limit_events,
     }
     stats.update(ane_stats)
@@ -1074,14 +1238,15 @@ def run(args) -> int:
     accuracy = solved / max(1, total)
     if total == 0:
         return 2
+    if ended == "fail_under":
+        return 1
     if accuracy < args.min_accuracy:
         return 1
     return 0
 
 
 def run_offline(args) -> int:
-    if not args.engine.exists():
-        raise RuntimeError(f"Engine not found at {args.engine}")
+    validate_engine_binary(args)
     if not args.offline_csv.exists():
         raise RuntimeError(f"Offline puzzle CSV not found at {args.offline_csv}")
     if args.mode in {"mcts", "hybrid"} and not args.weights.exists():
@@ -1099,6 +1264,7 @@ def run_offline(args) -> int:
     puzzles = iter_offline_csv_puzzles(args)
     if not puzzles:
         raise RuntimeError("No offline puzzles matched the selected filters")
+    target_total = min(args.max_puzzles, len(puzzles) * args.repeat_puzzles)
 
     engine = UCIEngine(args.engine, options, args.engine_cwd)
     solved = 0
@@ -1115,10 +1281,13 @@ def run_offline(args) -> int:
         f"source={args.offline_csv}",
         flush=True,
     )
+    print(f"Syzygy: {options.get('SyzygyPath', 'disabled')}", flush=True)
     try:
         with jsonl_path.open("w") as out:
             for repeat_idx in range(args.repeat_puzzles):
                 for item in puzzles:
+                    if total >= target_total:
+                        break
                     if time.monotonic() >= deadline:
                         ended = "time_budget"
                         break
@@ -1141,7 +1310,11 @@ def run_offline(args) -> int:
                             f"Progress: {solved}/{total} ({solved / total:.1%})",
                             flush=True,
                         )
-                if ended == "time_budget":
+                    if fail_under_tripped(solved, total, target_total, args.fail_under):
+                        ended = "fail_under"
+                        print_fail_under(solved, total, target_total, args.fail_under)
+                        break
+                if ended in {"time_budget", "fail_under"} or total >= target_total:
                     break
     finally:
         engine.close()
@@ -1154,9 +1327,11 @@ def run_offline(args) -> int:
         "threads": threads,
         "hash_mb": hash_mb,
         "movetime_ms": args.movetime_ms,
+        "syzygy_path": options.get("SyzygyPath", ""),
         "rated": False,
         "duration_s": duration_s,
         "ended": ended,
+        "fail_under": args.fail_under,
         "source": str(args.offline_csv),
         "rate_limit_events": 0,
         "repeat_puzzles": args.repeat_puzzles,
@@ -1174,6 +1349,8 @@ def run_offline(args) -> int:
     accuracy = solved / max(1, total)
     if total == 0:
         return 2
+    if ended == "fail_under":
+        return 1
     if accuracy < args.min_accuracy:
         return 1
     return 0
@@ -1183,13 +1360,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--engine", type=pathlib.Path, default=ENGINE)
     parser.add_argument("--engine-cwd", type=pathlib.Path, default=None)
+    parser.add_argument(
+        "--allow-stale-engine",
+        action="store_true",
+        default=False,
+        help="Allow benchmarking the default build/metalfish binary even if sources are newer.",
+    )
     parser.add_argument("--mode", choices=("ab", "mcts", "hybrid"), default="ab")
     parser.add_argument(
         "--weights",
         type=pathlib.Path,
         default=ROOT / "networks" / "BT4-1024x15x32h-swa-6147500.pb",
     )
-    parser.add_argument("--syzygy-path", type=pathlib.Path, default=None)
+    parser.add_argument(
+        "--syzygy-path",
+        type=pathlib.Path,
+        default=None,
+        help="Use a specific Syzygy tablebase path; defaults to METALFISH_SYZYGY_PATH or ./syzygy when valid.",
+    )
+    parser.add_argument(
+        "--no-syzygy",
+        action="store_true",
+        default=False,
+        help="Disable automatic Syzygy tablebase use for controlled no-tablebase runs.",
+    )
     parser.add_argument(
         "--hybrid-ane-root-probe",
         action="store_true",
@@ -1198,9 +1392,27 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--hybrid-ane-root-hints",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_ANE_ROOT_HINTS,
+        help="Use ANE root ordering as AB search hints; final ANE evidence remains available without this.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-confirm-mcts-override",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Allow ANE agreement to confirm an MCTS override in hybrid arbitration.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-only-pawn-endgames",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_ANE_ONLY_PAWN_ENDGAMES,
+        help="Restrict ANE root probing to pawn-only endgames.",
+    )
+    parser.add_argument(
+        "--hybrid-trace",
         action="store_true",
         default=False,
-        help="Use ANE root ordering as AB search hints; final ANE evidence remains available without this.",
+        help="Enable HybridTrace so puzzle reports include AB/MCTS/ANE arbitration fields.",
     )
     parser.add_argument(
         "--hybrid-ane-weights",
@@ -1259,6 +1471,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--angle", default="mix")
     parser.add_argument("--rated", action="store_true", default=False)
     parser.add_argument("--min-accuracy", type=float, default=0.0)
+    parser.add_argument(
+        "--fail-under",
+        type=int,
+        default=0,
+        help="Stop and fail once the requested run can no longer solve at least this many puzzles.",
+    )
     parser.add_argument("--request-interval-s", type=float, default=2.0)
     parser.add_argument("--rate-limit-backoff-s", type=float, default=65.0)
     parser.add_argument("--max-rate-limit-waits", type=int, default=5)
@@ -1284,6 +1502,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     args.max_minutes = max(0.1, args.max_minutes)
     args.max_puzzles = max(1, args.max_puzzles)
     args.repeat_puzzles = max(1, args.repeat_puzzles)
+    args.fail_under = max(0, args.fail_under)
     args.progress_interval = max(1, args.progress_interval)
     args.max_rate_limit_waits = max(0, args.max_rate_limit_waits)
     args.hybrid_ane_root_hint_count = max(1, min(32, args.hybrid_ane_root_hint_count))

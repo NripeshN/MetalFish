@@ -87,6 +87,99 @@ def error_count(results: list[dict]) -> int:
     return sum(1 for item in results if item.get("error"))
 
 
+def changed_pairs(
+    pairs: list[tuple[str, dict, dict]],
+) -> tuple[list[tuple[str, dict, dict]], list[tuple[str, dict, dict]]]:
+    gains: list[tuple[str, dict, dict]] = []
+    losses: list[tuple[str, dict, dict]] = []
+    for pair_id, baseline, candidate in pairs:
+        baseline_solved = bool(baseline.get("solved"))
+        candidate_solved = bool(candidate.get("solved"))
+        if baseline_solved == candidate_solved:
+            continue
+        if candidate_solved:
+            gains.append((pair_id, baseline, candidate))
+        else:
+            losses.append((pair_id, baseline, candidate))
+    return gains, losses
+
+
+def first_relevant_search(item: dict) -> dict:
+    searches = item.get("searches", [])
+    if not isinstance(searches, list):
+        return {}
+    first: dict | None = None
+    for search in searches:
+        if not isinstance(search, dict):
+            continue
+        if first is None:
+            first = search
+        expected = str(search.get("expected") or "")
+        actual = str(search.get("actual") or "")
+        if expected and actual and expected != actual:
+            return search
+    return first or {}
+
+
+def short_themes(item: dict, limit: int = 4) -> str:
+    themes = item.get("themes", [])
+    if not isinstance(themes, list):
+        return ""
+    labels = [str(theme) for theme in themes if theme][:limit]
+    return ",".join(labels)
+
+
+def result_detail(item: dict) -> str:
+    search = first_relevant_search(item)
+    solved = "solved" if item.get("solved") else "miss"
+    rating = item.get("rating")
+    rating_part = f" r={rating}" if rating is not None else ""
+    themes = short_themes(item)
+    theme_part = f" themes={themes}" if themes else ""
+    if not search:
+        error = item.get("error")
+        error_part = f" error={error}" if error else ""
+        return f"{solved}{rating_part}{theme_part}{error_part}"
+
+    expected = str(search.get("expected") or "?")
+    actual = str(search.get("actual") or "?")
+    reason = str(search.get("hybrid_reason") or "")
+    selected = str(search.get("hybrid_selected") or "")
+    ane_top = str(search.get("hybrid_ane_top") or "")
+    mcts_move = str(search.get("hybrid_mcts_move") or "")
+    ab_move = str(search.get("hybrid_ab_move") or "")
+    reason_part = f" reason={reason}" if reason else ""
+    selected_part = f" selected={selected}" if selected else ""
+    ane_part = f" ane={ane_top}" if ane_top and ane_top != "none" else ""
+    mcts_part = f" mcts={mcts_move}" if mcts_move else ""
+    ab_part = f" ab={ab_move}" if ab_move else ""
+    return (
+        f"{solved}{rating_part}{theme_part} expected={expected} actual={actual}"
+        f"{selected_part}{reason_part}{ane_part}{mcts_part}{ab_part}"
+    )
+
+
+def print_changed_pairs(
+    pairs: list[tuple[str, dict, dict]], *, max_examples: int
+) -> None:
+    gains, losses = changed_pairs(pairs)
+    unchanged = len(pairs) - len(gains) - len(losses)
+    print(
+        f"Changed puzzles: gains={len(gains)}, losses={len(losses)}, "
+        f"unchanged={unchanged}"
+    )
+    for label, items in (("Gains", gains), ("Losses", losses)):
+        if not items:
+            continue
+        print(f"{label}:")
+        for pair_id, baseline, candidate in items[:max_examples]:
+            print(f"  {pair_id}:")
+            print(f"    baseline: {result_detail(baseline)}")
+            print(f"    candidate: {result_detail(candidate)}")
+        if len(items) > max_examples:
+            print(f"    ... {len(items) - max_examples} more")
+
+
 def iter_search_records(results: list[dict] | dict[str, dict]):
     items = results.values() if isinstance(results, dict) else results
     for item in items:
@@ -245,6 +338,8 @@ def run(args: argparse.Namespace) -> int:
         f"errors baseline={error_count(base_common)}, "
         f"candidate={error_count(cand_common)}"
     )
+    if args.show_changes:
+        print_changed_pairs(pairs, max_examples=args.max_change_examples)
     if args.ane_summary:
         print_ane_trace_summary(cand_common, "candidate")
 
@@ -291,6 +386,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Print candidate Hybrid/ANE trace agreement and AB-block summaries.",
     )
     parser.add_argument(
+        "--show-changes",
+        action="store_true",
+        help="Print puzzles whose solved status changed between baseline and candidate.",
+    )
+    parser.add_argument(
+        "--max-change-examples",
+        type=int,
+        default=12,
+        help="Maximum changed puzzle examples to print per gain/loss bucket.",
+    )
+    parser.add_argument(
         "--match-repeat-ids",
         action="store_true",
         help="Match candidate ids like puzzle#r2 to baseline puzzle ids.",
@@ -301,6 +407,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     args.max_accuracy_drop = max(0.0, args.max_accuracy_drop)
     args.max_candidate_errors = max(0, args.max_candidate_errors)
     args.min_candidate_solved = max(0, args.min_candidate_solved)
+    args.max_change_examples = max(1, args.max_change_examples)
     return args
 
 

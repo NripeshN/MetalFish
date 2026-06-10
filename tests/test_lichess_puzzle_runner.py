@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -24,10 +25,13 @@ from tools.lichess_puzzle_runner import (  # noqa: E402
     board_from_csv_puzzle,
     csv_puzzle_item,
     csv_row_matches,
+    fail_under_tripped,
     normalize_move,
     parse_auto_int,
     parse_setoptions,
     parse_theme_filter,
+    resolve_syzygy_path,
+    syzygy_path_has_tables,
     tag_repeat_result,
     update_answer_from_info,
     wait_after_rate_limit,
@@ -138,6 +142,24 @@ def test_csv_filter_and_setoption_parsing() -> None:
     )
 
 
+def test_fail_under_helper_and_parsing() -> None:
+    args = puzzle_runner.parse_args(["--fail-under", "198"])
+
+    expect("fail-under parser keeps floor", args.fail_under == 198)
+    expect(
+        "fail-under does not trip while floor remains possible",
+        not fail_under_tripped(solved=122, total=125, target_total=200, floor=198),
+    )
+    expect(
+        "fail-under trips once floor is impossible",
+        fail_under_tripped(solved=121, total=125, target_total=200, floor=198),
+    )
+    expect(
+        "fail-under disabled at zero",
+        not fail_under_tripped(solved=0, total=100, target_total=100, floor=0),
+    )
+
+
 def test_hybrid_ane_flags_set_uci_options() -> None:
     args = puzzle_runner.parse_args(
         [
@@ -145,6 +167,8 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
             "hybrid",
             "--hybrid-ane-root-probe",
             "--hybrid-ane-root-hints",
+            "--hybrid-ane-confirm-mcts-override",
+            "--hybrid-trace",
             "--hybrid-ane-weights",
             "networks/t1.pb.gz",
             "--hybrid-ane-model-path",
@@ -164,6 +188,15 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
 
     expect("ANE probe enabled", options["HybridANERootProbe"] == "true")
     expect("ANE root hints enabled", options["HybridANERootHints"] == "true")
+    expect(
+        "ANE confirmation enabled",
+        options["HybridANEConfirmMCTSOverride"] == "true",
+    )
+    expect(
+        "ANE confirmation defaults to pawn endgames",
+        options["HybridANEOnlyPawnEndgames"] == "true",
+    )
+    expect("HybridTrace enabled", options["HybridTrace"] == "true")
     expect("ANE weights option", options["HybridANEWeights"] == "networks/t1.pb.gz")
     expect(
         "ANE model option", options["HybridANEModelPath"] == "build/coreml/t1.mlmodelc"
@@ -177,6 +210,20 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
         options["TransformerLowTimeFallbackMs"] == "0",
     )
 
+    args = puzzle_runner.parse_args(
+        [
+            "--mode",
+            "hybrid",
+            "--hybrid-ane-root-probe",
+            "--no-hybrid-ane-only-pawn-endgames",
+        ]
+    )
+    options = puzzle_runner.engine_options(args)
+    expect(
+        "ANE all-root override",
+        options["HybridANEOnlyPawnEndgames"] == "false",
+    )
+
 
 def test_hybrid_mode_keeps_transformer_active() -> None:
     args = puzzle_runner.parse_args(["--mode", "hybrid"])
@@ -186,6 +233,44 @@ def test_hybrid_mode_keeps_transformer_active() -> None:
         "hybrid benchmark disables low-time fallback",
         options["TransformerLowTimeFallbackMs"] == "0",
     )
+
+
+def test_syzygy_auto_explicit_and_disable() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tb_path = pathlib.Path(tmp)
+        marker = tb_path / "KQvK.rtbw"
+        marker.write_bytes(b"tb")
+
+        expect("syzygy table marker detected", syzygy_path_has_tables(tb_path))
+
+        old_env = os.environ.get("METALFISH_SYZYGY_PATH")
+        os.environ["METALFISH_SYZYGY_PATH"] = str(tb_path)
+        try:
+            args = puzzle_runner.parse_args(["--mode", "hybrid", "--no-syzygy"])
+            options = puzzle_runner.engine_options(args)
+            expect("no-syzygy disables auto path", "SyzygyPath" not in options)
+            expect("no-syzygy resolver returns none", resolve_syzygy_path(args) is None)
+
+            args = puzzle_runner.parse_args(["--mode", "hybrid"])
+            options = puzzle_runner.engine_options(args)
+            expect("env syzygy auto path", options["SyzygyPath"] == str(tb_path))
+            expect("env syzygy probe depth", options["SyzygyProbeDepth"] == "2")
+            expect("env syzygy probe limit", options["SyzygyProbeLimit"] == "6")
+
+            explicit_path = tb_path / "explicit"
+            args = puzzle_runner.parse_args(
+                ["--mode", "hybrid", "--syzygy-path", str(explicit_path)]
+            )
+            options = puzzle_runner.engine_options(args)
+            expect(
+                "explicit syzygy path wins",
+                options["SyzygyPath"] == str(explicit_path),
+            )
+        finally:
+            if old_env is None:
+                os.environ.pop("METALFISH_SYZYGY_PATH", None)
+            else:
+                os.environ["METALFISH_SYZYGY_PATH"] = old_env
 
 
 def test_mcts_mode_keeps_transformer_active() -> None:
@@ -204,9 +289,8 @@ def test_hybrid_ane_default_wait_uses_benchmarked_profile() -> None:
 
     expect("ANE benchmark default wait", options["HybridANERootHintWaitMs"] == "0")
     expect("ANE root hints default off", options["HybridANERootHints"] == "false")
-    expect(
-        "ANE benchmark default min budget", options["HybridANEMinBudgetMs"] == "1000"
-    )
+    expect("HybridTrace default off", "HybridTrace" not in options)
+    expect("ANE benchmark default min budget", options["HybridANEMinBudgetMs"] == "0")
     expect(
         "ANE benchmark disables low-time fallback",
         options["TransformerLowTimeFallbackMs"] == "0",
@@ -238,6 +322,7 @@ def test_hybrid_ane_stats_distinguish_configured_from_active() -> None:
             "hybrid",
             "--hybrid-ane-root-probe",
             "--hybrid-ane-root-hints",
+            "--hybrid-ane-confirm-mcts-override",
             "--hybrid-ane-weights",
             "networks/t1.pb.gz",
             "--hybrid-ane-model-path",
@@ -248,7 +333,13 @@ def test_hybrid_ane_stats_distinguish_configured_from_active() -> None:
     )
     stats = puzzle_runner.initial_ane_stats(args)
     expect("ANE requested", stats["ane_probe_requested"] is True)
+    expect("HybridTrace starts off", stats["hybrid_trace_requested"] is False)
     expect("ANE hints requested", stats["ane_root_hints_requested"] is True)
+    expect(
+        "ANE confirmation requested",
+        stats["ane_confirm_mcts_override_requested"] is True,
+    )
+    expect("ANE all-root scope tracked", stats["ane_only_pawn_endgames"] is False)
     expect("ANE starts inactive", stats["ane_root_nonempty"] == 0)
 
     puzzle_runner.update_ane_stats(
@@ -321,7 +412,11 @@ def test_solver_accepts_alternate_mating_move() -> None:
     )
 
     expect("alternate checkmate solves puzzle", result["solved"])
+    expect("search side recorded", result["searches"][0]["side"] == "black")
+    expect("search fen recorded", " b " in result["searches"][0]["fen"])
     expect("alternate mate recorded", result["searches"][-1]["actual"] == "e3f2")
+    expect("follow-up side recorded", result["searches"][-1]["side"] == "black")
+    expect("follow-up fen recorded", " b " in result["searches"][-1]["fen"])
     expect(
         "alternate mate marker recorded",
         result["searches"][-1]["accepted_mating_alternative"],
@@ -346,7 +441,8 @@ def test_search_info_parser_tracks_ane_hints() -> None:
         "info string HybridTrace: reason=ane_confirmed_mcts selected=c3c4 "
         "ABMove=h4h5 MCTSMove=c3c4 ANETop=c3c4 ANEAgreesMCTS=1 "
         "ANEConfirmedMCTS=1 ANETopScore=0.421 ANEScoreMargin=0.248 "
-        "ANERoot=[c3c4:v=0.421,h4h5:v=0.173]",
+        "ANERoot=[c3c4:v=0.421,h4h5:v=0.173] "
+        "ABHints=[c3c4,h4h5] ABVerifiedHints=[h4h5,c3c4]",
         answer,
     )
     update_answer_from_info(
@@ -373,6 +469,11 @@ def test_search_info_parser_tracks_ane_hints() -> None:
         "hybrid ANE root parsed",
         answer.hybrid_ane_root == "[c3c4:v=0.421,h4h5:v=0.173]",
     )
+    expect("hybrid AB hints parsed", answer.hybrid_ab_hints == "[c3c4,h4h5]")
+    expect(
+        "hybrid AB verified hints parsed",
+        answer.hybrid_ab_verified_hints == "[h4h5,c3c4]",
+    )
     expect("final summary retained", answer.final_summary.startswith("Final:"))
 
     trace_fields = puzzle_runner.search_trace_fields(answer)
@@ -388,6 +489,14 @@ def test_search_info_parser_tracks_ane_hints() -> None:
         "trace fields include ANE margin",
         trace_fields["hybrid_ane_score_margin"] == "0.248",
     )
+    expect(
+        "trace fields include AB hints",
+        trace_fields["hybrid_ab_hints"] == "[c3c4,h4h5]",
+    )
+    expect(
+        "trace fields include AB verified hints",
+        trace_fields["hybrid_ab_verified_hints"] == "[h4h5,c3c4]",
+    )
 
 
 def test_repeat_result_ids_are_comparable() -> None:
@@ -399,6 +508,145 @@ def test_repeat_result_ids_are_comparable() -> None:
     expect("repeat result keeps original puzzle id", repeated["puzzle_id"] == "abc")
     expect("repeat result stores pass number", repeated["repeat"] == 2)
     expect("repeat result id is unique", repeated["id"] == "abc#r2")
+
+
+def test_stale_engine_reason_detects_newer_sources() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        engine = root / "metalfish"
+        src = root / "src"
+        src.mkdir()
+        source = src / "hybrid_search.cpp"
+        engine.write_text("")
+        source.write_text("// newer source\n")
+        os.utime(engine, (100.0, 100.0))
+        os.utime(source, (200.0, 200.0))
+
+        reason = puzzle_runner.stale_engine_reason(engine, [src], tolerance_s=0.0)
+
+    expect("stale engine reports a reason", "older than source file" in reason)
+    expect("stale engine reason names build command", "cmake --build" in reason)
+
+
+def test_stale_engine_reason_accepts_current_binary() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        engine = root / "metalfish"
+        src = root / "src"
+        src.mkdir()
+        source = src / "hybrid_search.cpp"
+        engine.write_text("")
+        source.write_text("// older source\n")
+        os.utime(source, (100.0, 100.0))
+        os.utime(engine, (200.0, 200.0))
+
+        reason = puzzle_runner.stale_engine_reason(engine, [src], tolerance_s=0.0)
+
+    expect("fresh engine has no stale reason", reason == "")
+
+
+def test_validate_engine_binary_rejects_stale_default_engine() -> None:
+    old_engine = puzzle_runner.ENGINE
+    old_root = puzzle_runner.ROOT
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            engine = root / "build" / "metalfish"
+            src = root / "src"
+            engine.parent.mkdir()
+            src.mkdir()
+            source = src / "search.cpp"
+            engine.write_text("")
+            source.write_text("// newer source\n")
+            os.utime(engine, (100.0, 100.0))
+            os.utime(source, (200.0, 200.0))
+            puzzle_runner.ENGINE = engine
+            puzzle_runner.ROOT = root
+
+            args = type(
+                "Args",
+                (),
+                {"engine": engine, "allow_stale_engine": False},
+            )()
+            try:
+                puzzle_runner.validate_engine_binary(args)
+            except RuntimeError as exc:
+                message = str(exc)
+            else:
+                message = ""
+
+            args.allow_stale_engine = True
+            puzzle_runner.validate_engine_binary(args)
+
+        expect("stale default engine is rejected", "older than source file" in message)
+    finally:
+        puzzle_runner.ENGINE = old_engine
+        puzzle_runner.ROOT = old_root
+
+
+def test_offline_repeat_run_respects_max_puzzles() -> None:
+    class FakeEngine:
+        def __init__(self, path: pathlib.Path, options: dict[str, str], cwd=None):
+            del path, options, cwd
+
+        def close(self) -> None:
+            pass
+
+    old_engine = puzzle_runner.UCIEngine
+    old_iter = puzzle_runner.iter_offline_csv_puzzles
+    old_solve = puzzle_runner.solve_puzzle
+
+    try:
+        puzzle_runner.UCIEngine = FakeEngine
+        puzzle_runner.iter_offline_csv_puzzles = lambda args: [
+            {"puzzle": {"id": "a"}},
+            {"puzzle": {"id": "b"}},
+        ]
+        puzzle_runner.solve_puzzle = lambda engine, item, movetime_ms: {
+            "id": item["puzzle"]["id"],
+            "solved": True,
+            "searches": [],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            fake_engine = root / "engine"
+            fake_engine.write_text("")
+            fake_csv = root / "puzzles.csv"
+            fake_csv.write_text("PuzzleId,FEN,Moves\n")
+            out_dir = root / "results"
+
+            args = puzzle_runner.parse_args(
+                [
+                    "--offline-csv",
+                    str(fake_csv),
+                    "--engine",
+                    str(fake_engine),
+                    "--mode",
+                    "ab",
+                    "--max-puzzles",
+                    "3",
+                    "--repeat-puzzles",
+                    "3",
+                    "--results-dir",
+                    str(out_dir),
+                    "--progress-interval",
+                    "999",
+                ]
+            )
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                rc = puzzle_runner.run_offline(args)
+
+            jsonl = next(out_dir.glob("lichess-puzzles-offline-*.jsonl"))
+            rows = [json.loads(line) for line in jsonl.read_text().splitlines()]
+
+        expect("offline repeat run succeeds", rc == 0)
+        expect("offline repeat run stops at max-puzzles", len(rows) == 3)
+        expect("repeat id remains comparable", rows[-1]["id"] == "a#r2")
+    finally:
+        puzzle_runner.UCIEngine = old_engine
+        puzzle_runner.iter_offline_csv_puzzles = old_iter
+        puzzle_runner.solve_puzzle = old_solve
 
 
 def test_compare_puzzle_runs_detects_regression() -> None:
@@ -509,6 +757,97 @@ def test_compare_puzzle_runs_summarizes_ane_trace() -> None:
     expect("ANE margin median", summary["ane_score_margin_median"] == 0.25)
     expect("ANE margin max", summary["ane_score_margin_max"] == 0.25)
     expect("unsolved blocked counted", summary["unsolved_blocked"] == 1)
+
+
+def test_compare_puzzle_runs_prints_changed_puzzles() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        baseline = root / "baseline.jsonl"
+        candidate = root / "candidate.jsonl"
+        baseline.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "id": "gain",
+                            "solved": False,
+                            "rating": 2400,
+                            "themes": ["middlegame", "short"],
+                            "searches": [
+                                {
+                                    "expected": "c3c4",
+                                    "actual": "h4h5",
+                                    "hybrid_selected": "h4h5",
+                                    "hybrid_reason": "ab_default",
+                                    "hybrid_mcts_move": "c3c4",
+                                    "hybrid_ab_move": "h4h5",
+                                }
+                            ],
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "id": "loss",
+                            "solved": True,
+                            "searches": [{"expected": "e2e4", "actual": "e2e4"}],
+                        }
+                    ),
+                ]
+            )
+            + "\n"
+        )
+        candidate.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "id": "gain",
+                            "solved": True,
+                            "searches": [{"expected": "c3c4", "actual": "c3c4"}],
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "id": "loss",
+                            "solved": False,
+                            "searches": [
+                                {
+                                    "expected": "e2e4",
+                                    "actual": "d2d4",
+                                    "hybrid_reason": "ane_confirmed_mcts",
+                                    "hybrid_ane_top": "d2d4",
+                                }
+                            ],
+                        }
+                    ),
+                ]
+            )
+            + "\n"
+        )
+
+        stdout = io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(io.StringIO()):
+            rc = compare_puzzle_runs.run(
+                compare_puzzle_runs.parse_args(
+                    [
+                        "--baseline",
+                        str(baseline),
+                        "--candidate",
+                        str(candidate),
+                        "--show-changes",
+                        "--max-solved-drop",
+                        "1",
+                        "--max-accuracy-drop",
+                        "1.0",
+                    ]
+                )
+            )
+
+    output = stdout.getvalue()
+    expect("puzzle compare with changes succeeds", rc == 0)
+    expect("change summary printed", "Changed puzzles: gains=1, losses=1" in output)
+    expect("gain id printed", "gain:" in output)
+    expect("loss ANE detail printed", "ane=d2d4" in output)
 
 
 def test_compare_puzzle_runs_matches_repeat_ids() -> None:
@@ -659,7 +998,8 @@ def test_rate_limit_wait_respects_budget() -> None:
         puzzle_runner.time.monotonic = lambda: 100.0
         puzzle_runner.time.sleep = lambda seconds: sleeps.append(seconds)
 
-        with redirect_stdout(io.StringIO()):
+        out = io.StringIO()
+        with redirect_stdout(out):
             waited = wait_after_rate_limit(
                 LichessRateLimited(65.0),
                 deadline=300.0,
@@ -668,18 +1008,26 @@ def test_rate_limit_wait_respects_budget() -> None:
             )
         expect("rate limit waits when budget remains", waited)
         expect("rate limit slept requested interval", sleeps == [65.0])
+        expect(
+            "rate limit wait is reported",
+            "Rate limited; waiting 65s before retrying" in out.getvalue(),
+        )
 
         sleeps.clear()
-        expect(
-            "rate limit stops when event budget is exhausted",
-            not wait_after_rate_limit(
+        out = io.StringIO()
+        with redirect_stdout(out):
+            stopped = wait_after_rate_limit(
                 LichessRateLimited(65.0),
                 deadline=300.0,
                 events_seen=5,
                 max_events=5,
-            ),
+            )
+        expect(
+            "rate limit stops when event budget is exhausted",
+            not stopped,
         )
         expect("exhausted rate limit did not sleep", sleeps == [])
+        expect("exhausted rate limit is not reported as wait", out.getvalue() == "")
     finally:
         puzzle_runner.time.monotonic = old_monotonic
         puzzle_runner.time.sleep = old_sleep
@@ -696,8 +1044,10 @@ def main() -> int:
     test_hybrid_ane_low_time_fallback_can_be_overridden()
     test_search_info_parser_tracks_ane_hints()
     test_repeat_result_ids_are_comparable()
+    test_offline_repeat_run_respects_max_puzzles()
     test_compare_puzzle_runs_detects_regression()
     test_compare_puzzle_runs_summarizes_ane_trace()
+    test_compare_puzzle_runs_prints_changed_puzzles()
     test_compare_puzzle_runs_matches_repeat_ids()
     test_compare_puzzle_runs_preserves_repeated_baseline_results()
     test_filter_puzzle_csv_can_skip_and_exclude_ids()

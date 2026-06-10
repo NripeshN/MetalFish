@@ -635,6 +635,10 @@ void test_search_params_defaults(TestCounter &tc) {
   expect(params.smart_pruning_factor == 1.33f, "smart pruning default aligned",
          tc);
   expect(params.kld_gain_min == 0.00005f, "KLD stopper tactical default", tc);
+  expect(params.policy_softmax_temp == 1.359f, "policy softmax default aligned",
+         tc);
+  expect(params.root_policy_softmax_temp == 1.6f,
+         "root policy softmax default aligned", tc);
   expect(params.cache_history_length == 0,
          "classic cache history default uses current position", tc);
   expect(params.nn_cache_size == 2000000, "NN cache default aligned", tc);
@@ -646,10 +650,766 @@ void test_search_params_defaults(TestCounter &tc) {
          "moves-left quadratic factor default aligned", tc);
   expect(params.temp_winpct_cutoff == 100.0f,
          "temperature value cutoff default aligned", tc);
+  expect(params.high_policy_root_lever_selection,
+         "pure MCTS high-policy lever rescue default", tc);
+  expect(params.low_policy_root_lever_selection,
+         "pure MCTS low-policy lever rescue default", tc);
+  expect(params.root_tactical_capture_probe,
+         "pure MCTS root tactical capture probe default", tc);
+  expect(params.low_visit_q_override_rescan,
+         "pure MCTS low-visit Q override rescans by default", tc);
+  expect(!params.capture_leader_quiet_major_probe,
+         "capture-leader quiet-major probe defaults off for hybrid safety", tc);
+  expect(params.fixed_movetime_q_override_cap == 0,
+         "fixed-movetime Q override defaults off for hybrid safety", tc);
   expect(params.GetCpuctBase(true) == params.cpuct_base_at_root,
          "root cpuct base getter", tc);
   expect(params.GetFpuValue(true) == params.fpu_value_at_root,
          "root fpu value getter", tc);
+}
+
+void test_root_high_policy_lever_candidate(TestCounter &tc) {
+  std::cout << "  Root high-policy lever candidate..." << std::endl;
+
+  Position pos;
+  StateInfo st;
+  pos.set("2q1rr1k/3bbnnp/p2p1pp1/2pPp3/PpP1P1P1/1P2BNNP/2BQ1PRK/7R b - -",
+          false, &st);
+  const Move lever = UCIEngine::to_move(pos, "f6f5");
+  const Move quiet = UCIEngine::to_move(pos, "e7d8");
+
+  expect(MCTSIsKingsidePawnLever(pos, lever), "f6f5 is a kingside lever", tc);
+  expect(!MCTSIsKingsidePawnLever(pos, quiet), "quiet bishop move is not lever",
+         tc);
+  Position bk02;
+  StateInfo bk02_st;
+  bk02.set("3r1k2/4npp1/1ppr3p/p6P/P2PPPP1/1NR5/5K2/2R5 w - -", false,
+           &bk02_st);
+  const Move central_break = UCIEngine::to_move(bk02, "d4d5");
+  const Move noncentral_push = UCIEngine::to_move(bk02, "f4f5");
+  expect(MCTSIsCentralPawnBreak(bk02, central_break),
+         "BK.02 d4d5 is a central pawn break", tc);
+  expect(!MCTSIsCentralPawnBreak(bk02, noncentral_push),
+         "BK.02 f4f5 is not a central pawn break", tc);
+  expect(MCTSRootHighPolicyLeverCandidate(96, 43, 17, 0.208f, -0.426f, 0.260f,
+                                          -0.612f),
+         "BK.03 post-tiny high-policy lever passes", tc);
+  expect(MCTSRootHighPolicyLeverCandidate(49, 22, 11, 0.208f, -0.420f, 0.260f,
+                                          -0.569f),
+         "BK.03 tiny-node high-policy lever passes", tc);
+  expect(MCTSRootHighPolicyLeverCandidate(46, 19, 11, 0.179f, -0.425f, 0.217f,
+                                          -0.569f),
+         "BK.03 observed nodes-50 high-policy lever passes", tc);
+  expect(MCTSRootHighPolicyLeverCandidate(99, 36, 17, 0.179f, -0.436f, 0.217f,
+                                          -0.612f),
+         "BK.03 observed nodes-100 high-policy lever passes", tc);
+  expect(MCTSRootHighPolicyLeverCandidate(25, 10, 6, 0.179f, -0.395f, 0.217f,
+                                          -0.568f),
+         "BK.03 observed nodes-25 high-policy lever passes", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(25, 10, 5, 0.179f, -0.395f, 0.217f,
+                                           -0.568f),
+         "nodes-25 high-policy lever needs enough visits", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(25, 10, 6, 0.179f, -0.395f, 0.214f,
+                                           -0.568f),
+         "nodes-25 high-policy lever needs clear policy edge", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(25, 10, 6, 0.179f, -0.395f, 0.217f,
+                                           -0.590f),
+         "nodes-25 high-policy lever needs tight value gap", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(96, 43, 7, 0.208f, -0.426f, 0.260f,
+                                           -0.612f),
+         "insufficient visits blocked", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(46, 19, 12, 0.179f, -0.425f, 0.217f,
+                                           -0.569f),
+         "tiny-node high-policy lever visit tie blocked", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(99, 36, 19, 0.179f, -0.436f, 0.217f,
+                                           -0.612f),
+         "nodes-100 high-policy lever visit tie blocked", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(96, 43, 17, 0.208f, -0.426f, 0.230f,
+                                           -0.612f),
+         "weak policy edge blocked", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(96, 43, 17, 0.208f, -0.426f, 0.260f,
+                                           -0.640f),
+         "large value gap blocked", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(96, 52, 28, 0.143f, 0.022f, 0.269f,
+                                           -0.101f),
+         "BK.18 examined lever is blocked", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(99, 57, 28, 0.143f, 0.022f, 0.269f,
+                                           -0.101f),
+         "BK.18 nodes-100 high-policy lever is blocked", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(370, 258, 66, 0.143f, 0.012f, 0.269f,
+                                           -0.108f),
+         "BK.18 mature negative lever cannot override nonnegative leader", tc);
+  expect(MCTSRootHighPolicyLeverCandidate(499, 230, 228, 0.170f, 0.748f, 0.410f,
+                                          0.704f),
+         "BK.11 near-visit high-policy lever passes", tc);
+  expect(MCTSRootHighPolicyLeverCandidate(789, 388, 337, 0.170f, 0.744f, 0.410f,
+                                          0.704f),
+         "BK.11 mature near-visit high-policy lever passes", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(499, 230, 228, 0.170f, 0.748f,
+                                           0.410f, 0.680f),
+         "near-visit high-policy lever needs tight value gap", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(900, 220, 80, 0.208f, -0.426f,
+                                           0.260f, -0.612f),
+         "mature root blocked", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(87, 25, 3, 6, 0.206f, 0.932f, 0.050f,
+                                         0.888f),
+         "BK.09 low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(98, 29, 4, 7, 0.206f, 0.931f, 0.050f,
+                                         0.881f),
+         "BK.09 rank-seven low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(49, 14, 2, 7, 0.206f, 0.925f, 0.050f,
+                                         0.885f),
+         "BK.09 tiny-node rank-seven low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(25, 7, 1, 6, 0.174f, 0.918f, 0.052f,
+                                         0.887f),
+         "BK.09 nodes-25 low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(25, 6, 2, 5, 0.161f, 0.912f, 0.052f,
+                                         0.885f),
+         "BK.09 nodes-25 low-policy lever passes after probe", tc);
+  expect(!MCTSRootLowPolicyLeverCandidate(25, 7, 1, 6, 0.174f, 0.918f, 0.052f,
+                                          0.860f),
+         "nodes-25 single-visit low-policy lever needs tight Q gap", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(49, 24, 2, 4, 0.314f, -0.199f, 0.038f,
+                                         -0.259f),
+         "BK.17 tiny-node rank-four low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(25, 12, 2, 5, 0.258f, -0.203f, 0.043f,
+                                         -0.259f),
+         "BK.17 nodes-25 low-policy lever passes after probe", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(82, 41, 2, 5, 0.314f, -0.189f, 0.038f,
+                                         -0.259f),
+         "BK.17 defensive low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(87, 44, 3, 5, 0.314f, -0.188f, 0.038f,
+                                         -0.270f),
+         "BK.17 post-rescue low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(82, 35, 3, 5, 0.258f, -0.179f, 0.043f,
+                                         -0.270f),
+         "BK.17 observed rank-five low-policy lever passes", tc);
+  expect(!MCTSRootLowPolicyLeverCandidate(96, 17, 39, 1, 0.260f, -0.612f,
+                                          0.208f, -0.426f),
+         "already-dominant non-low-policy move blocked", tc);
+  expect(!MCTSRootLowPolicyLeverCandidate(87, 25, 1, 6, 0.206f, 0.932f, 0.050f,
+                                          0.888f),
+         "single-visit low-policy lever blocked", tc);
+  expect(!MCTSRootLowPolicyLeverCandidate(87, 25, 3, 8, 0.206f, 0.932f, 0.050f,
+                                          0.888f),
+         "too-late low-policy lever blocked", tc);
+  expect(!MCTSRootLowPolicyLeverCandidate(98, 29, 4, 7, 0.206f, 0.931f, 0.040f,
+                                          0.881f),
+         "weak rank-seven low-policy lever blocked", tc);
+  expect(MCTSRootLowPolicyLeverProbeCandidate(25, 5, 0.043f),
+         "BK.17 nodes-25 low-policy lever probe passes", tc);
+  expect(MCTSRootLowPolicyLeverProbeCandidate(25, 6, 0.052f),
+         "BK.09 nodes-25 low-policy lever probe passes", tc);
+  expect(!MCTSRootLowPolicyLeverProbeCandidate(15, 5, 0.043f),
+         "too-early low-policy lever probe blocked", tc);
+  expect(!MCTSRootLowPolicyLeverProbeCandidate(25, 8, 0.043f),
+         "late low-policy lever probe blocked", tc);
+  expect(!MCTSRootLowPolicyLeverProbeCandidate(25, 5, 0.090f),
+         "high-policy lever probe blocked", tc);
+  expect(MCTSRootCentralPawnBreakProbeCandidate(25, 7, 0.043f),
+         "BK.02 nodes-25 central break probe passes", tc);
+  expect(!MCTSRootCentralPawnBreakProbeCandidate(15, 7, 0.043f),
+         "early central break probe blocked", tc);
+  expect(!MCTSRootCentralPawnBreakProbeCandidate(25, 9, 0.043f),
+         "late central break probe blocked", tc);
+  expect(!MCTSRootCentralPawnBreakProbeCandidate(25, 7, 0.090f),
+         "high-policy central break probe blocked", tc);
+  expect(MCTSRootTinyLowVisitQOverrideCandidate(25, 6, 4, 0.103f, 0.555f,
+                                                0.050f, 0.581f),
+         "BK.07 nodes-25 low-visit Q override passes", tc);
+  expect(MCTSRootTinyLowVisitQOverrideCandidate(25, 10, 8, 0.217f, -0.103f,
+                                                0.127f, -0.057f),
+         "BK.18 nodes-25 low-visit Q override passes", tc);
+  expect(!MCTSRootTinyLowVisitQOverrideCandidate(25, 6, 3, 0.103f, 0.555f,
+                                                 0.050f, 0.581f),
+         "tiny low-visit Q override needs near visits", tc);
+  expect(!MCTSRootTinyLowVisitQOverrideCandidate(25, 6, 4, 0.103f, 0.555f,
+                                                 0.080f, 0.581f),
+         "tiny low-visit Q override blocks high-policy candidate", tc);
+  expect(!MCTSRootTinyLowVisitQOverrideCandidate(25, 6, 4, 0.103f, 0.555f,
+                                                 0.050f, 0.574f),
+         "tiny low-visit Q override needs clear Q gap", tc);
+  expect(!MCTSRootTinyLowVisitQOverrideCandidate(25, 14, 8, 0.320f, 0.711f,
+                                                 0.152f, 0.752f),
+         "BK.11 high-confidence pawn lever resists tiny Q override", tc);
+
+  Position bk22;
+  StateInfo bk22_st;
+  bk22.set("2r2rk1/1bqnbpp1/1p1ppn1p/pP6/N1P1P3/P2B1N1P/"
+           "1B2QPP1/R2R2K1 b - -",
+           false, &bk22_st);
+  const Move bishop_capture = UCIEngine::to_move(bk22, "b7e4");
+  const Move knight_quiet = UCIEngine::to_move(bk22, "d7c5");
+  expect(MCTSIsMinorCentralPawnCapture(bk22, bishop_capture),
+         "BK.22 bishop sacrifice is a central pawn capture", tc);
+  expect(!MCTSIsMinorCentralPawnCapture(bk22, knight_quiet),
+         "BK.22 quiet knight move is not a capture", tc);
+  expect(MCTSRootTacticalCaptureProbeCandidate(87, 14, 0.010f),
+         "BK.22 low-policy capture probe passes", tc);
+  expect(MCTSRootTacticalCaptureProbeCandidate(16, 14, 0.013f),
+         "BK.22 nodes-25 capture probe passes", tc);
+  expect(!MCTSRootTacticalCaptureProbeCandidate(15, 14, 0.013f),
+         "early low-policy capture probe blocked", tc);
+  expect(!MCTSRootTacticalCaptureProbeCandidate(87, 17, 0.010f),
+         "late low-policy capture probe blocked", tc);
+  expect(!MCTSRootTacticalCaptureProbeCandidate(87, 14, 0.030f),
+         "high-policy capture probe blocked", tc);
+
+  Position king_pawn_tactic;
+  StateInfo king_pawn_tactic_st;
+  king_pawn_tactic.set("r6r/pp2kB2/1bp2p2/4p1p1/6b1/1QP3p1/"
+                       "PP1R1PP1/4R1K1 b - - 3 23",
+                       false, &king_pawn_tactic_st);
+  const Move bishop_f2 = UCIEngine::to_move(king_pawn_tactic, "b6f2");
+  const Move pawn_f2 = UCIEngine::to_move(king_pawn_tactic, "g3f2");
+  expect(MCTSIsMinorKingPawnCheckCapture(king_pawn_tactic, bishop_f2),
+         "00iXO low-policy Bxf2+ is a king-pawn check capture", tc);
+  expect(!MCTSIsMinorKingPawnCheckCapture(king_pawn_tactic, pawn_f2),
+         "00iXO high-policy pawn capture is not a minor-piece probe", tc);
+
+  Position quiet_major_tactic;
+  StateInfo quiet_major_tactic_st;
+  quiet_major_tactic.set("1kq1r2r/p1p2pp1/1pPb4/3P4/Q1B2nbp/"
+                         "4B3/P2N1PPP/1R2R1K1 w - - 0 21",
+                         false, &quiet_major_tactic_st);
+  const Move bishop_attacks_queen =
+      UCIEngine::to_move(quiet_major_tactic, "c4a6");
+  const Move bishop_capture_knight =
+      UCIEngine::to_move(quiet_major_tactic, "e3f4");
+  expect(MCTSIsMinorQuietAttacksMajor(quiet_major_tactic, bishop_attacks_queen),
+         "01Isj quiet bishop move attacks the queen", tc);
+  expect(
+      !MCTSIsMinorQuietAttacksMajor(quiet_major_tactic, bishop_capture_knight),
+      "01Isj capture is not a quiet-major probe", tc);
+  expect(MCTSRootDeepTacticalQuietProbeCandidate(74, 2, 0.153f),
+         "01Isj high-policy quiet-major probe passes", tc);
+
+  Position fifth_rank_tactic;
+  StateInfo fifth_rank_tactic_st;
+  fifth_rank_tactic.set("1r3r1k/3b1pR1/p1p2b1p/P1Pq4/1P1Np3/"
+                        "2Q1P3/1B3P1P/4K1R1 w - - 1 27",
+                        false, &fifth_rank_tactic_st);
+  const Move knight_f5 = UCIEngine::to_move(fifth_rank_tactic, "d4f5");
+  const Move rook_retreat = UCIEngine::to_move(fifth_rank_tactic, "g7g3");
+  expect(MCTSIsMinorFifthRankQuietMove(fifth_rank_tactic, knight_f5),
+         "02I9S Nf5 is a fifth-rank minor quiet probe", tc);
+  expect(MCTSHasHeavyPieceOnSeventh(fifth_rank_tactic, WHITE),
+         "02I9S has a rook on the seventh before Nf5", tc);
+  expect(!MCTSIsMinorFifthRankQuietMove(fifth_rank_tactic, rook_retreat),
+         "02I9S rook move is not a fifth-rank minor quiet probe", tc);
+  expect(MCTSRootDeepTacticalQuietProbeCandidate(142, 5, 0.024f),
+         "02I9S low-policy fifth-rank quiet probe passes", tc);
+  expect(MCTSRootFifthRankQuietProbeCandidate(86, 11, 0.021f),
+         "02I9S rank-11 fifth-rank quiet probe passes", tc);
+  expect(!MCTSRootDeepTacticalQuietProbeCandidate(86, 11, 0.021f),
+         "02I9S rank-11 case stays outside the generic quiet probe", tc);
+  expect(MCTSRootFifthRankCurrentOverrideCandidate(157, 20, 48, 0.372f, 0.412f,
+                                                   0.024f),
+         "02I9S current-search fifth-rank override passes", tc);
+  expect(!MCTSRootFifthRankCurrentOverrideCandidate(157, 40, 48, 0.372f, 0.412f,
+                                                    0.024f),
+         "02I9S override requires a clear current-visit lead", tc);
+  expect(MCTSRootHighPolicyVisitLeaderProtected(49, 29, 0.301f, 0.294f, 0.039f,
+                                                0.500f),
+         "02I9S high-policy capture leader resists a low-policy Q flip", tc);
+  expect(!MCTSRootHighPolicyVisitLeaderProtected(49, 29, 0.301f, 0.294f, 0.039f,
+                                                 0.560f),
+         "02I9S guard still allows a much larger Q gap", tc);
+  expect(MCTSRootLowVisitQOverrideCandidate(53, 48, 0.390f, 0.412f, 0.02f),
+         "02I9S near-equal visits can select the higher-Q Nf5", tc);
+  expect(MCTSRootLowVisitQOverrideCandidate(32, 15, 0.022f, 0.662f, 0.02f,
+                                            0.134f, true),
+         "03cYQ 15-visit decisive Q gap can beat the original leader", tc);
+  expect(!MCTSRootLowVisitQOverrideCandidate(32, 14, 0.022f, 0.662f, 0.02f,
+                                             0.134f, true),
+         "03cYQ decisive Q gap still needs enough visits", tc);
+  expect(MCTSRootLowVisitQOverrideCandidate(18, 15, 0.022f, 0.662f, 0.02f,
+                                            0.134f, true),
+         "03cYQ 15 visits can beat an already-promoted 18-visit candidate", tc);
+
+  Position high_value_capture_tactic;
+  StateInfo high_value_capture_tactic_st;
+  high_value_capture_tactic.set("r4r2/pp1q1p2/2p1n1kB/4Pp2/"
+                                "2Pb3Q/P7/6PP/3R3K w - - 2 27",
+                                false, &high_value_capture_tactic_st);
+  const Move bishop_takes_rook =
+      UCIEngine::to_move(high_value_capture_tactic, "h6f8");
+  const Move high_value_queen_check =
+      UCIEngine::to_move(high_value_capture_tactic, "h4f6");
+  expect(
+      MCTSIsMinorHighValueCapture(high_value_capture_tactic, bishop_takes_rook),
+      "02J4S Bxf8 is a minor high-value capture", tc);
+  expect(!MCTSIsMinorHighValueCapture(high_value_capture_tactic,
+                                      high_value_queen_check),
+         "02J4S queen move is not a minor high-value capture", tc);
+  expect(MCTSRootHighValueCaptureProbeCandidate(76, 3, 0.110f),
+         "02J4S high-value capture probe passes", tc);
+
+  Position queen_check_capture_tactic;
+  StateInfo queen_check_capture_tactic_st;
+  queen_check_capture_tactic.set("r1b5/pppqNkp1/3p3p/4r2n/1PP2p1N/P5P1/"
+                                 "4Q2P/4RRK1 w - - 4 23",
+                                 false, &queen_check_capture_tactic_st);
+  const Move queen_takes_knight_check =
+      UCIEngine::to_move(queen_check_capture_tactic, "e2h5");
+  const Move quiet_queen_move =
+      UCIEngine::to_move(queen_check_capture_tactic, "e2d3");
+  expect(MCTSIsQueenCheckingCapture(queen_check_capture_tactic,
+                                    queen_takes_knight_check),
+         "00ZEW Qxh5+ is a queen checking capture", tc);
+  expect(
+      !MCTSIsQueenCheckingCapture(queen_check_capture_tactic, quiet_queen_move),
+      "00ZEW quiet queen move is not a queen checking capture", tc);
+  expect(MCTSRootQueenCheckingCaptureProbeCandidate(111, 9, 0.018f),
+         "00ZEW rank-nine queen checking capture probe passes", tc);
+  expect(!MCTSRootQueenCheckingCaptureProbeCandidate(181, 9, 0.018f),
+         "queen checking capture probe is early-root only", tc);
+  expect(!MCTSRootQueenCheckingCaptureProbeCandidate(111, 4, 0.018f),
+         "queen checking capture probe does not steal top-policy captures", tc);
+  expect(!MCTSRootQueenCheckingCaptureProbeCandidate(111, 9, 0.080f),
+         "queen checking capture probe stays below high-policy captures", tc);
+
+  Position rook_checking_pawn_capture_tactic;
+  StateInfo rook_checking_pawn_capture_tactic_st;
+  rook_checking_pawn_capture_tactic.set(
+      "4r1k1/pp3p2/3p1Ppq/5P2/8/6RP/PP2rQ2/6RK w - - 3 40", false,
+      &rook_checking_pawn_capture_tactic_st);
+  const Move rook_takes_pawn_check =
+      UCIEngine::to_move(rook_checking_pawn_capture_tactic, "g3g6");
+  const Move queen_block =
+      UCIEngine::to_move(rook_checking_pawn_capture_tactic, "f2d4");
+  expect(MCTSIsRookCheckingPawnCapture(rook_checking_pawn_capture_tactic,
+                                       rook_takes_pawn_check),
+         "01A5W Rxg6+ is a rook checking pawn capture", tc);
+  expect(!MCTSIsRookCheckingPawnCapture(rook_checking_pawn_capture_tactic,
+                                        queen_block),
+         "01A5W queen block is not a rook checking pawn capture", tc);
+  expect(MCTSRootRookCheckingPawnCaptureProbeCandidate(55, 4, 0.068f),
+         "01A5W rook checking pawn capture probe passes", tc);
+  expect(!MCTSRootRookCheckingPawnCaptureProbeCandidate(23, 4, 0.068f),
+         "rook checking pawn capture probe waits for a formed root", tc);
+  expect(!MCTSRootRookCheckingPawnCaptureProbeCandidate(55, 9, 0.068f),
+         "rook checking pawn capture probe stays inside mid-policy ranks", tc);
+  expect(
+      !MCTSRootRookCheckingPawnCaptureProbeCandidate(55, 4, 0.160f),
+      "rook checking pawn capture probe does not duplicate high policy probes",
+      tc);
+
+  Position high_policy_bishop_capture_tactic;
+  StateInfo high_policy_bishop_capture_tactic_st;
+  high_policy_bishop_capture_tactic.set(
+      "4r1k1/p3qpp1/1bQ5/5p1p/1P5P/8/PBP2PP1/3R2K1 b - - 0 24", false,
+      &high_policy_bishop_capture_tactic_st);
+  const Move queen_visit_leader =
+      UCIEngine::to_move(high_policy_bishop_capture_tactic, "e7e2");
+  const Move bishop_takes_f2 =
+      UCIEngine::to_move(high_policy_bishop_capture_tactic, "b6f2");
+  expect(MCTSRootHighPolicyCaptureQOverrideCandidate(
+             high_policy_bishop_capture_tactic, bishop_takes_f2, 62, 46, 15,
+             0.232f, 0.887f, 0.419f),
+         "00uL7 high-policy bishop capture can override a low-Q visit leader",
+         tc);
+  expect(!MCTSRootHighPolicyCaptureQOverrideCandidate(
+             high_policy_bishop_capture_tactic, bishop_takes_f2, 62, 46, 14,
+             0.232f, 0.887f, 0.419f),
+         "high-policy capture override still needs enough visits", tc);
+  expect(!MCTSRootHighPolicyCaptureQOverrideCandidate(
+             high_policy_bishop_capture_tactic, queen_visit_leader, 62, 46, 15,
+             0.232f, 0.887f, 0.419f),
+         "high-policy capture override requires an actual capture", tc);
+  Position high_policy_sacrifice_tactic;
+  StateInfo high_policy_sacrifice_tactic_st;
+  high_policy_sacrifice_tactic.set(
+      "5rk1/2R2p2/7p/6pB/b7/2Q4P/2p2PPK/1q6 w - - 4 32", false,
+      &high_policy_sacrifice_tactic_st);
+  const Move queen_check_leader =
+      UCIEngine::to_move(high_policy_sacrifice_tactic, "c3f6");
+  const Move bishop_takes_rook_sacrifice =
+      UCIEngine::to_move(high_policy_sacrifice_tactic, "h5f7");
+  expect(MCTSRootHighPolicyCaptureQOverrideCandidate(
+             high_policy_sacrifice_tactic, bishop_takes_rook_sacrifice, 65, 48,
+             15, -0.094f, 0.759f, 0.222f),
+         "03YCu high-Q bishop capture sacrifice can override visit leader", tc);
+  expect(!MCTSRootHighPolicyCaptureQOverrideCandidate(
+             high_policy_sacrifice_tactic, queen_check_leader, 65, 48, 15,
+             -0.094f, 0.759f, 0.222f),
+         "high-policy capture override still rejects quiet queen checks", tc);
+
+  Position high_policy_queen_attack_tactic;
+  StateInfo high_policy_queen_attack_tactic_st;
+  high_policy_queen_attack_tactic.set("r1k5/2p2Q2/1b3P2/1p2p1p1/8/2P4p/"
+                                      "1PB1RPq1/4K3 w - - 1 33",
+                                      false,
+                                      &high_policy_queen_attack_tactic_st);
+  const Move bishop_e4 =
+      UCIEngine::to_move(high_policy_queen_attack_tactic, "c2e4");
+  const Move bishop_f5 =
+      UCIEngine::to_move(high_policy_queen_attack_tactic, "c2f5");
+  expect(
+      MCTSIsMinorQuietAttacksMajor(high_policy_queen_attack_tactic, bishop_e4),
+      "02pFU Be4 is a quiet bishop attack on the queen", tc);
+  expect(
+      MCTSIsMinorQuietAttacksQueen(high_policy_queen_attack_tactic, bishop_e4),
+      "02pFU Be4 specifically attacks the queen", tc);
+  expect(
+      !MCTSIsMinorQuietAttacksMajor(high_policy_queen_attack_tactic, bishop_f5),
+      "02pFU Bxf5 is a capture, not a quiet-major probe", tc);
+  expect(MCTSRootQuietMajorAttackProbeCandidate(78, 1, 0.279f),
+         "02pFU high-policy quiet-major probe passes", tc);
+  expect(!MCTSRootDeepTacticalQuietProbeCandidate(78, 1, 0.279f),
+         "generic deep quiet probe still blocks very high policy moves", tc);
+
+  Position rook_attack_tactic;
+  StateInfo rook_attack_tactic_st;
+  rook_attack_tactic.set("6rk/2p2q2/1p4rp/2PR1b1p/P6Q/"
+                         "1P2pNPP/5P2/3R2K1 b - - 1 36",
+                         false, &rook_attack_tactic_st);
+  const Move bishop_attacks_rook =
+      UCIEngine::to_move(rook_attack_tactic, "f5e6");
+  const Move bishop_kingside_discovery =
+      UCIEngine::to_move(rook_attack_tactic, "f5g4");
+  expect(MCTSIsMinorQuietAttacksMajor(rook_attack_tactic, bishop_attacks_rook),
+         "03cYQ Be6 attacks a rook", tc);
+  expect(!MCTSIsMinorQuietAttacksQueen(rook_attack_tactic, bishop_attacks_rook),
+         "03cYQ Be6 is not a queen attack and should not get the deep target",
+         tc);
+  expect(!MCTSIsMinorQuietAttacksMajor(rook_attack_tactic,
+                                       bishop_kingside_discovery),
+         "03cYQ Bg4 is a different discovered-attack tactic", tc);
+
+  Position promotion_support_tactic;
+  StateInfo promotion_support_tactic_st;
+  promotion_support_tactic.set("7R/bP4k1/3q2p1/1Q1p1p2/4p3/7P/6P1/"
+                               "r4N1K w - - 3 40",
+                               false, &promotion_support_tactic_st);
+  const Move queen_supports_promotion =
+      UCIEngine::to_move(promotion_support_tactic, "b5b2");
+  const Move rook_check = UCIEngine::to_move(promotion_support_tactic, "h8a8");
+  expect(MCTSIsAdvancedPromotionSupportQueenMove(promotion_support_tactic,
+                                                 queen_supports_promotion),
+         "02Q6Q Qb2 is a queen support move for a seventh-rank pawn", tc);
+  expect(!MCTSIsAdvancedPromotionSupportQueenMove(promotion_support_tactic,
+                                                  rook_check),
+         "02Q6Q rook check is not a queen support move", tc);
+  expect(MCTSRootAdvancedPromotionSupportCandidate(70, 43, 27, 0.224f, 0.501f,
+                                                   0.333f, 0.409f),
+         "02Q6Q high-policy promotion support selection passes", tc);
+  expect(MCTSRootAdvancedPromotionSupportCandidate(79, 34, 24, 0.194f, 0.616f,
+                                                   0.271f, 0.477f),
+         "02Q6Q traced queen support survives a modest Q deficit", tc);
+  expect(!MCTSRootAdvancedPromotionSupportCandidate(70, 43, 20, 0.224f, 0.501f,
+                                                    0.333f, 0.300f),
+         "weak promotion support Q gap is blocked", tc);
+  Position promotion_deflection_tactic;
+  StateInfo promotion_deflection_tactic_st;
+  promotion_deflection_tactic.set("7R/bP4k1/5qp1/3p1p2/4p3/7P/"
+                                  "1Q4P1/r4N1K w - - 5 41",
+                                  false, &promotion_deflection_tactic_st);
+  const Move deflection_promotion =
+      UCIEngine::to_move(promotion_deflection_tactic, "b7b8q");
+  const Move rook_check_leader =
+      UCIEngine::to_move(promotion_deflection_tactic, "h8g8");
+  const Move underpromote_rook =
+      UCIEngine::to_move(promotion_deflection_tactic, "b7b8r");
+  expect(MCTSIsQueenPromotionDeflectionRecapture(promotion_deflection_tactic,
+                                                 deflection_promotion),
+         "02Q6Q b8=Q is a promotion deflection with queen recapture", tc);
+  expect(!MCTSIsQueenPromotionDeflectionRecapture(promotion_deflection_tactic,
+                                                  rook_check_leader),
+         "02Q6Q rook check is not a promotion deflection", tc);
+  expect(!MCTSIsQueenPromotionDeflectionRecapture(promotion_deflection_tactic,
+                                                  underpromote_rook),
+         "02Q6Q underpromotion is outside the queen-deflection override", tc);
+  expect(MCTSRootQueenPromotionDeflectionCandidate(84, 50, 3, 0.089f, -0.044f,
+                                                   true),
+         "02Q6Q traced low-visit queen promotion deflection can override", tc);
+  expect(!MCTSRootQueenPromotionDeflectionCandidate(62, 32, 1, 0.095f, -0.897f,
+                                                    true),
+         "02Q6Q first root keeps collapsed promotion candidate blocked", tc);
+  expect(!MCTSRootQueenPromotionDeflectionCandidate(84, 50, 3, 0.089f, -0.044f,
+                                                    false),
+         "promotion deflection override requires a checking visit leader", tc);
+  Position queen_endgame_passer_tactic;
+  StateInfo queen_endgame_passer_tactic_st;
+  queen_endgame_passer_tactic.set("1Q6/6pk/2q4p/1p2P3/2p3P1/"
+                                  "5P2/5K1P/8 b - - 0 44",
+                                  false, &queen_endgame_passer_tactic_st);
+  const Move queen_shuffle =
+      UCIEngine::to_move(queen_endgame_passer_tactic, "c6c5");
+  const Move defended_passer =
+      UCIEngine::to_move(queen_endgame_passer_tactic, "c4c3");
+  expect(MCTSIsQueenEndgameAdvancedPassedPawnPush(queen_endgame_passer_tactic,
+                                                  defended_passer),
+         "02TxK c4c3 is a queen-defended advanced passer", tc);
+  expect(!MCTSIsQueenEndgameAdvancedPassedPawnPush(queen_endgame_passer_tactic,
+                                                   queen_shuffle),
+         "02TxK queen shuffle is not a passed-pawn push", tc);
+  expect(MCTSRootQueenEndgamePassedPawnCandidate(
+             queen_endgame_passer_tactic, queen_shuffle, defended_passer, 44,
+             23, 19, 0.310f, 0.567f, 0.409f, 0.473f),
+         "02TxK traced second root can prefer the queen-defended passer", tc);
+  expect(!MCTSRootQueenEndgamePassedPawnCandidate(
+             queen_endgame_passer_tactic, queen_shuffle, defended_passer, 44,
+             23, 19, 0.310f, 0.700f, 0.409f, 0.473f),
+         "queen-endgame passer still respects large Q deficits", tc);
+  Position premature_passer_tactic;
+  StateInfo premature_passer_tactic_st;
+  premature_passer_tactic.set("1Q6/6pk/6qp/1p6/2p1P1P1/"
+                              "5P2/5K1P/8 b - - 1 43",
+                              false, &premature_passer_tactic_st);
+  const Move premature_passer =
+      UCIEngine::to_move(premature_passer_tactic, "c4c3");
+  expect(!MCTSIsQueenEndgameAdvancedPassedPawnPush(premature_passer_tactic,
+                                                   premature_passer),
+         "02TxK first-root passer is blocked until the queen defends it", tc);
+  Position queen_endgame_later_root;
+  StateInfo queen_endgame_later_root_st;
+  queen_endgame_later_root.set("8/6pk/2qQ3p/1p2P3/6P1/2p2P2/"
+                               "5K1P/8 b - - 1 45",
+                               false, &queen_endgame_later_root_st);
+  const Move later_passer =
+      UCIEngine::to_move(queen_endgame_later_root, "c3c2");
+  expect(MCTSIsQueenEndgameAdvancedPassedPawnPush(queen_endgame_later_root,
+                                                  later_passer),
+         "02TxK later c3c2 is recognized as defended but needs visits", tc);
+  expect(!MCTSRootQueenEndgamePassedPawnCandidate(
+             queen_endgame_later_root,
+             UCIEngine::to_move(queen_endgame_later_root, "c6c8"), later_passer,
+             52, 24, 0, 0.255f, 0.481f, 0.012f, -0.347f),
+         "02TxK later unvisited passer cannot override the queen move", tc);
+  Position high_q_major_quiet_tactic;
+  StateInfo high_q_major_quiet_tactic_st;
+  high_q_major_quiet_tactic.set("8/2r2p1p/p4Qpk/1q6/1P6/7P/"
+                                "2r3P1/4RR1K w - - 10 35",
+                                false, &high_q_major_quiet_tactic_st);
+  const Move queen_check_leader_02ti8 =
+      UCIEngine::to_move(high_q_major_quiet_tactic, "f6h4");
+  const Move rook_lift_02ti8 =
+      UCIEngine::to_move(high_q_major_quiet_tactic, "f1f4");
+  const Move lower_policy_rook_02ti8 =
+      UCIEngine::to_move(high_q_major_quiet_tactic, "e1e4");
+  expect(
+      MCTSRootMajorQuietQOverrideCandidate(
+          high_q_major_quiet_tactic, queen_check_leader_02ti8, rook_lift_02ti8,
+          35, 19, 9, 0.087f, 0.027f, 0.234f, 0.459f),
+      "02ti8 high-policy quiet rook lift can override the queen visit leader",
+      tc);
+  expect(!MCTSRootMajorQuietQOverrideCandidate(
+             high_q_major_quiet_tactic, queen_check_leader_02ti8,
+             lower_policy_rook_02ti8, 35, 19, 5, 0.087f, 0.027f, 0.110f,
+             0.514f),
+         "02ti8 lower-policy rook move remains blocked despite higher Q", tc);
+  expect(!MCTSRootMajorQuietQOverrideCandidate(
+             high_q_major_quiet_tactic, queen_check_leader_02ti8,
+             rook_lift_02ti8, 35, 19, 7, 0.087f, 0.027f, 0.234f, 0.459f),
+         "major quiet override needs enough visits", tc);
+  expect(!MCTSRootMajorQuietQOverrideCandidate(
+             high_q_major_quiet_tactic, queen_check_leader_02ti8,
+             rook_lift_02ti8, 35, 19, 9, 0.087f, 0.220f, 0.234f, 0.459f),
+         "major quiet override still requires a large Q gap", tc);
+  Position bk07;
+  StateInfo bk07_st;
+  bk07.set("1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/"
+           "B1P2R2/2P1B1PP/R2Q2K1 w - - 0 1",
+           false, &bk07_st);
+  const Move bk07_policy_leader = UCIEngine::to_move(bk07, "a3b4");
+  const Move bk07_tactic = UCIEngine::to_move(bk07, "h5f6");
+  expect(MCTSIsMinorQuietAttacksMajor(bk07, bk07_tactic),
+         "BK.07 Nf6 is a quiet minor attack on major material", tc);
+  expect(MCTSRootMinorQuietMajorAttackQOverrideCandidate(
+             bk07, bk07_policy_leader, bk07_tactic, 68, 32, 12, 0.120f, 0.421f,
+             0.050f, 0.636f),
+         "BK.07 12-visit high-Q Nf6 can override the policy visit leader", tc);
+  expect(MCTSRootMinorQuietMajorAttackQOverrideCandidate(
+             bk07, bk07_policy_leader, bk07_tactic, 58, 30, 4, 0.120f, 0.402f,
+             0.050f, 0.581f),
+         "BK.07 4-visit high-Q Nf6 can override in the low-node window", tc);
+  expect(!MCTSRootMinorQuietMajorAttackQOverrideCandidate(
+             bk07, bk07_policy_leader, bk07_tactic, 68, 32, 12, 0.120f, 0.421f,
+             0.050f, 0.600f),
+         "BK.07 quiet minor override requires a clear Q gap", tc);
+  expect(!MCTSRootMinorQuietMajorAttackQOverrideCandidate(
+             bk07, bk07_policy_leader, bk07_tactic, 58, 30, 4, 0.120f, 0.402f,
+             0.050f, 0.540f),
+         "BK.07 low-sample quiet minor override requires a Q gap", tc);
+  expect(!MCTSRootMinorQuietMajorAttackQOverrideCandidate(
+             bk07, bk07_policy_leader, bk07_tactic, 58, 40, 4, 0.120f, 0.402f,
+             0.050f, 0.581f),
+         "BK.07 low-sample quiet minor override avoids established leaders",
+         tc);
+  expect(MCTSRootClockLowVisitQOverrideCandidate(91, 37, 21, 0.400f, 0.475f,
+                                                 0.194f),
+         "02TvL reused-root current visits can prefer the higher-Q queen move",
+         tc);
+  Position promotion_support_duel;
+  StateInfo promotion_support_duel_st;
+  promotion_support_duel.set("2k5/p1p3q1/P4p2/2p5/Q1NP4/2P4r/"
+                             "4K1p1/6R1 b - - 1 29",
+                             false, &promotion_support_duel_st);
+  expect(MCTSIsAdvancedPromotionSupportQueenMove(
+             promotion_support_duel,
+             UCIEngine::to_move(promotion_support_duel, "g7g6")),
+         "02TvL Qg6 also supports the advanced pawn", tc);
+  expect(MCTSIsAdvancedPromotionSupportQueenMove(
+             promotion_support_duel,
+             UCIEngine::to_move(promotion_support_duel, "g7g4")),
+         "02TvL Qg4 is a competing support move, not a non-support replacement",
+         tc);
+  expect(MCTSRootPawnEndgameEnPassantCandidate(54, 26, 12, false, true, 0.214f,
+                                               0.180f),
+         "pawn-endgame en-passant can replace quiet best when Q is near", tc);
+  expect(!MCTSRootPawnEndgameEnPassantCandidate(54, 26, 12, true, true, 0.214f,
+                                                0.180f),
+         "pawn-endgame en-passant does not replace capture best", tc);
+  expect(!MCTSRootPawnEndgameEnPassantCandidate(54, 26, 2, false, true, 0.214f,
+                                                0.100f),
+         "pawn-endgame en-passant still needs near Q", tc);
+  Position pawn_zugzwang;
+  StateInfo pawn_zugzwang_st;
+  pawn_zugzwang.set("4K3/5p2/5kpp/8/7P/6P1/5P2/8 w - - 0 56", false,
+                    &pawn_zugzwang_st);
+  const Move pawn_race = UCIEngine::to_move(pawn_zugzwang, "g3g4");
+  const Move quiet_zugzwang = UCIEngine::to_move(pawn_zugzwang, "f2f3");
+  expect(MCTSRootPawnEndgameQuietQOverrideCandidate(pawn_zugzwang, pawn_race,
+                                                    quiet_zugzwang, 61, 23, 14,
+                                                    0.247f, 0.308f, 0.140f),
+         "01qsT pawn-endgame quiet zugzwang can override", tc);
+  expect(!MCTSRootPawnEndgameQuietQOverrideCandidate(pawn_zugzwang, pawn_race,
+                                                     quiet_zugzwang, 61, 23, 7,
+                                                     0.247f, 0.308f, 0.140f),
+         "pawn-endgame quiet override needs enough visits", tc);
+  Position pawn_break_endgame;
+  StateInfo pawn_break_endgame_st;
+  pawn_break_endgame.set("8/8/p3p3/3p2p1/1P1Ppk2/2P4P/5PK1/8 b - - 4 42", false,
+                         &pawn_break_endgame_st);
+  const Move pawn_push_leader = UCIEngine::to_move(pawn_break_endgame, "e4e3");
+  const Move quiet_pawn_break = UCIEngine::to_move(pawn_break_endgame, "e6e5");
+  expect(MCTSRootPawnEndgameQuietQOverrideCandidate(
+             pawn_break_endgame, pawn_push_leader, quiet_pawn_break, 68, 42, 15,
+             0.252f, 0.317f, 0.162f),
+         "01mBE quiet pawn break can override with one-third visit support",
+         tc);
+
+  Position minor_pawn_endgame_recapture;
+  StateInfo minor_pawn_endgame_recapture_st;
+  minor_pawn_endgame_recapture.set("8/7p/2p2pP1/8/1k1K4/p7/B4P2/8 b - - 0 43",
+                                   false, &minor_pawn_endgame_recapture_st);
+  const Move recapture =
+      UCIEngine::to_move(minor_pawn_endgame_recapture, "h7g6");
+  const Move quiet_pawn =
+      UCIEngine::to_move(minor_pawn_endgame_recapture, "c6c5");
+  expect(MCTSRootMinorPawnEndgameCaptureProtected(minor_pawn_endgame_recapture,
+                                                  recapture, quiet_pawn, 0.670f,
+                                                  0.211f, 0.265f, 0.319f),
+         "01abk high-policy pawn recapture resists a modest-Q quiet override",
+         tc);
+  expect(!MCTSRootMinorPawnEndgameCaptureProtected(
+             minor_pawn_endgame_recapture, recapture, quiet_pawn, 0.670f,
+             0.211f, 0.265f, 0.350f),
+         "01abk quiet override still passes when Q gap is decisive", tc);
+  expect(!MCTSRootMinorPawnEndgameCaptureProtected(
+             minor_pawn_endgame_recapture, recapture, quiet_pawn, 0.670f,
+             0.211f, 0.340f, 0.319f),
+         "01abk guard requires the quiet move to be much lower policy", tc);
+
+  expect(MCTSRootLowVisitQOverrideCandidate(39, 38, 0.601f, 0.698f),
+         "00GuG near-visit higher-Q king move can override", tc);
+  expect(!MCTSRootLowVisitQOverrideCandidate(39, 19, 0.601f, 0.698f),
+         "distant low-visit higher-Q move cannot override", tc);
+  expect(!MCTSRootLowVisitQOverrideCandidate(39, 38, 0.601f, 0.640f),
+         "near-visit weak Q gap is blocked", tc);
+  expect(MCTSRootLowVisitQOverrideCandidate(55, 22, -0.026f, 0.481f, 0.02f,
+                                            0.066f, true),
+         "out-of-sample strong-Q substantial-visit move can override", tc);
+  expect(!MCTSRootLowVisitQOverrideCandidate(55, 22, -0.026f, 0.481f, 0.02f,
+                                             0.066f, false),
+         "strong-Q substantial-visit override is movetime-only", tc);
+  expect(!MCTSRootLowVisitQOverrideCandidate(55, 12, -0.026f, 0.481f, 0.02f,
+                                             0.066f, true),
+         "strong-Q override still requires substantial visits", tc);
+  expect(MCTSRootClockLowVisitQOverrideCandidate(51, 26, 25, -0.861f, 0.759f,
+                                                 0.134f),
+         "012Fl clock root can rescue the near-tied high-Q queen move", tc);
+  expect(!MCTSRootClockLowVisitQOverrideCandidate(51, 26, 12, -0.861f, 0.759f,
+                                                  0.134f),
+         "clock root Q rescue still requires near-tied current visits", tc);
+  expect(!MCTSRootClockLowVisitQOverrideCandidate(220, 26, 25, -0.861f, 0.759f,
+                                                  0.134f),
+         "clock root Q rescue is limited to low-current roots", tc);
+  Position bk16;
+  StateInfo bk16_st;
+  bk16.set("r1bqkb1r/4npp1/p1p4p/1p1pP1B1/8/1B6/PPPN1PPP/R2Q1RK1 w kq -", false,
+           &bk16_st);
+  const Move knight_central = UCIEngine::to_move(bk16, "d2e4");
+  const Move queen_check = UCIEngine::to_move(bk16, "d1h5");
+  expect(MCTSIsMinorCentralQuietMove(bk16, knight_central),
+         "BK.16 knight centralization is a quiet probe candidate", tc);
+  expect(!MCTSIsMinorCentralQuietMove(bk16, queen_check),
+         "BK.16 queen move is not a minor central quiet probe", tc);
+  expect(MCTSRootTacticalQuietProbeCandidate(49, 6, 0.040f),
+         "BK.16 tiny-root quiet probe passes", tc);
+  expect(MCTSRootTacticalQuietProbeCandidate(16, 6, 0.040f),
+         "BK.16 nodes-25 quiet probe passes", tc);
+  expect(!MCTSRootTacticalQuietProbeCandidate(15, 6, 0.040f),
+         "early quiet probe blocked", tc);
+  expect(!MCTSRootTacticalQuietProbeCandidate(81, 6, 0.040f),
+         "mature quiet probe blocked", tc);
+  expect(!MCTSRootTacticalQuietProbeCandidate(49, 11, 0.040f),
+         "late quiet probe blocked", tc);
+  expect(!MCTSRootTacticalQuietProbeCandidate(49, 6, 0.080f),
+         "high-policy quiet probe blocked", tc);
+  Position quiet_queen_check_pos;
+  StateInfo quiet_queen_check_st;
+  quiet_queen_check_pos.set(
+      "r1b4r/pp1k2p1/2nb2qp/1B1p2B1/3p3Q/8/PPP2PPP/3RR1K1 w - - 0 18", false,
+      &quiet_queen_check_st);
+  const Move quiet_queen_check =
+      UCIEngine::to_move(quiet_queen_check_pos, "h4g4");
+  const Move quiet_queen_non_check =
+      UCIEngine::to_move(quiet_queen_check_pos, "h4f4");
+  expect(MCTSIsQuietQueenCheck(quiet_queen_check_pos, quiet_queen_check),
+         "006fF quiet queen check is a root probe candidate", tc);
+  expect(!MCTSIsQuietQueenCheck(quiet_queen_check_pos, quiet_queen_non_check),
+         "non-checking queen quiet is blocked", tc);
+  expect(MCTSRootQuietQueenCheckProbeCandidate(105, 12, 0.030f),
+         "low-policy quiet queen check can be probed", tc);
+  expect(MCTSRootQuietQueenCheckProbeCandidate(16, 4, 0.039f),
+         "BK.01 nodes-25 quiet queen check can be probed", tc);
+  expect(!MCTSRootQuietQueenCheckProbeCandidate(15, 4, 0.039f),
+         "early quiet queen check probe blocked", tc);
+  expect(!MCTSRootQuietQueenCheckProbeCandidate(105, 33, 0.030f),
+         "late-rank quiet queen check probe blocked", tc);
+  expect(!MCTSRootQuietQueenCheckProbeCandidate(105, 12, 0.003f),
+         "tiny-policy quiet queen check probe blocked", tc);
+  expect(MCTSRootQuietQueenCheckProbeStillViable(0, -0.700f),
+         "unvisited quiet queen check remains viable", tc);
+  expect(MCTSRootQuietQueenCheckProbeStillViable(1, 0.999f),
+         "positive quiet queen check remains viable", tc);
+  expect(!MCTSRootQuietQueenCheckProbeStillViable(1, -0.657f),
+         "negative quiet queen check stops forced probing", tc);
+  Position quiet_queen_net_pos;
+  StateInfo quiet_queen_net_st;
+  quiet_queen_net_pos.set(
+      "rn2k3/pp6/2pP2pp/5rq1/2B4b/2N2N2/PPP5/R2Q1K1R b q - 0 17", false,
+      &quiet_queen_net_st);
+  const Move queen_net = UCIEngine::to_move(quiet_queen_net_pos, "g5e3");
+  const Move queen_net_competing =
+      UCIEngine::to_move(quiet_queen_net_pos, "g5g3");
+  const Move knight_develop = UCIEngine::to_move(quiet_queen_net_pos, "b8d7");
+  expect(MCTSIsQuietQueenKingNetMove(quiet_queen_net_pos, queen_net),
+         "01o5f Qe3 is a quiet queen king-net probe candidate", tc);
+  expect(MCTSIsQuietQueenKingNetMove(quiet_queen_net_pos, queen_net_competing),
+         "01o5f Qg3 is also a quiet queen king-net move", tc);
+  expect(!MCTSIsQuietQueenKingNetMove(quiet_queen_net_pos, knight_develop),
+         "non-queen move is not a quiet queen king-net candidate", tc);
+  expect(MCTSRootQuietQueenKingNetProbeCandidate(40, 3, 0.154f),
+         "01o5f high-policy queen-net root probe passes", tc);
+  expect(!MCTSRootQuietQueenKingNetProbeCandidate(15, 3, 0.154f),
+         "queen-net probe waits for an initial root sample", tc);
+  expect(!MCTSRootQuietQueenKingNetProbeCandidate(40, 9, 0.154f),
+         "queen-net probe stays inside early policy ranks", tc);
+  expect(!MCTSRootQuietQueenKingNetProbeCandidate(40, 3, 0.040f),
+         "queen-net probe blocks low-policy queen moves", tc);
 }
 
 void test_network_format_descriptor(TestCounter &tc) {
@@ -3128,6 +3888,27 @@ void test_lc0_stoppers(TestCounter &tc) {
   expect(kld.ShouldStop(stats, &hints), "KLD stops on low distribution gain",
          tc);
 
+  KLDGainStopper timed_kld(1.0f, 1, 100);
+  SearchStats timed_stats;
+  timed_stats.total_nodes = 2;
+  timed_stats.nodes_since_movestart = 2;
+  timed_stats.time_since_movestart_ms = 50;
+  timed_stats.edge_n = {1, 0};
+  expect(!timed_kld.ShouldStop(timed_stats, &hints),
+         "KLD grace window blocks early cache-hot stop", tc);
+  timed_stats.total_nodes = 3;
+  timed_stats.nodes_since_movestart = 3;
+  timed_stats.edge_n = {2, 0};
+  expect(!timed_kld.ShouldStop(timed_stats, &hints),
+         "KLD grace window still blocks low-gain window before elapsed floor",
+         tc);
+  timed_stats.total_nodes = 4;
+  timed_stats.nodes_since_movestart = 4;
+  timed_stats.time_since_movestart_ms = 100;
+  timed_stats.edge_n = {3, 0};
+  expect(timed_kld.ShouldStop(timed_stats, &hints),
+         "KLD can stop after elapsed floor", tc);
+
   SmartPruningStopper smart(1.33f, 0);
   SearchStats sp_stats;
   sp_stats.total_nodes = 10;
@@ -3807,6 +4588,7 @@ bool test_mcts_all() {
   test_node_basics(tc);
   test_tablebase_wdl_conversion(tc);
   test_search_params_defaults(tc);
+  test_root_high_policy_lever_candidate(tc);
   test_network_format_descriptor(tc);
   test_shared_nn_input_fixture(tc);
   test_network_weight_inventory(tc);

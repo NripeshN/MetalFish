@@ -164,12 +164,16 @@ bool SmartPruningStopper::ShouldStop(const SearchStats &stats,
   return remaining_playouts < static_cast<double>(best_n - second_n);
 }
 
-KLDGainStopper::KLDGainStopper(float min_gain, int average_interval)
-    : min_gain_(min_gain), average_interval_(average_interval) {}
+KLDGainStopper::KLDGainStopper(float min_gain, int average_interval,
+                               int64_t min_elapsed_ms)
+    : min_gain_(min_gain), average_interval_(average_interval),
+      min_elapsed_ms_(min_elapsed_ms) {}
 
 bool KLDGainStopper::ShouldStop(const SearchStats &stats,
                                 StoppersHints * /*hints*/) {
   std::lock_guard<std::mutex> lock(mutex_);
+  const bool can_stop = stats.time_since_movestart_ms >= min_elapsed_ms_;
+
   const double new_child_nodes = static_cast<double>(stats.total_nodes) - 1.0;
 
   if (new_child_nodes < prev_child_nodes_ + average_interval_)
@@ -187,7 +191,7 @@ bool KLDGainStopper::ShouldStop(const SearchStats &stats,
       }
     }
     double per_node = kldgain / (new_child_nodes - prev_child_nodes_);
-    if (per_node < static_cast<double>(min_gain_)) {
+    if (can_stop && per_node < static_cast<double>(min_gain_)) {
       return true;
     }
   }

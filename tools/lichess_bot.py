@@ -79,6 +79,7 @@ ANE_UCI_OPTIONS = (
     "HybridANERootProbe",
     "HybridANERootHints",
     "HybridANEConfirmMCTSOverride",
+    "HybridANEOnlyPawnEndgames",
     "HybridANEWeights",
     "HybridANEModelPath",
     "HybridANEComputeUnits",
@@ -239,20 +240,20 @@ HYBRID_MCTS_KLD = max(0.0, min(1.0, env_float("METALFISH_HYBRID_MCTS_KLD", 0.0))
 HYBRID_AB_ROOT_REJECT_MCTS = env_bool_string(
     "METALFISH_HYBRID_AB_ROOT_REJECT_MCTS", True
 )
-HYBRID_MCTS_ROOT_REJECT = env_bool_string("METALFISH_HYBRID_MCTS_ROOT_REJECT", True)
+HYBRID_MCTS_ROOT_REJECT = env_bool_string("METALFISH_HYBRID_MCTS_ROOT_REJECT", False)
 HYBRID_MCTS_SHARED_TT = env_bool_string("METALFISH_HYBRID_MCTS_SHARED_TT", False)
 HYBRID_MCTS_AB_ROOT_HINTS = env_bool_string("METALFISH_HYBRID_MCTS_AB_ROOT_HINTS", True)
 HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS = max(
-    0, min(1000, env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS", 25))
+    0, min(1000, env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS", 0))
 )
 HYBRID_MCTS_AB_ROOT_HINT_COUNT = max(
     1, min(16, env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_COUNT", 8))
 )
 HYBRID_AB_CANDIDATE_VERIFY_MS = max(
-    0, min(1000, env_int("METALFISH_HYBRID_AB_CANDIDATE_VERIFY_MS", 120))
+    0, min(1000, env_int("METALFISH_HYBRID_AB_CANDIDATE_VERIFY_MS", 240))
 )
 HYBRID_AB_CANDIDATE_VERIFY_COUNT = max(
-    1, min(10, env_int("METALFISH_HYBRID_AB_CANDIDATE_VERIFY_COUNT", 4))
+    1, min(10, env_int("METALFISH_HYBRID_AB_CANDIDATE_VERIFY_COUNT", 5))
 )
 HYBRID_AB_POLICY_WEIGHT = max(
     0.0, min(1.0, env_float("METALFISH_HYBRID_AB_POLICY_WEIGHT", 0.0))
@@ -268,6 +269,9 @@ HYBRID_ANE_ROOT_PROBE = (
 HYBRID_ANE_ROOT_HINTS = (
     env_bool_string("METALFISH_HYBRID_ANE_ROOT_HINTS", False) == "true"
 )
+HYBRID_ANE_ONLY_PAWN_ENDGAMES = (
+    env_bool_string("METALFISH_HYBRID_ANE_ONLY_PAWN_ENDGAMES", True) == "true"
+)
 HYBRID_ANE_CONFIRM_MCTS_OVERRIDE = (
     env_bool_string("METALFISH_HYBRID_ANE_CONFIRM_MCTS_OVERRIDE", True) == "true"
 )
@@ -281,13 +285,13 @@ HYBRID_ANE_COMPUTE_UNITS = (
     os.environ.get("METALFISH_HYBRID_ANE_COMPUTE_UNITS", "cpu-ne").strip().lower()
 )
 HYBRID_ANE_ROOT_HINT_COUNT = max(
-    1, min(32, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_COUNT", 10))
+    1, min(32, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_COUNT", 6))
 )
 HYBRID_ANE_ROOT_HINT_WAIT_MS = max(
     0, min(1000, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_WAIT_MS", 0))
 )
 HYBRID_ANE_MIN_BUDGET_MS = max(
-    0, min(30000, env_int("METALFISH_HYBRID_ANE_MIN_BUDGET_MS", 1000))
+    0, min(30000, env_int("METALFISH_HYBRID_ANE_MIN_BUDGET_MS", 500))
 )
 TRANSFORMER_LOW_TIME_FALLBACK_MS = max(
     0, min(30000, env_int("METALFISH_TRANSFORMER_LOW_TIME_FALLBACK_MS", 3000))
@@ -296,6 +300,13 @@ TRANSFORMER_MIN_MOVE_BUDGET_MS = max(
     0, min(5000, env_int("METALFISH_TRANSFORMER_MIN_MOVE_BUDGET_MS", 400))
 )
 DEFAULT_SYZYGY_PATH = PROJ / "syzygy"
+DRAW_OFFER_TABLEBASE = env_bool_string("METALFISH_DRAW_OFFER_TABLEBASE", True) == "true"
+DRAW_OFFER_SEARCH_CAP_MS = max(
+    0, min(30_000, env_int("METALFISH_DRAW_OFFER_SEARCH_CAP_MS", 1500))
+)
+DRAW_OFFER_MAX_SYZYGY_PIECES = max(
+    2, min(7, env_int("METALFISH_DRAW_OFFER_MAX_SYZYGY_PIECES", 7))
+)
 
 
 def syzygy_path_is_safe(path: pathlib.Path) -> bool:
@@ -392,11 +403,40 @@ BOT_ONLINE_FETCH_LIMIT = max(
     1, min(512, env_int("METALFISH_BOT_ONLINE_FETCH_LIMIT", 512))
 )
 BOT_ONLINE_CACHE_TTL_S = env_float("METALFISH_BOT_ONLINE_CACHE_TTL_S", 20.0)
+SEEK_NO_CANDIDATE_RETRY_S = max(
+    5.0, min(300.0, env_float("METALFISH_SEEK_NO_CANDIDATE_RETRY_S", 30.0))
+)
+SEEK_COOLDOWN_RETRY_MIN_S = max(
+    1.0, min(60.0, env_float("METALFISH_SEEK_COOLDOWN_RETRY_MIN_S", 5.0))
+)
+SEEK_COOLDOWN_RETRY_MAX_S = max(
+    SEEK_COOLDOWN_RETRY_MIN_S,
+    min(900.0, env_float("METALFISH_SEEK_COOLDOWN_RETRY_MAX_S", 120.0)),
+)
 PLAYING_STATUS_CACHE_TTL_S = env_float("METALFISH_PLAYING_STATUS_CACHE_TTL_S", 5.0)
+ACCEPTED_CHALLENGE_RESERVE_TTL_S = max(
+    5.0, min(60.0, env_float("METALFISH_ACCEPTED_CHALLENGE_RESERVE_TTL_S", 30.0))
+)
+TIME_CONTROL_DECLINE_COOLDOWN_S = max(
+    600, min(86_400, env_int("METALFISH_TIME_CONTROL_DECLINE_COOLDOWN_S", 21_600))
+)
+STATIC_CHALLENGE_DECLINE_COOLDOWN_S = max(
+    600, min(86_400, env_int("METALFISH_STATIC_CHALLENGE_DECLINE_COOLDOWN_S", 21_600))
+)
+FRIENDS_ONLY_CHALLENGE_COOLDOWN_S = max(
+    3_600,
+    min(86_400, env_int("METALFISH_FRIENDS_ONLY_CHALLENGE_COOLDOWN_S", 86_400)),
+)
 CHALLENGE_COOLDOWN_PATH = pathlib.Path(
     os.environ.get(
         "METALFISH_CHALLENGE_COOLDOWN_FILE",
         str(PROJ / "results" / "lichess_challenge_cooldowns.json"),
+    )
+)
+SPEED_CHALLENGE_COOLDOWN_PATH = pathlib.Path(
+    os.environ.get(
+        "METALFISH_SPEED_CHALLENGE_COOLDOWN_FILE",
+        str(PROJ / "results" / "lichess_challenge_speed_cooldowns.json"),
     )
 )
 PLAYED_FORMAT_HISTORY_PATH = pathlib.Path(
@@ -424,6 +464,12 @@ LICHESS_AUDIT_DIR = pathlib.Path(
     os.environ.get(
         "METALFISH_LICHESS_AUDIT_DIR",
         str(PROJ / "results" / "lichess_audit"),
+    )
+)
+LICHESS_SEEK_AUDIT_PATH = pathlib.Path(
+    os.environ.get(
+        "METALFISH_LICHESS_SEEK_AUDIT_FILE",
+        str(PROJ / "results" / "lichess_seek_audit.jsonl"),
     )
 )
 LICHESS_AUDIT_EVENT_LIMIT = max(
@@ -613,6 +659,7 @@ BASE_ENGINE_OPTIONS = {
     "MCTSMinibatchSize": str(HYBRID_MCTS_MINIBATCH),
     "MCTSMinimumKLDGainPerNode": "0.00005",
     "MCTSPolicySoftmaxTemp": "1.359",
+    "MCTSRootPolicySoftmaxTemp": "1.6",
     "MCTSSmartPruningFactor": "1.33",
     "MCTSCacheHistoryLength": "0",
     "MCTSSolidTreeThreshold": "100",
@@ -659,12 +706,24 @@ def ane_engine_options(args) -> dict[str, str]:
         return {}
     options = {
         "HybridANERootProbe": "true",
+        "HybridANERootHints": (
+            "true"
+            if getattr(args, "hybrid_ane_root_hints", HYBRID_ANE_ROOT_HINTS)
+            else "false"
+        ),
         "HybridANEConfirmMCTSOverride": (
             "true"
             if getattr(
                 args,
                 "hybrid_ane_confirm_mcts_override",
                 HYBRID_ANE_CONFIRM_MCTS_OVERRIDE,
+            )
+            else "false"
+        ),
+        "HybridANEOnlyPawnEndgames": (
+            "true"
+            if getattr(
+                args, "hybrid_ane_only_pawn_endgames", HYBRID_ANE_ONLY_PAWN_ENDGAMES
             )
             else "false"
         ),
@@ -693,14 +752,25 @@ def ane_engine_options(args) -> dict[str, str]:
 
 
 def normalize_ane_args(args):
-    args.hybrid_ane_root_hint_count = max(
-        1, min(32, int(getattr(args, "hybrid_ane_root_hint_count", 10)))
+    ane_root_hint_count = getattr(
+        args, "hybrid_ane_root_hint_count", HYBRID_ANE_ROOT_HINT_COUNT
     )
+    args.hybrid_ane_root_hint_count = max(1, min(32, int(ane_root_hint_count)))
     args.hybrid_ane_root_hint_wait_ms = max(
-        0, min(1000, int(getattr(args, "hybrid_ane_root_hint_wait_ms", 0)))
+        0,
+        min(
+            1000,
+            int(
+                getattr(
+                    args,
+                    "hybrid_ane_root_hint_wait_ms",
+                    HYBRID_ANE_ROOT_HINT_WAIT_MS,
+                )
+            ),
+        ),
     )
     args.hybrid_ane_min_budget_ms = max(
-        0, min(30000, int(getattr(args, "hybrid_ane_min_budget_ms", 1000)))
+        0, min(30000, int(getattr(args, "hybrid_ane_min_budget_ms", 0)))
     )
     return args
 
@@ -724,9 +794,29 @@ def ane_status_label(args) -> str:
         args, "hybrid_ane_root_hint_wait_ms", HYBRID_ANE_ROOT_HINT_WAIT_MS
     )
     min_budget = getattr(args, "hybrid_ane_min_budget_ms", HYBRID_ANE_MIN_BUDGET_MS)
+    hints = (
+        "hints on"
+        if getattr(args, "hybrid_ane_root_hints", HYBRID_ANE_ROOT_HINTS)
+        else "hints off"
+    )
+    scope = (
+        "pawn-only"
+        if getattr(args, "hybrid_ane_only_pawn_endgames", HYBRID_ANE_ONLY_PAWN_ENDGAMES)
+        else "all roots"
+    )
+    confirm = (
+        "confirm on"
+        if getattr(
+            args,
+            "hybrid_ane_confirm_mcts_override",
+            HYBRID_ANE_CONFIRM_MCTS_OVERRIDE,
+        )
+        else "confirm off"
+    )
     status = "ready" if weights.exists() and model.exists() else "missing files"
     return (
-        f"{status} | {compute}, wait {wait_ms} ms, min budget {min_budget} ms, "
+        f"{status} | {compute}, {scope}, {hints}, {confirm}, wait {wait_ms} ms, "
+        f"min budget {min_budget} ms, "
         f"weights={weights.name}, model={model.name}"
     )
 
@@ -751,6 +841,13 @@ BULLET_ROTATION_TCS = [
 
 ACCEPTED_SPEEDS = {"bullet", "blitz", "rapid", "classical", "correspondence"}
 CHALLENGE_TIMEOUT = max(20.0, env_float("METALFISH_CHALLENGE_TIMEOUT_S", 21.0))
+CHALLENGE_CANCEL_GRACE_S = max(
+    0.0, min(10.0, env_float("METALFISH_CHALLENGE_CANCEL_GRACE_S", 2.0))
+)
+OUTGOING_CANCEL_RESERVE_TTL_S = max(
+    CHALLENGE_CANCEL_GRACE_S,
+    min(30.0, env_float("METALFISH_OUTGOING_CANCEL_RESERVE_TTL_S", 4.0)),
+)
 MAX_CHALLENGE_RETRIES = 3
 
 
@@ -856,6 +953,8 @@ def print_config_check(args) -> None:
         f"  Audit: {'enabled' if LICHESS_AUDIT_ENABLED else 'disabled'} "
         f"({LICHESS_AUDIT_DIR})"
     )
+    if LICHESS_AUDIT_ENABLED:
+        print(f"  Seek audit: {LICHESS_SEEK_AUDIT_PATH}")
     print(f"  Ponder: {args.ponder}")
 
 
@@ -1430,19 +1529,45 @@ class UCIEngine:
                             pass
 
 
-def _retry_after_seconds(response) -> float:
-    header = getattr(response, "headers", {}).get("Retry-After")
-    if not header:
-        return LICHESS_429_BACKOFF_S
+def _response_ratelimit_seconds(response) -> float | None:
     try:
-        return max(LICHESS_429_BACKOFF_S, float(header))
+        data = response.json()
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    ratelimit = data.get("ratelimit")
+    if not isinstance(ratelimit, dict):
+        return None
+    try:
+        seconds = float(ratelimit.get("seconds", 0) or 0)
     except (TypeError, ValueError):
-        pass
-    try:
-        retry_time = email.utils.parsedate_to_datetime(header)
-        return max(LICHESS_429_BACKOFF_S, retry_time.timestamp() - time.time())
-    except (TypeError, ValueError, IndexError, OverflowError):
-        return LICHESS_429_BACKOFF_S
+        return None
+    if seconds <= 0:
+        return None
+    return min(86_400.0, seconds)
+
+
+def _retry_after_seconds(response, *, include_body: bool = False) -> float:
+    retry_after = LICHESS_429_BACKOFF_S
+    headers = getattr(response, "headers", {}) or {}
+    header = None
+    if hasattr(headers, "get"):
+        header = headers.get("Retry-After") or headers.get("retry-after")
+    if header:
+        try:
+            retry_after = max(retry_after, float(header))
+        except (TypeError, ValueError):
+            try:
+                retry_time = email.utils.parsedate_to_datetime(header)
+                retry_after = max(retry_after, retry_time.timestamp() - time.time())
+            except (TypeError, ValueError, IndexError, OverflowError):
+                pass
+    if include_body:
+        body_seconds = _response_ratelimit_seconds(response)
+        if body_seconds is not None:
+            retry_after = max(retry_after, body_seconds)
+    return retry_after
 
 
 class SerializedHttpClient:
@@ -1699,6 +1824,8 @@ class LichessBot:
         self._pending_challenge_id: str | None = None
         self._pending_challenge_target: str | None = None
         self._pending_challenge_speed: str | None = None
+        self._accepted_challenge_reservations: dict[str, float] = {}
+        self._outgoing_cancel_reservations: dict[str, dict[str, object]] = {}
         self._challenge_sent_at: float = 0
         self._challenge_retries = 0
         self.book = OpeningBook(
@@ -1714,6 +1841,9 @@ class LichessBot:
         self._elo_widen_steps = 0
         self._persist_challenge_cooldowns = True
         self._declined_cooldown: dict[str, float] = self._load_challenge_cooldowns()
+        self._speed_declined_cooldown: dict[str, dict[str, float]] = (
+            self._load_speed_challenge_cooldowns()
+        )
         self._persist_played_format_history = True
         self._played_by_speed: dict[str, dict[str, float]] = (
             self._load_played_format_history()
@@ -1735,9 +1865,13 @@ class LichessBot:
         self._playing_status_cache: dict[str, tuple[float, bool | None]] = {}
         self._last_game_stream_status: int | None = None
         self._last_game_stream_error = ""
+        self._python_tablebase = None
+        self._python_tablebase_failed = False
+        self._python_tablebase_lock = threading.Lock()
         self._audit_enabled = LICHESS_AUDIT_ENABLED
         self._audit_lock = threading.Lock()
         self._audit_counts: dict[str, int] = {}
+        self._seek_audit_count = 0
         self._draining = threading.Event()
         self._shutdown = threading.Event()
 
@@ -1810,22 +1944,53 @@ class LichessBot:
             except OSError:
                 return
 
+    def _audit_seek(self, event: str, **fields) -> None:
+        if not event or not getattr(self, "_audit_enabled", False):
+            return
+        if not hasattr(self, "_audit_lock"):
+            self._audit_lock = threading.Lock()
+            self._audit_counts = {}
+        if not hasattr(self, "_seek_audit_count"):
+            self._seek_audit_count = 0
+
+        with self._audit_lock:
+            if self._seek_audit_count >= LICHESS_AUDIT_EVENT_LIMIT:
+                return
+            record = {
+                "ts": round(time.time(), 3),
+                "event": event,
+            }
+            for key, value in fields.items():
+                record[str(key)] = self._audit_value(value)
+            try:
+                LICHESS_SEEK_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+                with LICHESS_SEEK_AUDIT_PATH.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+                self._seek_audit_count += 1
+            except OSError:
+                return
+
     def get_profile(self) -> dict:
         r = self.api_get("/account")
         r.raise_for_status()
         return r.json()
 
-    def accept_challenge(self, challenge_id: str):
+    def accept_challenge(self, challenge_id: str) -> bool:
         r = self.api_post(f"/challenge/{challenge_id}/accept")
         if r.status_code != 200:
             print(f"  Could not accept {challenge_id}: {r.status_code}")
+            return False
+        return True
 
     def decline_challenge(self, challenge_id: str, reason: str = "generic"):
         self.api_post(f"/challenge/{challenge_id}/decline", json={"reason": reason})
 
-    def make_move(self, game_id: str, move: str) -> bool:
+    def make_move(
+        self, game_id: str, move: str, *, offering_draw: bool = False
+    ) -> bool:
         self._last_move_failure_detail = ""
-        r = self.api_post(f"/bot/game/{game_id}/move/{move}")
+        kwargs = {"params": {"offeringDraw": "true"}} if offering_draw else {}
+        r = self.api_post(f"/bot/game/{game_id}/move/{move}", **kwargs)
         if r.status_code != 200:
             detail = r.text.strip().replace("\n", " ")[:200]
             suffix = f": {detail}" if detail else ""
@@ -1844,6 +2009,23 @@ class LichessBot:
         return min(len(lhs), len(rhs)) >= 8 and (
             lhs.startswith(rhs) or rhs.startswith(lhs)
         )
+
+    def _pending_challenge_matches_game_start(
+        self,
+        pending_id: str | None,
+        pending_target: str | None,
+        pending_speed: str | None,
+        game_id: str | None,
+        event_opponent: str | None,
+        event_speed: str | None,
+    ) -> bool:
+        if self._same_game_id(pending_id, game_id):
+            return True
+        if not pending_target or not event_opponent:
+            return False
+        if self._cooldown_key(pending_target) != self._cooldown_key(event_opponent):
+            return False
+        return not pending_speed or not event_speed or pending_speed == event_speed
 
     def _game_active_status(self, game_id: str) -> bool | None:
         now = time.time()
@@ -1928,20 +2110,38 @@ class LichessBot:
             )
         )
 
-    def _submit_move(self, game_id: str, moves: list[str], move: str) -> bool:
-        if self.make_move(game_id, move):
+    def _move_failure_looks_game_over(self) -> bool:
+        return "game already over" in self._last_move_failure_detail.lower()
+
+    def _submit_move(
+        self,
+        game_id: str,
+        moves: list[str],
+        move: str,
+        *,
+        offering_draw: bool = False,
+        draw_offer_reason: str | None = None,
+    ) -> bool:
+        if self.make_move(game_id, move, offering_draw=offering_draw):
             self._record_submitted_turn(game_id, moves)
             self._audit(
                 game_id,
                 "move_submit",
                 move=move,
                 result="accepted",
+                offering_draw=offering_draw,
+                draw_offer_reason=draw_offer_reason or "",
                 **self._audit_context(moves),
             )
             return True
 
         if self._move_failure_looks_stale():
             self._record_submitted_turn(game_id, moves)
+            if self._move_failure_looks_game_over():
+                self._mark_game_completed(game_id)
+                cache = getattr(self, "_playing_status_cache", {})
+                cache[game_id] = (time.time() + PLAYING_STATUS_CACHE_TTL_S, False)
+                self._playing_status_cache = cache
             print(
                 f"  [{game_id}] Suppressing retries for stale turn after "
                 f"rejected move {move}"
@@ -1953,9 +2153,156 @@ class LichessBot:
             result="rejected",
             detail=self._last_move_failure_detail,
             stale=self._move_failure_looks_stale(),
+            offering_draw=offering_draw,
+            draw_offer_reason=draw_offer_reason or "",
             **self._audit_context(moves),
         )
         return False
+
+    def _pre_submit_active_check_needed(self, board: chess.Board) -> bool:
+        return (
+            board.is_insufficient_material()
+            or board.is_seventyfive_moves()
+            or board.is_fivefold_repetition()
+            or board.can_claim_draw()
+        )
+
+    def _draw_claim_available(self, board: chess.Board) -> bool:
+        try:
+            return (
+                board.is_seventyfive_moves()
+                or board.is_fivefold_repetition()
+                or board.can_claim_draw()
+            )
+        except Exception:
+            return False
+
+    def _tablebase_wdl(self, board: chess.Board) -> int | None:
+        if not DRAW_OFFER_TABLEBASE or not SYZYGY_PATH:
+            return None
+        if len(board.piece_map()) > DRAW_OFFER_MAX_SYZYGY_PIECES:
+            return None
+        if getattr(self, "_python_tablebase_failed", False):
+            return None
+        lock = getattr(self, "_python_tablebase_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._python_tablebase_lock = lock
+        try:
+            with lock:
+                tablebase = getattr(self, "_python_tablebase", None)
+                if tablebase is None:
+                    import chess.syzygy
+
+                    tablebase = chess.syzygy.open_tablebase(SYZYGY_PATH)
+                    self._python_tablebase = tablebase
+                return int(tablebase.probe_wdl(board))
+        except Exception:
+            self._python_tablebase_failed = True
+            return None
+
+    def _draw_offer_reason(self, board: chess.Board) -> str | None:
+        if not self._draw_claim_available(board):
+            return None
+        if self._tablebase_wdl(board) == 0:
+            return "tb_draw_claim"
+        return None
+
+    def _draw_state_fields(self, board: chess.Board) -> dict:
+        try:
+            insufficient = board.is_insufficient_material()
+            seventyfive = board.is_seventyfive_moves()
+            fivefold = board.is_fivefold_repetition()
+            can_claim = board.can_claim_draw()
+        except Exception:
+            return {
+                "piece_count": len(getattr(board, "piece_map", lambda: {})()),
+                "draw_state_error": True,
+            }
+
+        claim_available = self._draw_claim_available(board)
+        wdl = self._tablebase_wdl(board) if claim_available else None
+        reason = "tb_draw_claim" if claim_available and wdl == 0 else ""
+        return {
+            "piece_count": len(board.piece_map()),
+            "insufficient_material": insufficient,
+            "seventyfive_moves": seventyfive,
+            "fivefold_repetition": fivefold,
+            "can_claim_draw": can_claim,
+            "draw_claim_available": claim_available,
+            "tablebase_wdl": wdl if wdl is not None else "",
+            "draw_offer_reason": reason,
+            "draw_offer_eligible": bool(reason),
+        }
+
+    def _should_audit_draw_state(self, fields: dict) -> bool:
+        return bool(
+            fields.get("draw_claim_available")
+            or fields.get("insufficient_material")
+            or fields.get("draw_offer_eligible")
+            or int(fields.get("piece_count") or 64) <= DRAW_OFFER_MAX_SYZYGY_PIECES
+        )
+
+    def _skip_completed_game_submit(
+        self, game_id: str, moves: list[str], move: str
+    ) -> bool:
+        if not self._game_was_completed(game_id):
+            return False
+        self._record_submitted_turn(game_id, moves)
+        print(f"  [{game_id}] Skipping stale move {move}: " "game already completed")
+        self._audit(
+            game_id,
+            "move_submit_skipped_inactive",
+            move=move,
+            source="local_completed",
+            **self._audit_context(moves),
+        )
+        return True
+
+    def _submit_move_if_active(
+        self,
+        game_id: str,
+        moves: list[str],
+        move: str,
+        board: chess.Board,
+        *,
+        offering_draw: bool = False,
+        draw_offer_reason: str | None = None,
+    ) -> bool:
+        if self._skip_completed_game_submit(game_id, moves, move):
+            return False
+        if self._pre_submit_active_check_needed(board):
+            active = self._game_active_status(game_id)
+            self._audit(
+                game_id,
+                "pre_submit_active_check",
+                active=active,
+                move=move,
+                **self._audit_context(moves),
+            )
+            if active is False:
+                self._record_submitted_turn(game_id, moves)
+                print(
+                    f"  [{game_id}] Skipping stale move {move}: "
+                    "game no longer active"
+                )
+                self._audit(
+                    game_id,
+                    "move_submit_skipped_inactive",
+                    move=move,
+                    source="playing_status",
+                    offering_draw=offering_draw,
+                    draw_offer_reason=draw_offer_reason or "",
+                    **self._audit_context(moves),
+                )
+                return False
+        return self._submit_move(
+            game_id,
+            moves,
+            move,
+            offering_draw=offering_draw,
+            draw_offer_reason=draw_offer_reason,
+        )
 
     def _ponder_allowed_for_game(self, game_id: str) -> bool:
         with self._ponder_disabled_lock:
@@ -2184,7 +2531,122 @@ class LichessBot:
 
     def _reserved_games(self) -> int:
         pending = 1 if self._pending_challenge_id else 0
-        return len(self.active_games) + pending
+        return (
+            len(self.active_games)
+            + pending
+            + self._accepted_challenge_reserve_count()
+            + self._outgoing_cancel_reserve_count()
+        )
+
+    def _cleanup_outgoing_cancel_reservations(self) -> None:
+        reservations = getattr(self, "_outgoing_cancel_reservations", {})
+        now = time.time()
+        clean: dict[str, dict[str, object]] = {}
+        for challenge_id, entry in reservations.items():
+            if not isinstance(entry, dict):
+                continue
+            try:
+                expires_at = float(entry.get("expires_at", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if expires_at > now:
+                clean[str(challenge_id)] = entry
+        self._outgoing_cancel_reservations = clean
+
+    def _outgoing_cancel_reserve_count(self) -> int:
+        self._cleanup_outgoing_cancel_reservations()
+        return len(getattr(self, "_outgoing_cancel_reservations", {}))
+
+    def _reserve_outgoing_cancel(
+        self,
+        challenge_id: str | None,
+        target: str | None,
+        speed: str | None,
+    ) -> None:
+        if not challenge_id:
+            return
+        self._cleanup_outgoing_cancel_reservations()
+        self._outgoing_cancel_reservations[str(challenge_id)] = {
+            "expires_at": time.time() + OUTGOING_CANCEL_RESERVE_TTL_S,
+            "target": target,
+            "speed": speed,
+        }
+
+    def _clear_outgoing_cancel_reservation(
+        self, challenge_id: str | None = None
+    ) -> dict[str, object] | None:
+        if not challenge_id:
+            return None
+        reservations = getattr(self, "_outgoing_cancel_reservations", {})
+        entry = reservations.pop(str(challenge_id), None)
+        self._outgoing_cancel_reservations = reservations
+        return entry if isinstance(entry, dict) else None
+
+    def _consume_outgoing_cancel_reservation_for_game(
+        self,
+        game_id: str | None,
+        opponent: str | None,
+        speed: str | None,
+    ) -> dict[str, object] | None:
+        self._cleanup_outgoing_cancel_reservations()
+        reservations = getattr(self, "_outgoing_cancel_reservations", {})
+        if not reservations:
+            return None
+        if game_id and str(game_id) in reservations:
+            return self._clear_outgoing_cancel_reservation(str(game_id))
+        opponent_key = self._cooldown_key(opponent)
+        for challenge_id, entry in list(reservations.items()):
+            if not isinstance(entry, dict):
+                continue
+            target_key = self._cooldown_key(entry.get("target"))
+            entry_speed = entry.get("speed")
+            speed_matches = not speed or not entry_speed or speed == entry_speed
+            if opponent_key and target_key == opponent_key and speed_matches:
+                reservations.pop(challenge_id, None)
+                self._outgoing_cancel_reservations = reservations
+                return entry
+        return None
+
+    def _cleanup_accepted_challenge_reservations(self) -> None:
+        reservations = getattr(self, "_accepted_challenge_reservations", {})
+        now = time.time()
+        self._accepted_challenge_reservations = {
+            challenge_id: expires_at
+            for challenge_id, expires_at in reservations.items()
+            if expires_at > now
+        }
+
+    def _accepted_challenge_reserve_count(self) -> int:
+        self._cleanup_accepted_challenge_reservations()
+        return len(getattr(self, "_accepted_challenge_reservations", {}))
+
+    def _reserve_accepted_challenge(self, challenge_id: str | None) -> None:
+        if not challenge_id:
+            return
+        self._cleanup_accepted_challenge_reservations()
+        self._accepted_challenge_reservations[str(challenge_id)] = (
+            time.time() + ACCEPTED_CHALLENGE_RESERVE_TTL_S
+        )
+
+    def _clear_accepted_challenge_reservations(self) -> None:
+        self._accepted_challenge_reservations = {}
+        self._outgoing_cancel_reservations = {}
+
+    def _clear_accepted_challenge_reservation(self, challenge_id: str | None) -> None:
+        if not challenge_id:
+            return
+        reservations = getattr(self, "_accepted_challenge_reservations", {})
+        reservations.pop(str(challenge_id), None)
+        self._accepted_challenge_reservations = reservations
+
+    def _consume_accepted_challenge_reservation(self) -> None:
+        self._cleanup_accepted_challenge_reservations()
+        reservations = getattr(self, "_accepted_challenge_reservations", {})
+        if not reservations:
+            return
+        oldest = min(reservations, key=reservations.get)
+        reservations.pop(oldest, None)
+        self._accepted_challenge_reservations = reservations
 
     def _completed_limit_reached(self) -> bool:
         limit = getattr(self.args, "quit_after_games", 0) or 0
@@ -2219,6 +2681,43 @@ class LichessBot:
                 return str(game_id)
         game_id = event.get("gameId") or event.get("id")
         return str(game_id) if game_id else ""
+
+    def _event_game_opponent(self, event: dict) -> str | None:
+        game = event.get("game", {}) if isinstance(event, dict) else {}
+        sources = [event]
+        if isinstance(game, dict):
+            sources.insert(0, game)
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            opponent = source.get("opponent")
+            if isinstance(opponent, dict):
+                value = (
+                    opponent.get("id")
+                    or opponent.get("username")
+                    or opponent.get("name")
+                )
+            elif isinstance(opponent, str):
+                value = opponent
+            else:
+                value = source.get("opponentId")
+            key = self._cooldown_key(str(value)) if value else None
+            if key and key != self._cooldown_key(getattr(self, "bot_id", "")):
+                return str(value)
+        return None
+
+    def _event_game_speed(self, event: dict) -> str | None:
+        game = event.get("game", {}) if isinstance(event, dict) else {}
+        sources = [event]
+        if isinstance(game, dict):
+            sources.insert(0, game)
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            speed = source.get("speed") or source.get("perf")
+            if isinstance(speed, str) and speed in ACCEPTED_SPEEDS:
+                return speed
+        return None
 
     def _challenge_id_from_response(self, response: requests.Response) -> str | None:
         try:
@@ -2263,6 +2762,25 @@ class LichessBot:
                     return str(value)
         return ""
 
+    def _challenge_event_speed(self, event: dict) -> str | None:
+        ch = event.get("challenge") if isinstance(event.get("challenge"), dict) else {}
+        for source in (event, ch):
+            if not isinstance(source, dict):
+                continue
+            speed = source.get("speed")
+            if isinstance(speed, str) and speed in ACCEPTED_SPEEDS:
+                return speed
+
+        tc = ch.get("timeControl") if isinstance(ch, dict) else None
+        if not isinstance(tc, dict) or tc.get("type") != "clock":
+            return None
+        try:
+            limit = int(tc.get("limit", 0) or 0)
+            increment = int(tc.get("increment", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        return self._tc_to_speed(limit, increment)
+
     def _clear_pending_challenge(self):
         self._pending_challenge_id = None
         self._pending_challenge_target = None
@@ -2272,10 +2790,12 @@ class LichessBot:
     def _cancel_pending_challenge(self, reason: str):
         challenge_id = self._pending_challenge_id
         target = self._pending_challenge_target or challenge_id
+        speed = getattr(self, "_pending_challenge_speed", None)
         if not challenge_id:
             return
 
         if reason == "game started":
+            self._clear_outgoing_cancel_reservation(challenge_id)
             self._clear_pending_challenge()
             return
 
@@ -2284,6 +2804,8 @@ class LichessBot:
             self.api_post(f"/challenge/{challenge_id}/cancel")
         except Exception as e:
             print(f"  Could not cancel challenge {challenge_id}: {e}")
+        if reason in {"timeout", "expired"}:
+            self._reserve_outgoing_cancel(challenge_id, target, speed)
         self._clear_pending_challenge()
 
     def _enter_drain_mode(self):
@@ -2295,6 +2817,7 @@ class LichessBot:
             self._seek_timer.cancel()
             self._seek_timer = None
         self._cancel_pending_challenge("drain requested")
+        self._clear_accepted_challenge_reservations()
         self._close_warm_engine()
         if not self.active_games:
             self._shutdown.set()
@@ -2388,6 +2911,58 @@ class LichessBot:
         except Exception:
             pass
 
+    def _load_speed_challenge_cooldowns(self) -> dict[str, dict[str, float]]:
+        try:
+            data = json.loads(SPEED_CHALLENGE_COOLDOWN_PATH.read_text())
+        except Exception:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+
+        now = time.time()
+        cooldowns: dict[str, dict[str, float]] = {}
+        for speed, entries in data.items():
+            if speed not in ACCEPTED_SPEEDS or not isinstance(entries, dict):
+                continue
+            clean_entries: dict[str, float] = {}
+            for key, value in entries.items():
+                norm_key = self._cooldown_key(str(key))
+                if not norm_key:
+                    continue
+                try:
+                    expires = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if expires > now:
+                    clean_entries[norm_key] = expires
+            if clean_entries:
+                cooldowns[str(speed)] = clean_entries
+        return cooldowns
+
+    def _save_speed_challenge_cooldowns(self) -> None:
+        if not getattr(self, "_persist_challenge_cooldowns", False):
+            return
+        cooldowns = getattr(self, "_speed_declined_cooldown", {})
+        if not isinstance(cooldowns, dict):
+            return
+        now = time.time()
+        data: dict[str, dict[str, float]] = {}
+        for speed, entries in sorted(cooldowns.items()):
+            if speed not in ACCEPTED_SPEEDS or not isinstance(entries, dict):
+                continue
+            clean_entries = {
+                key: expires
+                for key, expires in sorted(entries.items())
+                if key and expires > now
+            }
+            if clean_entries:
+                data[str(speed)] = clean_entries
+        try:
+            SPEED_CHALLENGE_COOLDOWN_PATH.parent.mkdir(parents=True, exist_ok=True)
+            SPEED_CHALLENGE_COOLDOWN_PATH.write_text(json.dumps(data, indent=2))
+        except Exception:
+            pass
+
     def _load_played_format_history(self) -> dict[str, dict[str, float]]:
         try:
             data = json.loads(PLAYED_FORMAT_HISTORY_PATH.read_text())
@@ -2446,6 +3021,16 @@ class LichessBot:
             return False
         cooldowns = getattr(self, "_declined_cooldown", {})
         return (now or time.time()) < cooldowns.get(key, 0)
+
+    def _bot_speed_on_cooldown(
+        self, bot_id: str | None, speed: str, now: float | None = None
+    ) -> bool:
+        key = self._cooldown_key(bot_id)
+        if not key or speed not in ACCEPTED_SPEEDS:
+            return False
+        cooldowns = getattr(self, "_speed_declined_cooldown", {})
+        entries = cooldowns.get(speed, {}) if isinstance(cooldowns, dict) else {}
+        return (now or time.time()) < entries.get(key, 0)
 
     def _bot_played_in_speed(self, bot_id: str | None, speed: str) -> bool:
         if not getattr(self.args, "avoid_repeat_format", False):
@@ -2518,7 +3103,17 @@ class LichessBot:
             if not self._bot_on_cooldown(str(b.get("id") or b.get("name") or ""), now)
         ]
         if not bots:
-            return [], "All eligible bots are cooling down after declines/timeouts"
+            return [], "All eligible bots are cooling down after prior refusals"
+
+        bots = [
+            b
+            for b in bots
+            if not self._bot_speed_on_cooldown(
+                str(b.get("id") or b.get("name") or ""), speed, now
+            )
+        ]
+        if not bots:
+            return [], f"All eligible bots are cooling down for {speed}"
 
         if getattr(self.args, "avoid_repeat_format", False):
             bots = [
@@ -2531,6 +3126,10 @@ class LichessBot:
             if not bots:
                 return [], f"All eligible bots were already played in {speed}"
 
+        bots = [b for b in bots if self._bot_plays_speed(b, speed)]
+        if not bots:
+            return [], f"No eligible bots active in {speed}"
+
         if rated:
             bots = [b for b in bots if self._rated_opponent_allowed(b, speed)]
             if not bots:
@@ -2540,12 +3139,81 @@ class LichessBot:
         if not candidates:
             if self.args.elo_seek:
                 return [], "No opponents inside Elo seek range"
-            candidates = [b.get("id", "") for b in bots if b.get("id")]
-            random.shuffle(candidates)
+            return [], f"No eligible bots active in {speed}"
 
         if not candidates:
             return [], "No eligible bots online"
         return candidates, None
+
+    def _next_cooldown_retry_delay(
+        self,
+        speed: str | None,
+        *,
+        include_global: bool = True,
+        include_speed: bool = True,
+    ) -> float:
+        now = time.time()
+        expires_at: list[float] = []
+
+        raw_global = getattr(self, "_declined_cooldown", {})
+        if include_global and isinstance(raw_global, dict):
+            for expires in raw_global.values():
+                try:
+                    expires_f = float(expires)
+                except (TypeError, ValueError):
+                    continue
+                if expires_f > now:
+                    expires_at.append(expires_f)
+
+        raw_speed = getattr(self, "_speed_declined_cooldown", {})
+        if include_speed and speed in ACCEPTED_SPEEDS and isinstance(raw_speed, dict):
+            entries = raw_speed.get(speed, {})
+            if isinstance(entries, dict):
+                for expires in entries.values():
+                    try:
+                        expires_f = float(expires)
+                    except (TypeError, ValueError):
+                        continue
+                    if expires_f > now:
+                        expires_at.append(expires_f)
+
+        if not expires_at:
+            return SEEK_NO_CANDIDATE_RETRY_S
+        wait = min(expires_at) - now
+        return max(
+            SEEK_COOLDOWN_RETRY_MIN_S,
+            min(SEEK_COOLDOWN_RETRY_MAX_S, wait),
+        )
+
+    def _seek_no_candidate_retry_delay(
+        self, reason: str | None, speed: str | None
+    ) -> float:
+        reason_text = (reason or "").lower()
+        if bool(speed) and f"cooling down for {speed}".lower() in reason_text:
+            return self._next_cooldown_retry_delay(
+                speed, include_global=False, include_speed=True
+            )
+        if "cooling down" in reason_text:
+            return self._next_cooldown_retry_delay(
+                speed, include_global=True, include_speed=False
+            )
+        if "already played" in reason_text:
+            return min(SEEK_COOLDOWN_RETRY_MAX_S, max(SEEK_NO_CANDIDATE_RETRY_S, 60.0))
+        return SEEK_NO_CANDIDATE_RETRY_S
+
+    def _seek_no_candidate_should_rotate(
+        self, reason: str | None, speed: str | None
+    ) -> bool:
+        if not getattr(self.args, "rotate", False):
+            return False
+        reason_text = (reason or "").lower()
+        return bool(speed) and (
+            "already played" in reason_text
+            or f"active in {speed}".lower() in reason_text
+            or f"cooling down for {speed}".lower() in reason_text
+            or "elo seek range" in reason_text
+            or "rating floor" in reason_text
+        )
 
     def preview_seek_once(self, show_config: bool = True) -> bool:
         if show_config:
@@ -2584,9 +3252,11 @@ class LichessBot:
     def _seek_game_once(self):
         if not self._should_seek():
             return
+        self._cleanup_cooldowns()
 
         if not self._resources_allow_new_game():
             print("  Resources busy, deferring seek for 30s...")
+            self._audit_seek("seek_deferred", reason="resources_busy", retry_s=30)
             self._schedule_retry(30)
             return
 
@@ -2597,8 +3267,14 @@ class LichessBot:
 
         if self._pending_challenge_id:
             target = self._pending_challenge_target
+            speed = getattr(self, "_pending_challenge_speed", None)
             self._cancel_pending_challenge("expired")
             self._cooldown_bot(target)
+            self._audit_seek("challenge_expired", target=target, speed=speed)
+            self._schedule_retry(
+                max(CHALLENGE_CANCEL_GRACE_S, OUTGOING_CANCEL_RESERVE_TTL_S)
+            )
+            return
 
         limit, inc = self._next_tc()
         tc_label = f"{limit//60}+{inc}"
@@ -2609,13 +3285,45 @@ class LichessBot:
             bots, status_code = self._online_bots()
             if bots is None:
                 print(f"  /bot/online failed with {status_code}, retrying...")
+                self._audit_seek("online_failed", status=status_code, retry_s=10)
                 self._schedule_retry()
                 return
 
             candidates, reason = self._seek_candidates(bots, speed, rated)
             if reason:
-                print(f"  {reason}, retrying in 30s...")
-                self._schedule_retry(30)
+                rotated = False
+                if self._seek_no_candidate_should_rotate(reason, speed):
+                    rotated = self._advance_rotation_to_new_speed(speed)
+                retry_s = (
+                    max(1.0, CHALLENGE_CANCEL_GRACE_S)
+                    if rotated
+                    else self._seek_no_candidate_retry_delay(reason, speed)
+                )
+                if rotated:
+                    print(f"  {reason}, trying next speed...")
+                else:
+                    print(
+                        f"  {reason}, retrying in "
+                        f"{self._format_duration(int(round(retry_s)))}..."
+                    )
+                self._audit_seek(
+                    "seek_no_candidates",
+                    speed=speed,
+                    rated=rated,
+                    reason=reason,
+                    retry_s=round(float(retry_s), 3),
+                    rotated=rotated,
+                )
+                self._schedule_retry(retry_s)
+                return
+
+            if not self._should_seek():
+                self._audit_seek(
+                    "seek_aborted",
+                    reason="slot_filled",
+                    speed=speed,
+                    rated=rated,
+                )
                 return
 
             target = candidates[0]
@@ -2632,6 +3340,14 @@ class LichessBot:
                 if not challenge_id:
                     print(f"  Could not read challenge id for {target}")
                     self._cooldown_bot(target, duration=60)
+                    self._audit_seek(
+                        "challenge_bad_response",
+                        target=target,
+                        speed=speed,
+                        rated=rated,
+                        tc=tc_label,
+                        status=r.status_code,
+                    )
                     self._schedule_retry(5)
                     return
                 self._pending_challenge_id = challenge_id
@@ -2645,20 +3361,53 @@ class LichessBot:
                     f"({tc_label}, {'rated' if rated else 'casual'}, "
                     f"candidates={len(candidates)})"
                 )
+                self._audit_seek(
+                    "challenge_sent",
+                    challenge_id=challenge_id,
+                    target=target,
+                    speed=speed,
+                    rated=rated,
+                    tc=tc_label,
+                    candidates=len(candidates),
+                )
                 self._schedule_challenge_timeout()
             elif r.status_code == 429:
                 print("  Rate limited, backing off...")
                 self._rate_limit_count += 1
-                retry_after = _retry_after_seconds(r)
-                if self._rate_limit_count >= 3:
-                    backoff = max(900, retry_after)
+                retry_after = _retry_after_seconds(r, include_body=True)
+                if self._rate_limit_count >= 3 and retry_after <= LICHESS_429_BACKOFF_S:
+                    backoff = min(
+                        3600.0,
+                        max(
+                            900.0,
+                            LICHESS_429_BACKOFF_S
+                            * (2 ** min(5, self._rate_limit_count - 1)),
+                        ),
+                    )
+                    print(
+                        "  Possible challenge cap hit. "
+                        f"Waiting {self._format_duration(int(backoff))} "
+                        "before retrying."
+                    )
+                elif self._rate_limit_count >= 3:
+                    backoff = retry_after
                     print(
                         "  Possible daily cap hit. "
-                        f"Waiting {int(backoff) // 60}min before retrying."
+                        f"Waiting {self._format_duration(int(backoff))} "
+                        "before retrying."
                     )
                 else:
-                    backoff = max(65, retry_after)
-                    print(f"  Waiting {int(backoff)}s...")
+                    backoff = max(LICHESS_429_BACKOFF_S, retry_after)
+                    print(f"  Waiting {self._format_duration(int(backoff))}...")
+                self._audit_seek(
+                    "challenge_rate_limited",
+                    target=target,
+                    speed=speed,
+                    rated=rated,
+                    tc=tc_label,
+                    retry_s=round(float(backoff), 3),
+                    rate_limit_count=self._rate_limit_count,
+                )
                 self._schedule_retry(backoff)
             else:
                 detail = (r.text or "").strip().replace("\n", " ")[:180]
@@ -2669,28 +3418,33 @@ class LichessBot:
                     print(
                         f"  Cooling down {target} for {self._format_duration(cooldown_s)}"
                     )
-                self._cooldown_bot(target, duration=cooldown_s)
+                self._cooldown_challenge_failure(
+                    target, speed, detail, duration=cooldown_s
+                )
+                self._audit_seek(
+                    "challenge_failed",
+                    target=target,
+                    speed=speed,
+                    rated=rated,
+                    tc=tc_label,
+                    status=r.status_code,
+                    reason=detail,
+                    cooldown_s=cooldown_s,
+                )
                 self._schedule_retry(2)
         except Exception as e:
             print(f"  Seek error: {e}")
+            self._audit_seek("seek_error", error=str(e), retry_s=15)
             self._schedule_retry(15)
 
     def _challenge_failure_cooldown_seconds(self, response: requests.Response) -> int:
         cooldown = 300
-        try:
-            data = response.json()
-        except ValueError:
-            return cooldown
-        if not isinstance(data, dict):
-            return cooldown
-        ratelimit = data.get("ratelimit")
-        if isinstance(ratelimit, dict):
-            try:
-                seconds = int(float(ratelimit.get("seconds", 0) or 0))
-            except (TypeError, ValueError):
-                seconds = 0
-            if seconds > 0:
-                cooldown = max(cooldown, min(86_400, seconds + 60))
+        seconds = _response_ratelimit_seconds(response)
+        if seconds is not None:
+            cooldown = max(cooldown, min(86_400, int(seconds) + 60))
+        cooldown = self._reason_specific_cooldown_seconds(
+            getattr(response, "text", ""), cooldown
+        )
         return cooldown
 
     def _format_duration(self, seconds: int) -> str:
@@ -2713,12 +3467,114 @@ class LichessBot:
             )
             self._save_challenge_cooldowns()
 
-    def _cleanup_cooldowns(self):
+    def _cooldown_bot_speed(
+        self, bot_id: str | None, speed: str | None, duration: int = 600
+    ):
+        key = self._cooldown_key(bot_id)
+        if not key or speed not in ACCEPTED_SPEEDS:
+            self._cooldown_bot(bot_id, duration=duration)
+            return
+        if not hasattr(self, "_speed_declined_cooldown") or not isinstance(
+            self._speed_declined_cooldown, dict
+        ):
+            self._speed_declined_cooldown = {}
+        entries = self._speed_declined_cooldown.setdefault(str(speed), {})
+        entries[key] = max(entries.get(key, 0), time.time() + duration)
+        self._save_speed_challenge_cooldowns()
+
+    def _time_control_rejection(self, reason: str | None) -> bool:
+        text = (reason or "").lower()
+        return any(
+            phrase in text
+            for phrase in (
+                "time control",
+                "too slow",
+                "too fast",
+                "faster game",
+                "slower game",
+            )
+        )
+
+    def _reason_specific_cooldown_seconds(
+        self, reason: str | None, default: int
+    ) -> int:
+        text = (reason or "").lower()
+        if "friends" in text:
+            return max(default, FRIENDS_ONLY_CHALLENGE_COOLDOWN_S)
+        if any(
+            phrase in text
+            for phrase in (
+                "not accepting challenges from bots",
+                "not accepting challenges at the moment",
+                "please send me a casual challenge",
+                "please send me a rated challenge",
+            )
+        ):
+            return max(default, STATIC_CHALLENGE_DECLINE_COOLDOWN_S)
+        return default
+
+    def _cooldown_challenge_failure(
+        self,
+        bot_id: str | None,
+        speed: str | None,
+        reason: str | None,
+        duration: int = 600,
+    ) -> None:
+        duration = self._reason_specific_cooldown_seconds(reason, duration)
+        if self._time_control_rejection(reason):
+            self._cooldown_bot_speed(
+                bot_id,
+                speed,
+                duration=max(duration, TIME_CONTROL_DECLINE_COOLDOWN_S),
+            )
+        else:
+            self._cooldown_bot(bot_id, duration=duration)
+
+    def _cleanup_cooldowns(self) -> bool:
         now = time.time()
-        self._declined_cooldown = {
-            k: v for k, v in self._declined_cooldown.items() if v > now
-        }
-        self._save_challenge_cooldowns()
+        raw_global = getattr(self, "_declined_cooldown", {})
+        if not isinstance(raw_global, dict):
+            raw_global = {}
+        clean_global: dict[str, float] = {}
+        for key, expires in raw_global.items():
+            norm_key = self._cooldown_key(str(key))
+            if not norm_key:
+                continue
+            try:
+                expires_f = float(expires)
+            except (TypeError, ValueError):
+                continue
+            if expires_f > now:
+                clean_global[norm_key] = expires_f
+
+        raw_speed = getattr(self, "_speed_declined_cooldown", {})
+        if not isinstance(raw_speed, dict):
+            raw_speed = {}
+        clean_speed: dict[str, dict[str, float]] = {}
+        for speed, entries in raw_speed.items():
+            if speed not in ACCEPTED_SPEEDS or not isinstance(entries, dict):
+                continue
+            clean_entries: dict[str, float] = {}
+            for key, expires in entries.items():
+                norm_key = self._cooldown_key(str(key))
+                if not norm_key:
+                    continue
+                try:
+                    expires_f = float(expires)
+                except (TypeError, ValueError):
+                    continue
+                if expires_f > now:
+                    clean_entries[norm_key] = expires_f
+            if clean_entries:
+                clean_speed[str(speed)] = clean_entries
+
+        changed = clean_global != raw_global or clean_speed != raw_speed
+        self._declined_cooldown = clean_global
+        self._speed_declined_cooldown = clean_speed
+        if changed:
+            self._save_challenge_cooldowns()
+            self._save_speed_challenge_cooldowns()
+        return changed
 
     def _schedule_retry(self, delay: float = 10):
         if self._seek_timer:
@@ -2739,11 +3595,33 @@ class LichessBot:
         self._seek_timer.start()
 
     def _challenge_timed_out(self):
+        seek_lock = getattr(self, "_seek_lock", None)
+        if seek_lock is None:
+            retry_delay = self._challenge_timed_out_locked()
+        else:
+            with seek_lock:
+                retry_delay = self._challenge_timed_out_locked()
+        if retry_delay is not None:
+            self._schedule_retry(retry_delay)
+
+    def _challenge_timed_out_locked(self) -> float | None:
         if self._pending_challenge_id:
             target = self._pending_challenge_target or self._pending_challenge_id
+            speed = getattr(self, "_pending_challenge_speed", None)
+            if len(self.active_games) >= self.args.max_games:
+                self._audit_seek(
+                    "challenge_canceled_slot_filled",
+                    target=target,
+                    speed=speed,
+                    active_games=len(self.active_games),
+                    max_games=self.args.max_games,
+                )
+                self._cancel_pending_challenge("slot filled")
+                return None
             print(f"  Challenge to {target} timed out")
             self._cooldown_bot(target, duration=600)
-            self._clear_pending_challenge()
+            self._audit_seek("challenge_timeout", target=target, speed=speed)
+            self._cancel_pending_challenge("timeout")
             self._challenge_retries += 1
             self._tc_failures += 1
             if self._tc_failures >= 3 and self.args.rotate:
@@ -2752,12 +3630,18 @@ class LichessBot:
                 self._tc_failures = 0
                 self._challenge_retries = 0
                 self._cleanup_cooldowns()
-            if self._challenge_retries < MAX_CHALLENGE_RETRIES and self._should_seek():
-                self.seek_game()
-            elif self._should_seek():
+            can_retry = (
+                self.args.seek
+                and not self._draining.is_set()
+                and not self._completed_limit_reached()
+            )
+            if self._challenge_retries < MAX_CHALLENGE_RETRIES and can_retry:
+                return max(CHALLENGE_CANCEL_GRACE_S, OUTGOING_CANCEL_RESERVE_TTL_S)
+            elif can_retry:
                 self._challenge_retries = 0
                 self._cleanup_cooldowns()
-                self._schedule_retry(15)
+                return 15
+        return None
 
     def _next_tc(self) -> tuple[int, int]:
         if self.args.tc:
@@ -2779,6 +3663,21 @@ class LichessBot:
     def _advance_rotation(self):
         rotation_tcs = self._rotation_tcs()
         self._rotation_idx = (self._rotation_idx + 1) % len(rotation_tcs)
+
+    def _advance_rotation_to_new_speed(self, current_speed: str | None) -> bool:
+        if not self.args.rotate:
+            return False
+        rotation_tcs = self._rotation_tcs()
+        if len(rotation_tcs) <= 1:
+            return False
+        start_idx = self._rotation_idx
+        for _ in range(len(rotation_tcs)):
+            self._advance_rotation()
+            limit, inc = rotation_tcs[self._rotation_idx % len(rotation_tcs)]
+            if self._tc_to_speed(limit, inc) != current_speed:
+                return True
+        self._rotation_idx = start_idx
+        return False
 
     def _tc_to_speed(self, limit: int, inc: int) -> str:
         estimated_duration = limit + 40 * inc
@@ -2850,10 +3749,11 @@ class LichessBot:
 
         if not getattr(self.args, "elo_seek", False):
             # Still filter by speed activity even without elo-seek
-            active = [b for b in bots if self._bot_plays_speed(b, speed)]
-            if not active:
-                active = bots
-            ids = [str(b.get("id", "")) for b in active if b.get("id")]
+            ids = [
+                str(b.get("id", ""))
+                for b in bots
+                if b.get("id") and self._bot_plays_speed(b, speed)
+            ]
             random.shuffle(ids)
             return ids
 
@@ -2959,6 +3859,8 @@ class LichessBot:
         speed = ch.get("speed", "")
         if speed not in ACCEPTED_SPEEDS:
             return f"unsupported speed {speed or '?'}"
+        if self._reserved_games() >= self.args.max_games:
+            return "max games reached"
         if not self._resources_allow_new_game():
             return "resources busy"
         if rated:
@@ -2978,8 +3880,6 @@ class LichessBot:
                 return "bullet disabled"
             if increment == 0 and not self.args.include_zero_increment:
                 return "zero increment disabled"
-        if self._reserved_games() >= self.args.max_games:
-            return "max games reached"
         return None
 
     def should_accept(self, challenge: dict) -> bool:
@@ -3060,6 +3960,12 @@ class LichessBot:
                     print(f"  [{game_id}] Stream error: {e}")
                     self._audit(game_id, "stream_error", error=str(e))
                 if finished:
+                    break
+
+                if self._game_was_completed(game_id):
+                    finished = True
+                    inferred_finished = True
+                    self._audit(game_id, "stream_completed_from_event", attempt=attempt)
                     break
 
                 active_status = self._game_active_status(game_id)
@@ -3202,6 +4108,7 @@ class LichessBot:
                         state = {}
                     status = state.get("status", "started")
                     if status != "started":
+                        self._mark_game_completed(game_id)
                         print(f"  [{game_id}] Game already ended: {status}")
                         self._audit(game_id, "stream_game_full", status=status)
                         return True
@@ -3223,6 +4130,7 @@ class LichessBot:
                         result = f"{status}"
                         if winner:
                             result += f" ({winner} wins)"
+                        self._mark_game_completed(game_id)
                         print(f"  [{game_id}] Game over: {result}, {len(moves)} moves")
                         self._audit(
                             game_id,
@@ -3306,12 +4214,40 @@ class LichessBot:
             self._audit(game_id, "turn_duplicate", **self._audit_context(moves))
             return
 
+        if self._game_was_completed(game_id):
+            self._audit(game_id, "turn_completed_skip", **self._audit_context(moves))
+            return
+
         search_timeout = self._search_timeout_seconds(
             my_color, wtime, btime, winc, binc
         )
         ponder_stop_timeout = self._ponder_stop_timeout_seconds(
             my_color, wtime, btime, winc, binc
         )
+        draw_state = self._draw_state_fields(board)
+        if self._should_audit_draw_state(draw_state):
+            self._audit(
+                game_id,
+                "draw_state",
+                fen=board.fen(),
+                **draw_state,
+                **self._audit_context(moves),
+            )
+        draw_offer_reason = str(draw_state.get("draw_offer_reason") or "") or None
+        offering_draw = draw_offer_reason is not None
+        if offering_draw:
+            if DRAW_OFFER_SEARCH_CAP_MS > 0:
+                cap_s = DRAW_OFFER_SEARCH_CAP_MS / 1000.0
+                search_timeout = min(search_timeout, cap_s)
+                ponder_stop_timeout = min(ponder_stop_timeout, cap_s)
+            self._audit(
+                game_id,
+                "draw_offer_candidate",
+                reason=draw_offer_reason,
+                search_timeout=round(search_timeout, 3),
+                fen=board.fen(),
+                **self._audit_context(moves),
+            )
 
         if engine.ponder_move:
             if self._last_move_matches_ponder(
@@ -3359,7 +4295,14 @@ class LichessBot:
                             **self._audit_context(moves),
                         )
                         engine.restart()
-                    elif self._submit_move(game_id, moves, parsed.uci()):
+                    elif self._submit_move_if_active(
+                        game_id,
+                        moves,
+                        parsed.uci(),
+                        board,
+                        offering_draw=offering_draw,
+                        draw_offer_reason=draw_offer_reason,
+                    ):
                         move_uci = parsed.uci()
                         print(f"  [{game_id}] Ponderhit! {move_uci}")
                         self._start_pondering_if_legal(
@@ -3403,7 +4346,14 @@ class LichessBot:
                 )
                 parsed = self._parse_legal_move(game_id, book_move, board, "book")
                 if parsed is not None:
-                    if self._submit_move(game_id, moves, parsed.uci()):
+                    if self._submit_move_if_active(
+                        game_id,
+                        moves,
+                        parsed.uci(),
+                        board,
+                        offering_draw=offering_draw,
+                        draw_offer_reason=draw_offer_reason,
+                    ):
                         move_uci = parsed.uci()
                         print(f"  [{game_id}] Book: {move_uci}")
                         self._start_book_pondering(
@@ -3434,7 +4384,14 @@ class LichessBot:
                     **self._audit_context(moves),
                 )
                 fallback = self._fallback_move(board)
-                if fallback and self._submit_move(game_id, moves, fallback):
+                if fallback and self._submit_move_if_active(
+                    game_id,
+                    moves,
+                    fallback,
+                    board,
+                    offering_draw=offering_draw,
+                    draw_offer_reason=draw_offer_reason,
+                ):
                     print(f"  [{game_id}] Fallback legal move: {fallback}")
                 return
 
@@ -3515,7 +4472,14 @@ class LichessBot:
                     )
                     return
             parsed = self._parse_legal_move(game_id, best, board, "engine")
-            if parsed is not None and self._submit_move(game_id, moves, parsed.uci()):
+            if parsed is not None and self._submit_move_if_active(
+                game_id,
+                moves,
+                parsed.uci(),
+                board,
+                offering_draw=offering_draw,
+                draw_offer_reason=draw_offer_reason,
+            ):
                 move_uci = parsed.uci()
                 print(f"  [{game_id}] Engine: {move_uci}")
                 ponder_wtime, ponder_btime = self._after_search_clock(
@@ -3556,7 +4520,14 @@ class LichessBot:
             if not best:
                 return
             parsed = self._parse_legal_move(game_id, best, board, "recovery")
-            if parsed is not None and self._submit_move(game_id, moves, parsed.uci()):
+            if parsed is not None and self._submit_move_if_active(
+                game_id,
+                moves,
+                parsed.uci(),
+                board,
+                offering_draw=offering_draw,
+                draw_offer_reason=draw_offer_reason,
+            ):
                 print(f"  [{game_id}] Recovery: {parsed.uci()}")
 
     def _build_board(
@@ -4102,6 +5073,8 @@ class LichessBot:
             f"  Audit:    {'enabled' if LICHESS_AUDIT_ENABLED else 'disabled'} "
             f"| {LICHESS_AUDIT_DIR}"
         )
+        if LICHESS_AUDIT_ENABLED:
+            print(f"  Seek log: {LICHESS_SEEK_AUDIT_PATH}")
         print(
             f"  Clock:    Move overhead {BASE_ENGINE_OPTIONS['Move Overhead']} ms "
             f"| hard cap {MAX_SEARCH_TIMEOUT_S:.0f}s"
@@ -4189,44 +5162,251 @@ class LichessBot:
                     print(f"  Event loop error: {e}")
                     time.sleep(5)
 
-    def _handle_game_start(self, game_id: str) -> None:
+    def _handle_game_start(self, game_id: str, event: dict | None = None) -> None:
         if not game_id:
             return
+        event = event if isinstance(event, dict) else {}
+        event_opponent = self._event_game_opponent(event)
+        event_speed = self._event_game_speed(event)
         if self._game_was_completed(game_id):
             print(f"  [{game_id}] Ignoring stale gameStart for completed game")
+            self._audit_seek(
+                "game_start_ignored",
+                game_id=game_id,
+                reason="completed",
+                target=event_opponent,
+                speed=event_speed,
+            )
             return
         if self._seek_timer:
             self._seek_timer.cancel()
             self._seek_timer = None
         if game_id in self.active_games:
+            self._audit_seek(
+                "game_start_ignored",
+                game_id=game_id,
+                reason="already_active",
+                target=event_opponent,
+                speed=event_speed,
+            )
             return
 
         pending_id = self._pending_challenge_id
         pending_target = self._pending_challenge_target
         pending_speed = getattr(self, "_pending_challenge_speed", None)
+        matched_pending = False
         if pending_id:
-            if self._same_game_id(pending_id, game_id):
+            if self._pending_challenge_matches_game_start(
+                pending_id,
+                pending_target,
+                pending_speed,
+                game_id,
+                event_opponent,
+                event_speed,
+            ):
+                matched_pending = True
                 self._mark_seek_opponent_played(pending_target, pending_speed)
                 self._cancel_pending_challenge("game started")
             else:
+                self._audit_seek(
+                    "game_start_cancel_pending",
+                    game_id=game_id,
+                    pending_id=pending_id,
+                    pending_target=pending_target,
+                    pending_speed=pending_speed,
+                    target=event_opponent,
+                    speed=event_speed,
+                )
                 self._cancel_pending_challenge("game started elsewhere")
+        self._clear_accepted_challenge_reservation(game_id)
+        if not matched_pending:
+            outgoing_entry = self._consume_outgoing_cancel_reservation_for_game(
+                game_id, event_opponent, event_speed
+            )
+            if outgoing_entry:
+                matched_pending = True
+                outgoing_target = str(outgoing_entry.get("target") or "")
+                outgoing_speed = str(outgoing_entry.get("speed") or "")
+                pending_target = outgoing_target or pending_target
+                pending_speed = outgoing_speed or pending_speed
+                self._mark_seek_opponent_played(pending_target, pending_speed)
+            else:
+                self._consume_accepted_challenge_reservation()
 
         self._reset_elo_range()
         self._tc_failures = 0
         if self._draining.is_set():
             print(f"  [{game_id}] Drain mode active, aborting new game")
+            if event_opponent and event_speed:
+                self._mark_seek_opponent_played(event_opponent, event_speed)
+            self._audit_seek(
+                "game_start_aborted",
+                game_id=game_id,
+                reason="drain_mode",
+                target=event_opponent,
+                speed=event_speed,
+                active_games=len(self.active_games),
+                max_games=self.args.max_games,
+            )
             self.abort_or_resign(game_id)
             if not self.active_games:
                 self._shutdown.set()
             return
         if len(self.active_games) >= self.args.max_games:
             print(f"  [{game_id}] Max games reached, aborting overflow game")
+            if event_opponent and event_speed:
+                self._mark_seek_opponent_played(event_opponent, event_speed)
+            self._audit_seek(
+                "game_start_aborted",
+                game_id=game_id,
+                reason="max_games",
+                target=event_opponent,
+                speed=event_speed,
+                active_games=len(self.active_games),
+                max_games=self.args.max_games,
+            )
             self.abort_or_resign(game_id)
             return
         self._advance_rotation()
+        self._audit_seek(
+            "game_started",
+            game_id=game_id,
+            target=pending_target or event_opponent,
+            speed=pending_speed or event_speed,
+            active_games=len(self.active_games) + 1,
+            max_games=self.args.max_games,
+        )
         t = threading.Thread(target=self.play_game, args=(game_id,), daemon=True)
         self.active_games[game_id] = t
         t.start()
+
+    def _handle_challenge_event(self, event: dict) -> None:
+        ch = event.get("challenge", {})
+        if not isinstance(ch, dict):
+            return
+        challenger_user = ch.get("challenger", {})
+        challenger = (
+            challenger_user.get("name") or challenger_user.get("id") or "?"
+            if isinstance(challenger_user, dict)
+            else str(challenger_user or "?")
+        )
+        challenger_id = self._user_id(challenger_user)
+        tc = ch.get("timeControl", {})
+        if isinstance(tc, dict) and tc.get("type") == "clock":
+            try:
+                limit = int(tc.get("limit", 0) or 0)
+                increment = int(tc.get("increment", 0) or 0)
+            except (TypeError, ValueError):
+                limit = 0
+                increment = 0
+            tc_str = f"{limit//60}+{increment}"
+        elif isinstance(tc, dict):
+            tc_str = str(tc.get("type", "?"))
+        else:
+            tc_str = str(tc or "?")
+        rated = "rated" if ch.get("rated") else "casual"
+
+        if challenger_id == self.bot_id:
+            return
+
+        challenge_id = ch.get("id")
+        reason = self._challenge_reject_reason(event)
+        if reason is None:
+            if not challenge_id:
+                print(f"  Could not accept challenge from {challenger}: missing id")
+                return
+            print(f"  Accepting {rated} from {challenger} ({tc_str})")
+            if self.accept_challenge(challenge_id):
+                self._reserve_accepted_challenge(challenge_id)
+        else:
+            print(f"  Declining from {challenger} ({tc_str}, {rated}): {reason}")
+            if challenge_id:
+                self.decline_challenge(challenge_id)
+
+    def _handle_challenge_resolution_event(self, event: dict, etype: str) -> None:
+        challenge_id, event_target = self._challenge_event_identity(event)
+        event_reason = self._challenge_event_reason(event)
+        event_speed = self._challenge_event_speed(event)
+        label = "declined" if etype == "challengeDeclined" else "canceled"
+        if challenge_id:
+            self._clear_accepted_challenge_reservation(challenge_id)
+        if not self._pending_challenge_id:
+            self._cooldown_challenge_failure(
+                event_target, event_speed, event_reason, duration=600
+            )
+            self._audit_seek(
+                "challenge_event_untracked",
+                label=label,
+                challenge_id=challenge_id,
+                target=event_target,
+                speed=event_speed,
+                reason=event_reason,
+            )
+            return
+        if challenge_id and challenge_id != self._pending_challenge_id:
+            self._cooldown_challenge_failure(
+                event_target, event_speed, event_reason, duration=600
+            )
+            self._audit_seek(
+                "challenge_event_stale",
+                label=label,
+                challenge_id=challenge_id,
+                pending_id=self._pending_challenge_id,
+                target=event_target,
+                speed=event_speed,
+                reason=event_reason,
+            )
+            return
+        if self._pending_challenge_id and not challenge_id:
+            pending_target = self._pending_challenge_target
+            pending_speed = getattr(self, "_pending_challenge_speed", None)
+            target_matches = bool(
+                pending_target
+                and event_target
+                and self._cooldown_key(pending_target)
+                == self._cooldown_key(event_target)
+            )
+            speed_matches = (
+                not event_speed or not pending_speed or event_speed == pending_speed
+            )
+            if target_matches and speed_matches:
+                challenge_id = self._pending_challenge_id
+            else:
+                self._audit_seek(
+                    "challenge_event_unidentified",
+                    label=label,
+                    target=event_target,
+                    speed=event_speed,
+                    reason=event_reason,
+                )
+                return
+
+        target = self._pending_challenge_target or event_target
+        reason_suffix = f": {event_reason}" if event_reason else ""
+        print(f"  Challenge to {target} {label}{reason_suffix}")
+        self._cooldown_challenge_failure(
+            target,
+            getattr(self, "_pending_challenge_speed", None),
+            event_reason,
+            duration=600,
+        )
+        self._audit_seek(
+            "challenge_event",
+            label=label,
+            challenge_id=challenge_id,
+            target=target,
+            speed=getattr(self, "_pending_challenge_speed", None),
+            reason=event_reason,
+        )
+        self._clear_pending_challenge()
+        self._tc_failures += 1
+        if self._tc_failures >= 5 and self.args.rotate:
+            print(f"  TC getting too many declines, trying next format...")
+            self._advance_rotation()
+            self._tc_failures = 0
+            self._cleanup_cooldowns()
+        if self._should_seek():
+            self._schedule_retry(2)
 
     def _handle_event(self, event: dict):
         if not isinstance(event, dict):
@@ -4234,91 +5414,39 @@ class LichessBot:
         etype = event.get("type", "")
 
         if etype == "challenge":
-            ch = event.get("challenge", {})
-            if not isinstance(ch, dict):
-                return
-            challenger_user = ch.get("challenger", {})
-            challenger = (
-                challenger_user.get("name") or challenger_user.get("id") or "?"
-                if isinstance(challenger_user, dict)
-                else str(challenger_user or "?")
-            )
-            challenger_id = self._user_id(challenger_user)
-            tc = ch.get("timeControl", {})
-            if isinstance(tc, dict) and tc.get("type") == "clock":
-                try:
-                    limit = int(tc.get("limit", 0) or 0)
-                    increment = int(tc.get("increment", 0) or 0)
-                except (TypeError, ValueError):
-                    limit = 0
-                    increment = 0
-                tc_str = f"{limit//60}+{increment}"
-            elif isinstance(tc, dict):
-                tc_str = str(tc.get("type", "?"))
+            seek_lock = getattr(self, "_seek_lock", None)
+            if seek_lock is None:
+                self._handle_challenge_event(event)
             else:
-                tc_str = str(tc or "?")
-            rated = "rated" if ch.get("rated") else "casual"
-
-            if challenger_id == self.bot_id:
-                return
-
-            challenge_id = ch.get("id")
-            reason = self._challenge_reject_reason(event)
-            if reason is None:
-                if not challenge_id:
-                    print(f"  Could not accept challenge from {challenger}: missing id")
-                    return
-                print(f"  Accepting {rated} from {challenger} ({tc_str})")
-                self.accept_challenge(challenge_id)
-            else:
-                print(
-                    f"  Declining from {challenger} ({tc_str}, {rated}): " f"{reason}"
-                )
-                if challenge_id:
-                    self.decline_challenge(challenge_id)
+                with seek_lock:
+                    self._handle_challenge_event(event)
 
         elif etype == "gameStart":
             game_id = self._event_game_id(event)
             seek_lock = getattr(self, "_seek_lock", None)
             if seek_lock is None:
-                self._handle_game_start(game_id)
+                self._handle_game_start(game_id, event)
             else:
                 with seek_lock:
-                    self._handle_game_start(game_id)
+                    self._handle_game_start(game_id, event)
 
         elif etype == "gameFinish":
             game_id = self._event_game_id(event)
             if game_id:
                 self._mark_game_completed(game_id)
+                cache = getattr(self, "_playing_status_cache", {})
+                cache[game_id] = (time.time() + PLAYING_STATUS_CACHE_TTL_S, False)
+                self._playing_status_cache = cache
             if self._draining.is_set() and not self.active_games:
                 self._shutdown.set()
 
         elif etype in ("challengeDeclined", "challengeCanceled"):
-            challenge_id, event_target = self._challenge_event_identity(event)
-            event_reason = self._challenge_event_reason(event)
-            if not self._pending_challenge_id:
-                self._cooldown_bot(event_target, duration=600)
-                return
-            if challenge_id and challenge_id != self._pending_challenge_id:
-                self._cooldown_bot(event_target, duration=600)
-                return
-            if self._pending_challenge_id and not challenge_id:
-                return
-
-            target = self._pending_challenge_target or event_target
-            label = "declined" if etype == "challengeDeclined" else "canceled"
-            reason_suffix = f": {event_reason}" if event_reason else ""
-            print(f"  Challenge to {target} {label}{reason_suffix}")
-            self._cooldown_bot(target, duration=600)
-            self._clear_pending_challenge()
-            self._tc_failures += 1
-            if self._tc_failures >= 5 and self.args.rotate:
-                print(f"  TC getting too many declines, trying next format...")
-                self._advance_rotation()
-                self._tc_failures = 0
-                self._cleanup_cooldowns()
-            if self._should_seek():
-                self._schedule_retry(2)
+            seek_lock = getattr(self, "_seek_lock", None)
+            if seek_lock is None:
+                self._handle_challenge_resolution_event(event, etype)
+            else:
+                with seek_lock:
+                    self._handle_challenge_resolution_event(event, etype)
 
 
 def main():
@@ -4435,13 +5563,19 @@ def main():
         "--hybrid-ane-root-hints",
         action=argparse.BooleanOptionalAction,
         default=HYBRID_ANE_ROOT_HINTS,
-        help="Use ANE root ordering as AB root-order hints.",
+        help="Allow ANE root probe ordering to feed AB root-order hints.",
     )
     parser.add_argument(
         "--hybrid-ane-confirm-mcts-override",
         action=argparse.BooleanOptionalAction,
         default=HYBRID_ANE_CONFIRM_MCTS_OVERRIDE,
         help="Allow ANE agreement to confirm narrowly gated MCTS overrides.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-only-pawn-endgames",
+        action=argparse.BooleanOptionalAction,
+        default=HYBRID_ANE_ONLY_PAWN_ENDGAMES,
+        help="Restrict ANE root probing to pawn-only endgames.",
     )
     parser.add_argument(
         "--hybrid-ane-weights",

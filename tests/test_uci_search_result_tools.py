@@ -72,6 +72,7 @@ def test_uci_smoke_extracts_search_fields() -> None:
         payload = json.loads(result_path.read_text(encoding="utf-8"))
         expect("search score", payload["search_info"]["score"]["value"] == 96)
         expect("search pv", payload["search_info"]["pv"][0] == "a3b4")
+        expect("search nodes", payload["search_info"]["nodes"] == 149)
         expect("final metric", payload["final_metrics"]["MCTSPlayouts"] == 1)
         expect("string final metric", payload["final_metrics"]["ABMove"] == "a3b4")
 

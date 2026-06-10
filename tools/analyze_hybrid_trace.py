@@ -68,11 +68,21 @@ class TraceLogStats:
     search_entries: int = 0
     hybrid_starts: int = 0
     trace_entries: int = 0
+    ane_top_entries: int = 0
+    ane_agrees_mcts: int = 0
+    ane_confirmed_mcts: int = 0
+    ane_pawn_only_mcts: int = 0
+    ane_q_supported_root: int = 0
+    ane_failures: int = 0
+    ane_hints: int = 0
+    ane_hint_moves: int = 0
     time_safety_fallbacks: int = 0
     time_safety_reasons: dict[str, int] = field(default_factory=dict)
     root_hint_events: int = 0
     root_hint_moves_total: int = 0
     root_hint_sizes: dict[int, int] = field(default_factory=dict)
+    mcts_ultra_low_root_confidence: int = 0
+    ab_mcts_agree_off_first_hint: int = 0
 
 
 def latest_results_file() -> pathlib.Path:
@@ -95,6 +105,23 @@ def latest_results_file() -> pathlib.Path:
     raise FileNotFoundError("no traced tournament results found")
 
 
+def expand_results_paths(paths: list[pathlib.Path]) -> list[pathlib.Path]:
+    expanded: list[pathlib.Path] = []
+    for path in paths:
+        if not path.is_dir():
+            expanded.append(path)
+            continue
+        files = sorted(
+            p
+            for p in path.iterdir()
+            if p.is_file() and p.suffix.lower() in {".json", ".jsonl"}
+        )
+        if not files:
+            raise FileNotFoundError(f"No .json/.jsonl results found in {path}")
+        expanded.extend(files)
+    return expanded
+
+
 def parse_fields(line: str) -> dict[str, str]:
     return dict(re.findall(r"(\w+)=([^\s]+)", line))
 
@@ -111,8 +138,33 @@ def normalize_time_safety_reason(reason: str) -> str:
     return reason
 
 
-def iter_trace_decisions(results_path: pathlib.Path) -> Iterable[TraceDecision]:
-    data = json.loads(results_path.read_text())
+def load_result_records(results_path: pathlib.Path) -> list[object]:
+    text = results_path.read_text()
+    try:
+        return [json.loads(text)]
+    except json.JSONDecodeError as whole_file_error:
+        records: list[object] = []
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError as line_error:
+                raise ValueError(
+                    f"{results_path}: invalid JSONL at line {line_no}: "
+                    f"{line_error.msg}"
+                ) from line_error
+        if records:
+            return records
+        raise whole_file_error
+
+
+def normalize_trace_line(value: object) -> str:
+    line = str(value).removeprefix("info string ").strip()
+    return line if line.startswith("HybridTrace:") else ""
+
+
+def iter_tournament_trace_decisions(data: dict) -> Iterable[TraceDecision]:
     for match in data.get("matches", []):
         for game in match.get("games", []):
             game_no = int(game.get("game", 0))
@@ -145,38 +197,118 @@ def iter_trace_decisions(results_path: pathlib.Path) -> Iterable[TraceDecision]:
                 )
 
 
+def iter_puzzle_trace_decisions(record_no: int, data: dict) -> Iterable[TraceDecision]:
+    puzzle_id = str(data.get("puzzle_id") or data.get("id") or "")
+    for search_no, search in enumerate(data.get("searches", []), start=1):
+        if not isinstance(search, dict):
+            continue
+        trace = normalize_trace_line(search.get("hybrid_trace", ""))
+        if not trace:
+            continue
+        fields = parse_fields(trace)
+        if puzzle_id:
+            fields["PuzzleId"] = puzzle_id
+        ab_move = fields.get("ABMove", "none")
+        mcts_move = fields.get("MCTSMove", "none")
+        yield TraceDecision(
+            game=record_no,
+            ply=int(search.get("ply", search_no)),
+            side=str(search.get("side", "")),
+            fen=str(search.get("fen", "")),
+            played=str(search.get("actual", "")),
+            reason=fields.get("reason", "?"),
+            selected=fields.get("selected", "none"),
+            ab_move=ab_move,
+            mcts_move=mcts_move,
+            fields=fields,
+        )
+
+
+def iter_trace_decisions(results_path: pathlib.Path) -> Iterable[TraceDecision]:
+    for record_no, record in enumerate(load_result_records(results_path), start=1):
+        if not isinstance(record, dict):
+            continue
+        if "matches" in record:
+            yield from iter_tournament_trace_decisions(record)
+        elif "searches" in record:
+            yield from iter_puzzle_trace_decisions(record_no, record)
+
+
 def collect_trace_log_stats(results_paths: list[pathlib.Path]) -> TraceLogStats:
     stats = TraceLogStats()
+
+    def add_ane_fields(fields: dict[str, str]) -> None:
+        if fields.get("ANETop", "none") not in {"", "none"}:
+            stats.ane_top_entries += 1
+        stats.ane_agrees_mcts += field_int(fields, "ANEAgreesMCTS")
+        stats.ane_confirmed_mcts += field_int(fields, "ANEConfirmedMCTS")
+        stats.ane_pawn_only_mcts += field_int(fields, "PawnOnlyANEMCTS")
+        stats.ane_q_supported_root += field_int(fields, "ANEQSupportedRoot")
+        stats.mcts_ultra_low_root_confidence += field_int(
+            fields, "MCTSUltraLowNodeRootConfidence"
+        )
+        stats.ab_mcts_agree_off_first_hint += field_int(
+            fields, "ABMCTSAgreeOffFirstHint"
+        )
+
+    def add_structured_ane_aux_fields(search: dict) -> None:
+        stats.ane_failures += int(search.get("ane_failures") or 0)
+        stats.ane_hints += int(search.get("ane_hints") or 0)
+        stats.ane_hint_moves += int(search.get("ane_hint_moves") or 0)
+
+    def add_structured_ane_fields(search: dict) -> None:
+        if str(search.get("hybrid_ane_top", "none")) not in {"", "none"}:
+            stats.ane_top_entries += 1
+        stats.ane_agrees_mcts += int(search.get("hybrid_ane_agrees_mcts") or 0)
+        stats.ane_confirmed_mcts += int(search.get("hybrid_ane_confirmed_mcts") or 0)
+        add_structured_ane_aux_fields(search)
+
     for results_path in results_paths:
-        data = json.loads(results_path.read_text())
-        for match in data.get("matches", []):
-            for game in match.get("games", []):
-                for entry in game.get("search_log", []):
+        for record in load_result_records(results_path):
+            if not isinstance(record, dict):
+                continue
+            if "matches" in record:
+                for match in record.get("matches", []):
+                    for game in match.get("games", []):
+                        for entry in game.get("search_log", []):
+                            stats.search_entries += 1
+                            has_trace = False
+                            for raw in entry.get("lines", []):
+                                line = str(raw).removeprefix("info string ")
+                                if line.startswith("Starting Parallel Hybrid Search"):
+                                    stats.hybrid_starts += 1
+                                elif line.startswith("Time safety:"):
+                                    stats.time_safety_fallbacks += 1
+                                    reason = line.removeprefix("Time safety:").strip()
+                                    reason = reason.split(";", 1)[0].strip()
+                                    reason = normalize_time_safety_reason(reason)
+                                    stats.time_safety_reasons[reason] = (
+                                        stats.time_safety_reasons.get(reason, 0) + 1
+                                    )
+                                elif line.startswith("Hybrid: AB root hints from MCTS"):
+                                    stats.root_hint_events += 1
+                                    hint_count = max(0, len(line.split()) - 6)
+                                    stats.root_hint_moves_total += hint_count
+                                    stats.root_hint_sizes[hint_count] = (
+                                        stats.root_hint_sizes.get(hint_count, 0) + 1
+                                    )
+                                elif line.startswith("HybridTrace:"):
+                                    has_trace = True
+                                    add_ane_fields(parse_fields(line))
+                            if has_trace:
+                                stats.trace_entries += 1
+            elif "searches" in record:
+                for search in record.get("searches", []):
+                    if not isinstance(search, dict):
+                        continue
                     stats.search_entries += 1
-                    has_trace = False
-                    for raw in entry.get("lines", []):
-                        line = str(raw).removeprefix("info string ")
-                        if line.startswith("Starting Parallel Hybrid Search"):
-                            stats.hybrid_starts += 1
-                        elif line.startswith("Time safety:"):
-                            stats.time_safety_fallbacks += 1
-                            reason = line.removeprefix("Time safety:").strip()
-                            reason = reason.split(";", 1)[0].strip()
-                            reason = normalize_time_safety_reason(reason)
-                            stats.time_safety_reasons[reason] = (
-                                stats.time_safety_reasons.get(reason, 0) + 1
-                            )
-                        elif line.startswith("Hybrid: AB root hints from MCTS"):
-                            stats.root_hint_events += 1
-                            hint_count = max(0, len(line.split()) - 6)
-                            stats.root_hint_moves_total += hint_count
-                            stats.root_hint_sizes[hint_count] = (
-                                stats.root_hint_sizes.get(hint_count, 0) + 1
-                            )
-                        elif line.startswith("HybridTrace:"):
-                            has_trace = True
-                    if has_trace:
+                    trace = normalize_trace_line(search.get("hybrid_trace", ""))
+                    if trace:
                         stats.trace_entries += 1
+                        add_ane_fields(parse_fields(trace))
+                        add_structured_ane_aux_fields(search)
+                    else:
+                        add_structured_ane_fields(search)
     return stats
 
 
@@ -406,11 +538,11 @@ class MetalFishProbe:
                 "MCTSAddDirichletNoise": "false",
                 "HybridMCTSMinimumKLDGainPerNode": "0.0",
                 "HybridABRootRejectMCTS": "true",
-                "HybridMCTSRootReject": "true",
+                "HybridMCTSRootReject": "false",
                 "HybridMCTSABRootHints": "true",
-                "HybridMCTSABRootHintDelayMs": "25",
+                "HybridMCTSABRootHintDelayMs": "0",
                 "HybridMCTSABRootHintCount": "8",
-                "HybridABCandidateVerifyMs": "120",
+                "HybridABCandidateVerifyMs": "240",
                 "HybridABCandidateVerifyCount": "4",
                 "HybridABPolicyWeight": "0.0",
                 "HybridRootPawnLeverTieBreak": "true",
@@ -534,6 +666,25 @@ def print_trace_log_stats(stats: TraceLogStats) -> None:
     print(f"  search_log entries: {stats.search_entries}")
     print(f"  traced decisions: {stats.trace_entries} ({coverage:.1f}%)")
     print(f"  hybrid starts: {stats.hybrid_starts}")
+    if (
+        stats.ane_top_entries
+        or stats.ane_agrees_mcts
+        or stats.ane_confirmed_mcts
+        or stats.ane_pawn_only_mcts
+        or stats.ane_q_supported_root
+        or stats.ane_failures
+        or stats.ane_hints
+        or stats.ane_hint_moves
+    ):
+        print("  ANE root probe:")
+        print(f"    top entries: {stats.ane_top_entries}")
+        print(f"    agrees with MCTS: {stats.ane_agrees_mcts}")
+        print(f"    confirmed MCTS overrides: {stats.ane_confirmed_mcts}")
+        print(f"    pawn-only overrides: {stats.ane_pawn_only_mcts}")
+        print(f"    Q-supported root overrides: {stats.ane_q_supported_root}")
+        print(f"    failures: {stats.ane_failures}")
+        print(f"    hint events: {stats.ane_hints}")
+        print(f"    hint moves: {stats.ane_hint_moves}")
     print(f"  MCTS-to-AB root hint events: {stats.root_hint_events}")
     if stats.root_hint_events:
         avg_hints = stats.root_hint_moves_total / stats.root_hint_events
@@ -542,6 +693,18 @@ def print_trace_log_stats(stats: TraceLogStats) -> None:
         )
         print(f"  MCTS-to-AB root hint avg moves: {avg_hints:.2f}")
         print(f"  MCTS-to-AB root hint sizes: {sizes}")
+    if stats.mcts_ultra_low_root_confidence:
+        print("  MCTS arbitration:")
+        print(
+            "    ultra-low root confidence overrides: "
+            f"{stats.mcts_ultra_low_root_confidence}"
+        )
+    if stats.ab_mcts_agree_off_first_hint:
+        print("  Root hint diagnostics:")
+        print(
+            "    AB/MCTS agreed off first root hint: "
+            f"{stats.ab_mcts_agree_off_first_hint}"
+        )
     print(f"  time-safety AB fallbacks: {stats.time_safety_fallbacks}")
     if stats.time_safety_reasons:
         print("  fallback reasons:")
@@ -918,7 +1081,7 @@ def main() -> int:
     parser.add_argument("--replay-low-time-fallback-ms", type=int, default=3000)
     args = parser.parse_args()
 
-    results_paths = args.results_json or [latest_results_file()]
+    results_paths = expand_results_paths(args.results_json or [latest_results_file()])
     decisions = [
         decision
         for results_path in results_paths

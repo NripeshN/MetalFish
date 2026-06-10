@@ -37,6 +37,7 @@ struct SearchParams {
 
   // Policy softmax temperature
   float policy_softmax_temp = 1.359f;
+  float root_policy_softmax_temp = 1.6f;
 
   // Dirichlet exploration noise (disabled for competitive play)
   bool add_dirichlet_noise = false;
@@ -68,6 +69,12 @@ struct SearchParams {
   // Temperature for final move selection (0 = always best, >0 = sample)
   float temperature = 0.0f;
   float temp_winpct_cutoff = 100.0f;
+  bool high_policy_root_lever_selection = true;
+  bool low_policy_root_lever_selection = true;
+  bool root_tactical_capture_probe = true;
+  bool low_visit_q_override_rescan = true;
+  bool capture_leader_quiet_major_probe = false;
+  int fixed_movetime_q_override_cap = 0;
 
   // Contempt (positive = avoid draws, negative = prefer draws)
   float contempt = 0.0f;

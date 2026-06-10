@@ -50,6 +50,9 @@ ParallelHybridSearch::ParallelHybridSearch() {
   config_.mcts_config.fpu_reduction = 0.330f;
   config_.mcts_config.cpuct_base = 38739.0f;
   config_.mcts_config.cpuct_factor = 3.894f;
+  config_.mcts_config.high_policy_root_lever_selection = false;
+  config_.mcts_config.low_policy_root_lever_selection = false;
+  config_.mcts_config.low_visit_q_override_rescan = false;
 
   config_.ab_min_depth = 8;
   config_.agreement_threshold = 0.3f;
@@ -241,6 +244,8 @@ void ParallelHybridSearch::start_search(
   {
     std::lock_guard<std::mutex> lock(ab_root_mutex_);
     ab_root_moves_.clear();
+    ab_root_order_hints_.clear();
+    ab_verified_root_order_hints_.clear();
   }
   {
     std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
@@ -330,7 +335,7 @@ void ParallelHybridSearch::ponderhit() {
 
   search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
   time_budget_ms_.store(calculate_time_budget(), std::memory_order_release);
-  start_ane_root_probe();
+  start_ane_root_probe(true);
 
   if (mcts_search_) {
     std::lock_guard<std::mutex> lock(mcts_start_mutex_);
@@ -427,6 +432,8 @@ void ParallelHybridSearch::new_game() {
   {
     std::lock_guard<std::mutex> lock(ab_root_mutex_);
     ab_root_moves_.clear();
+    ab_root_order_hints_.clear();
+    ab_verified_root_order_hints_.clear();
   }
   {
     std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
@@ -509,6 +516,33 @@ bool HybridHasMCTSDecisionBudget(const ::MetalFish::Search::LimitsType &limits,
   return limits.time[WHITE] > 0 || limits.time[BLACK] > 0;
 }
 
+bool HybridUseMCTSPrimaryForFixedNodeBudget(
+    const ::MetalFish::Search::LimitsType &limits) {
+  return limits.nodes > 0 && limits.nodes <= 1024 && limits.movetime <= 0 &&
+         limits.depth <= 0 && limits.mate <= 0 && !limits.infinite &&
+         !limits.ponderMode;
+}
+
+uint64_t HybridLowNodeABProbeNodes(uint64_t requested_nodes) {
+  if (requested_nodes == 0)
+    return 0;
+  return std::clamp<uint64_t>(requested_nodes / 4, 1, 64);
+}
+
+bool HybridLowNodeMCTSPrimaryReady(bool enabled, uint64_t requested_nodes,
+                                   uint64_t mcts_root_current_nodes,
+                                   uint32_t mcts_best_current_visits,
+                                   bool visit_evidence_sane) {
+  if (!enabled || requested_nodes == 0 || !visit_evidence_sane)
+    return false;
+
+  const uint64_t root_min = std::max<uint64_t>(8, (requested_nodes * 3) / 4);
+  const uint32_t best_min =
+      static_cast<uint32_t>(std::max<uint64_t>(4, requested_nodes / 10));
+  return mcts_root_current_nodes >= root_min &&
+         mcts_best_current_visits >= best_min;
+}
+
 int HybridABCandidateVerifyBudgetMs(
     const ::MetalFish::Search::LimitsType &limits, int time_budget_ms,
     int requested_ms, bool waiting_for_ponderhit) {
@@ -522,6 +556,8 @@ int HybridABCandidateVerifyBudgetMs(
 
   int budget_cap = 0;
   if (limits.movetime > 0) {
+    if (limits.movetime < 1000)
+      return 0;
     budget_cap = static_cast<int>(std::max<TimePoint>(0, limits.movetime)) / 6;
   } else if ((limits.time[WHITE] > 0 || limits.time[BLACK] > 0) &&
              time_budget_ms >= 1000) {
@@ -608,9 +644,223 @@ bool HybridMCTSRootConfidenceFixedBudgetOverride(
       visit_share >= 0.74f && root_q_gap >= 0.06f && eval_delta >= 70;
   const bool clear_root_q_confident =
       mcts_total_nodes >= 300 && mcts_visits >= 240 && visit_share >= 0.64f &&
-      root_q_gap >= 0.12f && mcts_cp >= 200 && eval_delta >= 60;
+      root_q_gap >= 0.12f && mcts_cp >= 200 && eval_delta >= 55;
   return value_gap_confident || compact_root_confident ||
          clear_root_q_confident;
+}
+
+bool HybridMCTSLowNodeRootConfidenceOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int ab_average_score,
+    int mcts_average_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || ab_has_clear_preference)
+    return false;
+
+  if (mcts_root_visits < 50 || mcts_root_visits > 180 ||
+      mcts_best_visits < 40 || visit_share < 0.70f || root_q_gap < 0.30f ||
+      mcts_cp < 180 || eval_delta < 150) {
+    return false;
+  }
+
+  if (ab_average_score - mcts_average_score > 35)
+    return false;
+
+  if (ab_in_mcts_rank <= 1 || ab_in_mcts_rank > 4 ||
+      ab_in_mcts_current_visits > 12) {
+    return false;
+  }
+
+  if (mcts_q - ab_in_mcts_q < 0.40f)
+    return false;
+
+  const bool ab_barely_touched_mcts =
+      mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 4 &&
+      mcts_in_ab_score == -VALUE_INFINITE && !mcts_in_ab_lowerbound &&
+      !mcts_in_ab_upperbound && mcts_in_ab_effort <= 1000;
+  const bool ab_shallow_lower_bound =
+      mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 3 && mcts_in_ab_lowerbound &&
+      !mcts_in_ab_upperbound && mcts_in_ab_score >= -50 &&
+      mcts_in_ab_effort >= 50000 && mcts_in_ab_effort <= 250000;
+
+  return ab_barely_touched_mcts || ab_shallow_lower_bound;
+}
+
+bool HybridMCTSUltraLowNodeRootConfidenceOverride(
+    bool fixed_budget, bool visit_evidence_sane, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int ab_score, int ab_average_score, int mcts_average_score,
+    int mcts_in_ab_rank, int mcts_in_ab_score, uint64_t mcts_in_ab_effort,
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q,
+    float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane)
+    return false;
+
+  if (mcts_root_visits < 20 || mcts_root_visits > 40 || mcts_best_visits < 20 ||
+      visit_share < 0.74f || root_q_gap < 0.55f || mcts_cp < 170 ||
+      eval_delta < 170) {
+    return false;
+  }
+
+  if (std::abs(ab_score) > 220)
+    return false;
+
+  if (ab_average_score - mcts_average_score > 720)
+    return false;
+
+  if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 4 ||
+      mcts_in_ab_effort > 400000) {
+    return false;
+  }
+
+  if (mcts_in_ab_score != -VALUE_INFINITE && mcts_in_ab_score < ab_score - 90)
+    return false;
+
+  if (ab_in_mcts_rank <= 1 || ab_in_mcts_current_visits > 4)
+    return false;
+
+  return mcts_q - ab_in_mcts_q >= 0.45f;
+}
+
+bool HybridMCTSShortRootTacticalOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int ab_average_score,
+    int mcts_average_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane)
+    return false;
+
+  if (root_q_gap < 0.16f || mcts_cp < 200 || eval_delta < 45)
+    return false;
+
+  const int max_average_gap = ab_root_rejects_mcts ? 70 : 25;
+  if (ab_average_score - mcts_average_score > max_average_gap)
+    return false;
+
+  if (mcts_root_visits >= 150 && mcts_root_visits < 230 &&
+      mcts_best_visits >= 95 && visit_share >= 0.58f) {
+    if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 3 ||
+        mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
+        mcts_in_ab_effort < 200000 || mcts_in_ab_effort > 1500000) {
+      return false;
+    }
+
+    if (ab_in_mcts_rank < 4 || ab_in_mcts_current_visits > 16)
+      return false;
+
+    return mcts_q - ab_in_mcts_q >= 0.24f;
+  }
+
+  if (!ab_root_rejects_mcts)
+    return false;
+
+  if (mcts_root_visits < 240 || mcts_root_visits > 360 ||
+      mcts_best_visits < 150 || mcts_best_visits > 260 || visit_share < 0.58f ||
+      visit_share > 0.72f || eval_delta < 50) {
+    return false;
+  }
+
+  if (ab_average_score - mcts_average_score > 60)
+    return false;
+
+  if (mcts_in_ab_rank != 2 || mcts_in_ab_score != -VALUE_INFINITE ||
+      mcts_in_ab_lowerbound || mcts_in_ab_effort < 1000000 ||
+      mcts_in_ab_effort > 3000000) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank != 2 || ab_in_mcts_current_visits < 20 ||
+      ab_in_mcts_current_visits > 64) {
+    return false;
+  }
+
+  return mcts_q - ab_in_mcts_q >= 0.20f;
+}
+
+bool HybridMCTSVerifiedHintSupportOverride(
+    bool fixed_budget, bool visit_evidence_sane,
+    bool verified_hint_supports_mcts, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int ab_average_score, int mcts_average_score,
+    int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
+    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || !verified_hint_supports_mcts)
+    return false;
+
+  if (mcts_best_visits > mcts_root_visits)
+    return false;
+
+  if (mcts_root_visits < 120 || mcts_root_visits > 320 ||
+      mcts_best_visits < 70 || mcts_best_visits > 220 || visit_share < 0.55f ||
+      visit_share > 0.72f || root_q_gap < 0.16f || mcts_cp < 200 ||
+      eval_delta < 45) {
+    return false;
+  }
+
+  if (ab_average_score - mcts_average_score > 70)
+    return false;
+
+  if (mcts_in_ab_rank != 2 || mcts_in_ab_score != -VALUE_INFINITE ||
+      mcts_in_ab_lowerbound || !mcts_in_ab_upperbound ||
+      mcts_in_ab_effort > 2500000) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank != 2 || ab_in_mcts_current_visits < 20 ||
+      ab_in_mcts_current_visits > 64) {
+    return false;
+  }
+
+  return mcts_q - ab_in_mcts_q >= 0.20f;
+}
+
+bool HybridMCTSABLowerBoundConfirmedOverride(
+    bool fixed_budget, bool visit_evidence_sane, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap,
+    int ab_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits) {
+  if (!fixed_budget)
+    return false;
+
+  if (mcts_best_visits > mcts_root_visits)
+    return false;
+
+  if (visit_evidence_sane) {
+    if (mcts_root_visits < 50 || mcts_root_visits > 140 ||
+        mcts_best_visits < 45 || visit_share < 0.75f || root_q_gap < 0.30f) {
+      return false;
+    }
+
+    if (ab_score > 500 || mcts_in_ab_rank <= 1 || mcts_in_ab_rank > 3 ||
+        !mcts_in_ab_lowerbound || mcts_in_ab_score < 250 ||
+        mcts_in_ab_score - ab_score < 250 || mcts_in_ab_effort < 100000 ||
+        mcts_in_ab_effort > 1500000) {
+      return false;
+    }
+
+    return ab_in_mcts_rank > 1 && ab_in_mcts_current_visits <= 8;
+  }
+
+  if (mcts_root_visits < 1500 || mcts_root_visits > 6000 ||
+      mcts_best_visits < 1500 || visit_share < 0.95f || root_q_gap < 0.50f) {
+    return false;
+  }
+
+  if (ab_score > 100 || mcts_in_ab_rank <= 1 || mcts_in_ab_rank > 3 ||
+      !mcts_in_ab_lowerbound || mcts_in_ab_score < 500 ||
+      mcts_in_ab_score - ab_score < 450 || mcts_in_ab_effort < 100000 ||
+      mcts_in_ab_effort > 1500000) {
+    return false;
+  }
+
+  return ab_in_mcts_rank > 1 && ab_in_mcts_current_visits <= 32;
 }
 
 bool HybridMCTSCompactFixedBudgetOverride(
@@ -626,6 +876,40 @@ bool HybridMCTSCompactFixedBudgetOverride(
   }
 
   return ab_average_score - mcts_average_score <= 90;
+}
+
+bool HybridMCTSCompactPawnEndgameOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool pawn_only_endgame,
+    bool ab_has_clear_preference, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int ab_average_score, int mcts_average_score,
+    int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || !pawn_only_endgame ||
+      ab_has_clear_preference) {
+    return false;
+  }
+
+  if (mcts_root_visits < 35 || mcts_root_visits >= 80 ||
+      mcts_best_visits < 32 || visit_share < 0.88f || root_q_gap < 0.90f ||
+      mcts_cp < 220 || eval_delta < 220) {
+    return false;
+  }
+
+  if (ab_average_score - mcts_average_score > 90)
+    return false;
+
+  if (mcts_in_ab_rank != 2 || mcts_in_ab_score != -VALUE_INFINITE ||
+      mcts_in_ab_lowerbound || mcts_in_ab_effort < 100000 ||
+      mcts_in_ab_effort > 600000) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank != 2 || ab_in_mcts_current_visits > 2)
+    return false;
+
+  return mcts_q - ab_in_mcts_q >= 0.90f;
 }
 
 bool HybridMCTSCompactClearPreferenceOverride(
@@ -676,11 +960,20 @@ bool HybridMCTSCrossRootConfidenceOverride(
   if (ab_average_score - mcts_average_score > 80)
     return false;
 
-  if (ab_in_mcts_rank < 4 || ab_in_mcts_visits == 0)
+  const float mcts_q_edge = mcts_q - ab_in_mcts_q;
+  const bool ab_ranked_low_by_mcts = ab_in_mcts_rank >= 4;
+  const bool ab_rank2_or_3_rejected_by_mcts =
+      ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 3 && ab_in_mcts_visits <= 48 &&
+      mcts_visits >= 6 * std::max<uint32_t>(1, ab_in_mcts_visits) &&
+      root_q_gap >= 0.12f && visit_share >= 0.64f && eval_delta >= 40 &&
+      mcts_q_edge >= 0.18f;
+  if ((!ab_ranked_low_by_mcts && !ab_rank2_or_3_rejected_by_mcts) ||
+      ab_in_mcts_visits == 0)
     return false;
 
+  const float required_q_edge = ab_rank2_or_3_rejected_by_mcts ? 0.18f : 0.20f;
   return mcts_visits >= 3 * std::max<uint32_t>(1, ab_in_mcts_visits) &&
-         mcts_q - ab_in_mcts_q >= 0.20f;
+         mcts_q_edge >= required_q_edge;
 }
 
 bool HybridMCTSRootConfidenceRejectOverride(
@@ -692,19 +985,326 @@ bool HybridMCTSRootConfidenceRejectOverride(
   if (!root_confidence_fixed_budget || !ab_root_rejects_mcts)
     return false;
 
-  if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 3 ||
-      mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
-      mcts_in_ab_upperbound || mcts_in_ab_effort > 10000) {
+  if (mcts_in_ab_rank <= 0 || mcts_in_ab_score != -VALUE_INFINITE ||
+      mcts_in_ab_lowerbound || mcts_in_ab_upperbound ||
+      mcts_in_ab_effort > 10000) {
     return false;
   }
 
-  if (ab_average_score - mcts_average_score > 120)
+  const int average_gap = ab_average_score - mcts_average_score;
+  const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
+
+  if (mcts_in_ab_rank > 3) {
+    if (mcts_in_ab_rank > 10 || average_gap > 90 || ab_in_mcts_rank < 2 ||
+        ab_in_mcts_rank > 4 || ab_in_mcts_visits == 0 ||
+        ab_in_mcts_visits > 16) {
+      return false;
+    }
+
+    return q_gap_to_ab >= 0.75f;
+  }
+
+  if (average_gap > 120)
     return false;
 
   if (ab_in_mcts_rank <= 1 || ab_in_mcts_visits < 10)
     return false;
 
+  return q_gap_to_ab >= 0.60f;
+}
+
+bool HybridMCTSRootRejectLowMaterialPushOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    bool low_material_root, bool mcts_kingside_pawn_push,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int ab_average_score,
+    int mcts_average_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || !ab_root_rejects_mcts ||
+      !low_material_root || !mcts_kingside_pawn_push) {
+    return false;
+  }
+
+  if (mcts_root_visits < 700 || mcts_root_visits > 1600 ||
+      mcts_best_visits < 500 || visit_share < 0.68f || root_q_gap < 0.45f ||
+      mcts_cp < 140 || eval_delta < 130) {
+    return false;
+  }
+
+  if (ab_average_score - mcts_average_score > 30)
+    return false;
+
+  if (mcts_in_ab_rank <= 1 || mcts_in_ab_rank > 3 ||
+      mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_effort < 20000 ||
+      mcts_in_ab_effort > 80000) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank != 2 || ab_in_mcts_current_visits < 120)
+    return false;
+
+  return mcts_q - ab_in_mcts_q >= 0.45f;
+}
+
+bool HybridMCTSRootRejectKingsidePawnPushOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    bool mcts_kingside_pawn_push, uint64_t mcts_root_current_visits,
+    uint32_t mcts_best_current_visits, float visit_share, float root_q_gap,
+    int mcts_cp, int eval_delta, int mcts_in_ab_rank, int mcts_in_ab_score,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || !ab_root_rejects_mcts ||
+      !mcts_kingside_pawn_push) {
+    return false;
+  }
+
+  if (mcts_root_current_visits < 15 || mcts_root_current_visits > 22 ||
+      mcts_best_current_visits < 10 || mcts_best_current_visits > 20 ||
+      mcts_cp < 240 || eval_delta < 190) {
+    return false;
+  }
+
+  if (mcts_in_ab_rank != 2 || mcts_in_ab_score != -VALUE_INFINITE ||
+      mcts_in_ab_effort > 25000) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank != 2 || ab_in_mcts_current_visits > 4)
+    return false;
+
+  const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
+  const bool normal_q_gap = visit_share >= 0.60f && visit_share <= 0.76f &&
+                            root_q_gap >= 0.30f && q_gap_to_ab >= 0.30f;
+  const bool compact_low_root_q_gap =
+      mcts_root_current_visits >= 15 && mcts_root_current_visits <= 17 &&
+      mcts_best_current_visits >= 8 && visit_share >= 0.50f &&
+      root_q_gap >= 0.24f && q_gap_to_ab >= 0.24f && mcts_cp >= 220 &&
+      eval_delta >= 190 && mcts_in_ab_effort <= 50000;
+  const bool single_line_current =
+      visit_share >= 0.99f && root_q_gap == 0.0f &&
+      ab_in_mcts_current_visits == 0 && mcts_best_current_visits >= 18 &&
+      mcts_cp >= 270 && eval_delta >= 215 && mcts_in_ab_effort <= 20000 &&
+      q_gap_to_ab >= 0.32f;
+  return normal_q_gap || compact_low_root_q_gap || single_line_current;
+}
+
+bool HybridMCTSRootRejectRookEndgamePawnPushOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    bool rook_endgame_root, bool mcts_quiet_central_pawn_push,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int mcts_in_ab_rank,
+    int mcts_in_ab_score, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !ab_root_rejects_mcts || !rook_endgame_root ||
+      !mcts_quiet_central_pawn_push || mcts_best_visits > mcts_root_visits) {
+    return false;
+  }
+
+  if (visit_evidence_sane) {
+    if (mcts_root_visits < 45 || mcts_root_visits > 1600 ||
+        mcts_best_visits < 40 || visit_share < 0.88f || root_q_gap < 0.60f ||
+        mcts_cp < 430 || eval_delta < 300) {
+      const bool ultra_low_root_breakthrough =
+          mcts_root_visits >= 30 && mcts_root_visits <= 48 &&
+          mcts_best_visits >= 28 && visit_share >= 0.84f &&
+          root_q_gap >= 0.66f && mcts_cp >= 440 && eval_delta >= 240 &&
+          mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 6 &&
+          mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 64 &&
+          ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 3 &&
+          ab_in_mcts_current_visits > 0 && ab_in_mcts_current_visits <= 2 &&
+          mcts_best_visits >=
+              12 * std::max<uint32_t>(1, ab_in_mcts_current_visits) &&
+          mcts_q - ab_in_mcts_q >= 0.65f;
+      if (!ultra_low_root_breakthrough)
+        return false;
+    }
+  } else {
+    if (mcts_root_visits < 1500 || mcts_root_visits > 6000 ||
+        mcts_best_visits < 1500 || visit_share < 0.95f || root_q_gap < 0.50f ||
+        mcts_cp < 450 || eval_delta < 380) {
+      return false;
+    }
+  }
+
+  if (mcts_in_ab_rank <= 1 || mcts_in_ab_rank > 6 ||
+      mcts_in_ab_score != -VALUE_INFINITE ||
+      mcts_in_ab_effort > (visit_evidence_sane ? 20000 : 2000)) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank < 2 || ab_in_mcts_rank > 3 ||
+      ab_in_mcts_current_visits == 0 || ab_in_mcts_current_visits > 32) {
+    return false;
+  }
+
+  const uint32_t dominance_multiplier = visit_evidence_sane ? 6 : 50;
+  if (mcts_best_visits <
+      dominance_multiplier * std::max<uint32_t>(1, ab_in_mcts_current_visits)) {
+    return false;
+  }
+
   return mcts_q - ab_in_mcts_q >= 0.60f;
+}
+
+bool HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool rook_endgame_root,
+    bool mcts_quiet_central_pawn_push, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int ab_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || !rook_endgame_root ||
+      !mcts_quiet_central_pawn_push || mcts_best_visits > mcts_root_visits) {
+    return false;
+  }
+
+  if (mcts_root_visits < 24 || mcts_root_visits > 64 || mcts_best_visits < 18 ||
+      visit_share < 0.70f || root_q_gap < 0.55f || mcts_cp < 180 ||
+      eval_delta < 160 || std::abs(ab_score) > 80) {
+    return false;
+  }
+
+  if (mcts_in_ab_rank <= 1 || mcts_in_ab_rank > 3 || !mcts_in_ab_lowerbound ||
+      mcts_in_ab_upperbound || mcts_in_ab_score < -50 ||
+      mcts_in_ab_score - ab_score < -30 || mcts_in_ab_effort < 50000 ||
+      mcts_in_ab_effort > 500000) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank != 2 || ab_in_mcts_current_visits < 4 ||
+      ab_in_mcts_current_visits > 8) {
+    return false;
+  }
+
+  return mcts_q - ab_in_mcts_q >= 0.50f;
+}
+
+bool HybridMCTSRootRejectQuietQueenMoveOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    bool mcts_quiet_central_queen_move, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || !ab_root_rejects_mcts ||
+      !mcts_quiet_central_queen_move) {
+    return false;
+  }
+
+  const bool low_root_tactical =
+      mcts_root_visits >= 7 && mcts_root_visits <= 24 &&
+      mcts_best_visits >= 5 && visit_share >= 0.70f && root_q_gap >= 1.15f &&
+      mcts_cp >= 190 && eval_delta >= 230 && mcts_in_ab_rank >= 3 &&
+      mcts_in_ab_rank <= 7 && mcts_in_ab_score == -VALUE_INFINITE &&
+      !mcts_in_ab_lowerbound && mcts_in_ab_effort <= 512 &&
+      ab_in_mcts_rank >= 5 && ab_in_mcts_rank <= 8 &&
+      ab_in_mcts_current_visits == 0 && mcts_q - ab_in_mcts_q >= 1.00f;
+
+  if (mcts_root_visits < 50 || mcts_root_visits > 1200 ||
+      mcts_best_visits < 47 || visit_share < 0.85f || root_q_gap < 1.05f ||
+      mcts_cp < 330 || eval_delta < 330) {
+    if (!low_root_tactical)
+      return false;
+  }
+
+  if (mcts_in_ab_rank <= 1 || mcts_in_ab_rank > (low_root_tactical ? 7 : 6) ||
+      mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
+      (!low_root_tactical && mcts_in_ab_upperbound) ||
+      mcts_in_ab_effort > 512) {
+    return false;
+  }
+
+  if (low_root_tactical) {
+    if (ab_in_mcts_rank < 5 || ab_in_mcts_rank > 8 ||
+        ab_in_mcts_current_visits != 0) {
+      return false;
+    }
+  } else {
+    if (ab_in_mcts_rank <= 1 || ab_in_mcts_rank > 4 ||
+        ab_in_mcts_current_visits == 0 || ab_in_mcts_current_visits > 4) {
+      return false;
+    }
+  }
+
+  const uint32_t dominance_multiplier = low_root_tactical ? 1 : 12;
+  if (mcts_best_visits <
+      dominance_multiplier * std::max<uint32_t>(1, ab_in_mcts_current_visits)) {
+    return false;
+  }
+
+  return mcts_q - ab_in_mcts_q >= (low_root_tactical ? 1.00f : 1.05f);
+}
+
+bool HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
+    bool ab_root_rejects_mcts, bool mcts_quiet_minor_major_attack,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int mcts_in_ab_rank,
+    int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
+    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || !ab_has_clear_preference ||
+      !ab_root_rejects_mcts || !mcts_quiet_minor_major_attack) {
+    return false;
+  }
+
+  if (mcts_root_visits < 55 || mcts_root_visits > 90 || mcts_best_visits < 30 ||
+      visit_share < 0.50f || root_q_gap < 0.19f || mcts_cp < 180 ||
+      eval_delta < 75) {
+    return false;
+  }
+
+  if (mcts_in_ab_rank < 5 || mcts_in_ab_rank > 12 ||
+      mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
+      mcts_in_ab_effort > 10000) {
+    return false;
+  }
+
+  const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
+  const bool outranks_ab = ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 3 &&
+                           ab_in_mcts_current_visits <= 24 &&
+                           q_gap_to_ab >= 0.19f;
+  const bool lightly_sampled_ab =
+      ab_in_mcts_rank >= 4 && ab_in_mcts_current_visits <= 4 &&
+      mcts_best_visits >=
+          12 * std::max<uint32_t>(1, ab_in_mcts_current_visits) &&
+      q_gap_to_ab >= 0.45f;
+  return outranks_ab || lightly_sampled_ab;
+}
+
+bool HybridMCTSMidRootTacticalQGapOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int mcts_in_ab_rank,
+    int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
+    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || !ab_root_rejects_mcts ||
+      mcts_best_visits > mcts_root_visits) {
+    return false;
+  }
+
+  if (mcts_root_visits < 110 || mcts_root_visits > 180 ||
+      mcts_best_visits < 70 || visit_share < 0.55f || root_q_gap < 0.80f ||
+      mcts_cp < 170 || eval_delta < 220) {
+    return false;
+  }
+
+  if (mcts_in_ab_rank <= 1 || mcts_in_ab_rank > 3 ||
+      mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
+      mcts_in_ab_upperbound || mcts_in_ab_effort > 6000) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank != 2 || ab_in_mcts_current_visits < 32 ||
+      ab_in_mcts_current_visits > 64) {
+    return false;
+  }
+
+  return mcts_q - ab_in_mcts_q >= 0.80f;
 }
 
 bool HybridMCTSReusedRootConfidenceOverride(
@@ -717,6 +1317,29 @@ bool HybridMCTSReusedRootConfidenceOverride(
     float mcts_q) {
   if (!fixed_budget)
     return false;
+
+  const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
+  const int average_gap = ab_average_score - mcts_average_score;
+  const bool high_cache_near_current =
+      mcts_root_visits >= 500 && mcts_best_visits >= 500 &&
+      mcts_root_current_visits >= 18 && mcts_best_current_visits >= 18 &&
+      mcts_in_ab_effort <= 100000;
+  const bool moderate_cache_current =
+      mcts_root_visits >= 400 && mcts_best_visits >= 400 &&
+      mcts_root_current_visits >= 20 && mcts_best_current_visits >= 20 &&
+      mcts_in_ab_effort <= 150000;
+  const bool cache_heavy_near_current =
+      (high_cache_near_current || moderate_cache_current) &&
+      mcts_root_visits >= 3 * std::max<uint64_t>(1, mcts_root_current_visits) &&
+      mcts_best_visits >= 3 * static_cast<uint32_t>(std::max<uint32_t>(
+                                  1, mcts_best_current_visits)) &&
+      absolute_visit_share >= 0.96f && current_visit_share >= 0.96f &&
+      mcts_cp >= 400 && eval_delta >= 400 && average_gap <= 75 &&
+      mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 2 &&
+      mcts_in_ab_score == -VALUE_INFINITE && ab_in_mcts_rank == 2 &&
+      ab_in_mcts_current_visits <= 1 && q_gap_to_ab >= 0.85f;
+  if (cache_heavy_near_current)
+    return true;
 
   if (mcts_root_visits < 200 || mcts_best_visits < 180 ||
       mcts_root_current_visits < 24 || mcts_best_current_visits < 24 ||
@@ -738,13 +1361,13 @@ bool HybridMCTSReusedRootConfidenceOverride(
     return false;
   }
 
-  if (ab_average_score - mcts_average_score > 75)
+  if (average_gap > 75)
     return false;
 
   if (ab_in_mcts_rank <= 1 || ab_in_mcts_current_visits > 2)
     return false;
 
-  return mcts_q - ab_in_mcts_q >= 0.75f;
+  return q_gap_to_ab >= 0.75f;
 }
 
 bool HybridMCTSReusedRootCurrentOverride(
@@ -785,15 +1408,125 @@ bool HybridMCTSReusedRootCurrentOverride(
       mcts_in_ab_effort >= 250000;
   const bool late_lower_bound =
       mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 2 && mcts_in_ab_lowerbound &&
-      !mcts_in_ab_upperbound && mcts_in_ab_score >= 0 &&
-      mcts_in_ab_effort >= 250000 && absolute_visit_share >= 0.93f &&
-      mcts_cp >= 400 && q_gap_to_ab >= 0.58f;
+      !mcts_in_ab_upperbound && mcts_in_ab_effort >= 250000 &&
+      ((mcts_in_ab_score >= 0 && absolute_visit_share >= 0.93f &&
+        mcts_cp >= 400 && q_gap_to_ab >= 0.58f) ||
+       (mcts_in_ab_score >= -50 && absolute_visit_share >= 0.95f &&
+        current_visit_share >= 0.95f && mcts_cp >= 400 && eval_delta >= 400 &&
+        q_gap_to_ab >= 0.85f));
   const bool ab_barely_touched_mcts =
       ab_root_rejects_mcts && mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 4 &&
       mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 10000 &&
       root_q_gap >= 0.75f && q_gap_to_ab >= 0.50f;
 
   return ab_searched_lower_bound || late_lower_bound || ab_barely_touched_mcts;
+}
+
+bool HybridMCTSBishopEndgameRetreatOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
+    bool bishop_endgame_root, bool mcts_bishop_back_rank_retreat,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits,
+    uint64_t mcts_root_current_visits, uint32_t mcts_best_current_visits,
+    float absolute_visit_share, float current_visit_share, int mcts_cp,
+    int eval_delta, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || !bishop_endgame_root ||
+      !mcts_bishop_back_rank_retreat) {
+    return false;
+  }
+
+  const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
+  if (mcts_best_visits > mcts_root_visits ||
+      mcts_best_current_visits > mcts_root_current_visits) {
+    return false;
+  }
+
+  const bool barely_touched_score =
+      mcts_in_ab_score == -VALUE_INFINITE && !mcts_in_ab_lowerbound &&
+      !mcts_in_ab_upperbound && mcts_in_ab_effort <= 10000;
+  const bool low_node_barely_touched =
+      !ab_has_clear_preference && barely_touched_score && mcts_in_ab_rank > 0 &&
+      mcts_in_ab_rank <= 4 && mcts_root_visits >= 80 &&
+      mcts_root_visits <= 190 && mcts_best_visits >= 30 &&
+      mcts_root_current_visits >= 12 && mcts_best_current_visits >= 12 &&
+      absolute_visit_share >= 0.35f && current_visit_share >= 0.70f &&
+      mcts_cp >= 190 && eval_delta >= 180 && ab_in_mcts_rank >= 3 &&
+      ab_in_mcts_rank <= 4 && ab_in_mcts_current_visits <= 12 &&
+      q_gap_to_ab >= 0.30f;
+  if (low_node_barely_touched)
+    return true;
+
+  const bool low_node_q_gap_barely_touched =
+      !ab_has_clear_preference && barely_touched_score && mcts_in_ab_rank > 0 &&
+      mcts_in_ab_rank <= 4 && mcts_root_visits >= 100 &&
+      mcts_root_visits <= 130 && mcts_best_visits >= 45 &&
+      mcts_root_current_visits >= 55 && mcts_best_current_visits >= 36 &&
+      absolute_visit_share >= 0.43f && current_visit_share >= 0.58f &&
+      mcts_cp >= 210 && eval_delta >= 200 && ab_in_mcts_rank >= 2 &&
+      ab_in_mcts_rank <= 3 && ab_in_mcts_current_visits <= 12 &&
+      q_gap_to_ab >= 0.29f;
+  if (low_node_q_gap_barely_touched)
+    return true;
+
+  const bool low_node_lowerbound_confirms =
+      !ab_has_clear_preference && mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 2 &&
+      mcts_in_ab_lowerbound && !mcts_in_ab_upperbound &&
+      mcts_in_ab_score >= 140 && mcts_in_ab_effort >= 200000 &&
+      mcts_root_visits >= 90 && mcts_root_visits <= 130 &&
+      mcts_best_visits >= 40 && mcts_root_current_visits >= 50 &&
+      mcts_best_current_visits >= 30 && absolute_visit_share >= 0.40f &&
+      current_visit_share >= 0.58f && mcts_cp >= 220 && eval_delta >= 210 &&
+      ab_in_mcts_rank >= 3 && ab_in_mcts_current_visits <= 12 &&
+      q_gap_to_ab >= 0.38f;
+  if (low_node_lowerbound_confirms)
+    return true;
+
+  if (mcts_root_visits < 200 || mcts_best_visits < 180 ||
+      mcts_root_current_visits < 24 || absolute_visit_share < 0.75f ||
+      current_visit_share < 0.94f || mcts_cp < 280 || eval_delta < 210) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank <= 1 || ab_in_mcts_current_visits > 1)
+    return false;
+
+  const bool high_confidence_one_visit_short =
+      mcts_best_current_visits >= 23 && mcts_root_current_visits >= 24 &&
+      mcts_cp >= 360 && eval_delta >= 360 && q_gap_to_ab >= 0.58f;
+  if (mcts_best_current_visits < 24 && !high_confidence_one_visit_short)
+    return false;
+
+  const bool low_gap_barely_touched =
+      barely_touched_score && mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 4 &&
+      ab_in_mcts_current_visits == 0 && absolute_visit_share >= 0.80f &&
+      current_visit_share >= 0.99f && mcts_cp >= 300 && eval_delta >= 290;
+  if (q_gap_to_ab < (low_gap_barely_touched ? 0.46f : 0.50f))
+    return false;
+
+  const bool barely_touched_rank_ok =
+      mcts_in_ab_rank > 0 &&
+      (mcts_in_ab_rank <= 4 ||
+       (mcts_in_ab_rank == 5 && mcts_cp >= 360 && eval_delta >= 350));
+  const bool ab_barely_touched_mcts =
+      barely_touched_score && barely_touched_rank_ok;
+  const bool ab_lowerbound_confirms_mcts =
+      mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 2 && mcts_in_ab_lowerbound &&
+      !mcts_in_ab_upperbound && mcts_in_ab_score >= 0 &&
+      mcts_in_ab_effort >= 250000;
+  const bool ab_shallow_lowerbound_confirms_mcts =
+      mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 2 && mcts_in_ab_lowerbound &&
+      !mcts_in_ab_upperbound && mcts_in_ab_score >= 150 &&
+      mcts_in_ab_effort >= 150000 && absolute_visit_share >= 0.90f &&
+      mcts_cp >= 380 && eval_delta >= 360 && q_gap_to_ab >= 0.60f;
+
+  if (ab_has_clear_preference)
+    return ab_lowerbound_confirms_mcts && mcts_in_ab_score >= 300 &&
+           eval_delta >= 220;
+
+  return ab_barely_touched_mcts || ab_lowerbound_confirms_mcts ||
+         ab_shallow_lowerbound_confirms_mcts;
 }
 
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
@@ -824,15 +1557,107 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
                                     float visit_share, float root_q_gap,
                                     int mcts_cp, int eval_delta,
                                     float ane_score_margin) {
-  if (!enabled || !ane_agrees_mcts || !fixed_budget || !visit_evidence_sane ||
-      root_q_gap < 0.20f || mcts_cp < 120 || eval_delta < 60) {
+  const bool large_ane_margin_low_cp =
+      mcts_cp >= 80 && eval_delta >= 80 && ane_score_margin >= 0.45f;
+  if (!enabled || !ane_agrees_mcts || !fixed_budget) {
     return false;
   }
   if (mcts_best_visits > mcts_root_visits)
     return false;
 
+  if (!visit_evidence_sane)
+    return false;
+
+  const bool forced_single_line =
+      mcts_root_visits >= 50 && mcts_root_visits <= 70 &&
+      mcts_best_visits >= 50 && visit_share >= 0.95f && mcts_cp >= 800 &&
+      eval_delta >= 800 && ane_score_margin >= 1.0f;
+  if (root_q_gap < 0.20f && !forced_single_line)
+    return false;
+  if (!forced_single_line && !large_ane_margin_low_cp && mcts_cp < 120)
+    return false;
+  if (!forced_single_line && eval_delta < 60)
+    return false;
+
+  if (forced_single_line)
+    return true;
+
+  if (mcts_root_visits >= 16 && mcts_root_visits <= 35 &&
+      mcts_best_visits >= 13 && visit_share >= 0.80f && root_q_gap >= 0.40f &&
+      root_q_gap <= 0.68f && mcts_cp >= 380 && mcts_cp <= 460 &&
+      eval_delta >= 260 && ane_score_margin >= 0.10f) {
+    return true;
+  }
+
+  if (mcts_root_visits >= 22 && mcts_root_visits <= 28 &&
+      mcts_best_visits >= 18 && visit_share >= 0.82f && root_q_gap >= 0.79f &&
+      mcts_cp >= 150 && eval_delta >= 160 && ane_score_margin >= 0.80f) {
+    return true;
+  }
+
+  if (mcts_root_visits >= 16 && mcts_root_visits <= 20 &&
+      mcts_best_visits >= 12 && visit_share >= 0.75f && root_q_gap >= 0.70f &&
+      mcts_cp >= 650 && eval_delta >= 600 && ane_score_margin >= 0.35f) {
+    return true;
+  }
+
+  if (mcts_root_visits >= 18 && mcts_root_visits <= 32 &&
+      mcts_best_visits >= 16 && visit_share >= 0.80f && root_q_gap >= 0.70f &&
+      mcts_cp >= 450 && eval_delta >= 400 && ane_score_margin >= 0.35f) {
+    return true;
+  }
+
+  if (mcts_root_visits >= 33 && mcts_root_visits <= 34 &&
+      mcts_best_visits >= 28 && visit_share >= 0.84f && root_q_gap >= 0.70f &&
+      mcts_cp >= 700 && eval_delta >= 650 && ane_score_margin >= 0.35f) {
+    return true;
+  }
+
+  if (mcts_root_visits >= 50 && mcts_root_visits <= 60 &&
+      mcts_best_visits >= 40 && visit_share >= 0.80f && root_q_gap >= 0.80f &&
+      mcts_cp >= 500 && eval_delta >= 500 && ane_score_margin >= 0.015f) {
+    return true;
+  }
+
+  if (mcts_root_visits >= 30 && mcts_root_visits < 50 &&
+      mcts_best_visits >= 24 && visit_share >= 0.80f && root_q_gap >= 0.90f &&
+      mcts_cp >= 200 && eval_delta >= 200 && ane_score_margin >= 0.45f) {
+    return true;
+  }
+
+  if (mcts_root_visits >= 35 && mcts_root_visits <= 45 &&
+      mcts_best_visits >= 30 && visit_share >= 0.80f && root_q_gap >= 0.65f &&
+      mcts_cp >= 450 && eval_delta >= 300 && ane_score_margin >= 0.10f) {
+    return true;
+  }
+
   if (mcts_root_visits >= 80 && mcts_best_visits >= 64 &&
-      visit_share >= 0.70f && ane_score_margin >= 0.02f) {
+      visit_share >= 0.70f && ane_score_margin >= 0.10f) {
+    return true;
+  }
+
+  if (mcts_root_visits < 80 && mcts_root_visits >= 50 &&
+      mcts_best_visits >= 45 && mcts_best_visits <= 49 &&
+      visit_share >= 0.85f && root_q_gap >= 0.55f && mcts_cp >= 130 &&
+      eval_delta >= 120 && ane_score_margin >= 0.20f) {
+    return true;
+  }
+
+  if (mcts_root_visits < 80 && mcts_root_visits >= 56 &&
+      mcts_best_visits >= 50 && visit_share >= 0.88f && root_q_gap >= 0.60f &&
+      mcts_cp >= 300 && eval_delta >= 200 && ane_score_margin >= 0.12f) {
+    return true;
+  }
+
+  if (mcts_root_visits < 80 && mcts_root_visits >= 60 &&
+      mcts_best_visits >= 55 && visit_share >= 0.86f && root_q_gap >= 0.40f &&
+      mcts_cp >= 80 && eval_delta >= 80 && ane_score_margin >= 0.45f) {
+    return true;
+  }
+
+  if (mcts_root_visits < 80 && mcts_root_visits >= 30 &&
+      mcts_best_visits >= 24 && visit_share >= 0.44f && root_q_gap >= 1.0f &&
+      mcts_cp >= 280 && eval_delta >= 300 && ane_score_margin >= 0.15f) {
     return true;
   }
 
@@ -840,6 +1665,69 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
          mcts_best_visits >= 50 && visit_share >= 0.90f &&
          root_q_gap >= 0.50f && mcts_cp >= 200 && eval_delta >= 150 &&
          ane_score_margin >= 0.10f;
+}
+
+bool HybridANEQSupportedRootOverride(
+    bool enabled, bool fixed_budget, bool visit_evidence_sane,
+    bool ab_root_rejects_mcts, int ane_rank, float ane_score_margin,
+    uint64_t mcts_root_visits, int ane_in_mcts_rank,
+    uint32_t ane_in_mcts_current_visits, float ane_in_mcts_q,
+    float ane_in_mcts_policy, uint32_t selected_mcts_current_visits,
+    float selected_mcts_q, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, int ane_in_ab_rank,
+    int ane_in_ab_score, int ane_in_ab_average_score, bool ane_in_ab_upperbound,
+    uint64_t ane_in_ab_effort, int selected_ab_average_score) {
+  if (!enabled || !fixed_budget || !visit_evidence_sane ||
+      !ab_root_rejects_mcts || ane_rank != 1 || ane_score_margin < 0.15f) {
+    return false;
+  }
+
+  if (mcts_root_visits < 30 || mcts_root_visits > 120 ||
+      ane_in_mcts_rank <= 0 || ane_in_mcts_rank > 2 ||
+      ane_in_mcts_current_visits < 20 || selected_mcts_current_visits < 20 ||
+      ane_in_mcts_policy < 0.08f || ane_in_mcts_q < 0.55f) {
+    return false;
+  }
+
+  if (ane_in_mcts_current_visits > mcts_root_visits ||
+      selected_mcts_current_visits > mcts_root_visits) {
+    return false;
+  }
+
+  if (static_cast<uint64_t>(ane_in_mcts_current_visits) * 100 <
+      mcts_root_visits * 35) {
+    return false;
+  }
+
+  if (ane_in_mcts_q - selected_mcts_q < 0.75f)
+    return false;
+
+  if (ab_in_mcts_rank > 0) {
+    if (ab_in_mcts_current_visits > mcts_root_visits)
+      return false;
+    if (ane_in_mcts_q - ab_in_mcts_q < 0.75f)
+      return false;
+  }
+
+  const bool ab_barely_evaluated_ane =
+      ane_in_ab_score <= -30000 && ane_in_ab_effort <= 1000;
+  if (ane_in_ab_rank <= 0 || (!ab_barely_evaluated_ane && ane_in_ab_rank > 4))
+    return false;
+
+  const bool ab_did_not_refute_ane =
+      ane_in_ab_upperbound &&
+      selected_ab_average_score - ane_in_ab_average_score <= 140 &&
+      ane_in_ab_effort <= 10000;
+  return ab_barely_evaluated_ane || ab_did_not_refute_ane;
+}
+
+bool HybridANERootHintMarginClear(size_t hint_count, float top_score,
+                                  float second_score) {
+  if (hint_count <= 1)
+    return true;
+  if (!std::isfinite(top_score) || !std::isfinite(second_score))
+    return false;
+  return top_score >= 0.400f && top_score - second_score >= 0.080f;
 }
 
 bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
@@ -869,6 +1757,35 @@ bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
          candidate_policy >= top_policy * 2.0f;
 }
 
+bool HybridRootQConflictTieBreak(bool fixed_budget, bool visit_evidence_sane,
+                                 uint64_t root_visits, uint32_t selected_visits,
+                                 float selected_q, float selected_policy,
+                                 uint32_t candidate_visits, float candidate_q,
+                                 float candidate_policy,
+                                 int selected_average_score,
+                                 int candidate_average_score) {
+  if (!fixed_budget || !visit_evidence_sane || root_visits < 40 ||
+      root_visits > 90 || selected_visits < 20 || candidate_visits < 20) {
+    return false;
+  }
+
+  if (static_cast<uint64_t>(candidate_visits) * 100 <
+      static_cast<uint64_t>(selected_visits) * 75) {
+    return false;
+  }
+
+  if (selected_q > 0.05f || candidate_q < 0.10f ||
+      candidate_q - selected_q < 0.45f) {
+    return false;
+  }
+
+  if (selected_policy < 0.20f || candidate_policy > selected_policy * 0.60f) {
+    return false;
+  }
+
+  return selected_average_score - candidate_average_score <= 60;
+}
+
 bool HybridMCTSRootRejectsAB(bool fixed_budget, bool visit_evidence_sane,
                              bool mcts_strong, bool ab_has_clear_preference,
                              uint32_t top_visits, uint32_t ab_visits,
@@ -889,6 +1806,179 @@ bool HybridMCTSRootRejectsAB(bool fixed_budget, bool visit_evidence_sane,
   return hard_reject || no_clear_ab_reject;
 }
 
+bool HybridMCTSRootRejectQGapOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int mcts_in_ab_rank,
+    int mcts_in_ab_score, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !ab_root_rejects_mcts ||
+      mcts_best_visits > mcts_root_visits) {
+    return false;
+  }
+
+  if (!visit_evidence_sane || mcts_root_visits < 40 || mcts_root_visits > 90 ||
+      mcts_best_visits < 25 || mcts_best_visits > 40 || visit_share < 0.40f ||
+      visit_share > 0.60f || root_q_gap < 0.60f || mcts_cp < 80 ||
+      eval_delta < 150) {
+    const bool low_ab_support_discovery =
+        visit_evidence_sane && mcts_root_visits >= 24 &&
+        mcts_root_visits <= 60 && mcts_best_visits >= 18 &&
+        mcts_best_visits <= 30 && visit_share >= 0.45f && root_q_gap >= 0.90f &&
+        mcts_cp >= 250 && eval_delta >= 280 && mcts_in_ab_rank >= 2 &&
+        mcts_in_ab_rank <= 8 && mcts_in_ab_score == -VALUE_INFINITE &&
+        mcts_in_ab_effort <= 1000 && ab_in_mcts_rank >= 3 &&
+        ab_in_mcts_rank <= 5 && ab_in_mcts_current_visits <= 2 &&
+        mcts_q - ab_in_mcts_q >= 0.90f;
+    const bool tiny_root_dominance =
+        visit_evidence_sane && mcts_root_visits >= 18 &&
+        mcts_root_visits <= 32 && mcts_best_visits >= 16 &&
+        mcts_best_visits <= 24 && visit_share >= 0.80f && root_q_gap >= 0.70f &&
+        mcts_cp >= 250 && eval_delta >= 250 && mcts_in_ab_rank >= 2 &&
+        mcts_in_ab_rank <= 4 && mcts_in_ab_score == -VALUE_INFINITE &&
+        mcts_in_ab_effort <= 800 && ab_in_mcts_rank == 2 &&
+        ab_in_mcts_current_visits <= 2 && mcts_q - ab_in_mcts_q >= 0.70f;
+    const bool ultra_low_root_policy_confidence =
+        visit_evidence_sane && mcts_root_visits >= 12 &&
+        mcts_root_visits <= 32 && mcts_best_visits >= 10 &&
+        visit_share >= 0.75f && root_q_gap >= 0.30f && mcts_cp >= 75 &&
+        eval_delta >= 75 && mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 6 &&
+        mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 10000 &&
+        ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 4 &&
+        ab_in_mcts_current_visits <= 3 && mcts_q - ab_in_mcts_q >= 0.30f;
+    const bool ultra_dominant_low_root =
+        visit_evidence_sane && mcts_root_visits >= 45 &&
+        mcts_root_visits <= 80 && mcts_best_visits >= 45 &&
+        visit_share >= 0.88f && root_q_gap >= 1.20f && mcts_cp >= 500 &&
+        eval_delta >= 600 && mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 3 &&
+        mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 100 &&
+        ab_in_mcts_rank == 2 && ab_in_mcts_current_visits <= 2 &&
+        mcts_q - ab_in_mcts_q >= 1.20f;
+    const bool medium_root_discovery =
+        visit_evidence_sane && mcts_root_visits >= 90 &&
+        mcts_root_visits <= 300 && mcts_best_visits >= 60 &&
+        visit_share >= 0.60f && root_q_gap >= 0.75f && mcts_cp >= 140 &&
+        eval_delta >= 220 && mcts_in_ab_rank == 2 &&
+        mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 1500 &&
+        ab_in_mcts_rank == 2 && ab_in_mcts_current_visits >= 20 &&
+        mcts_q - ab_in_mcts_q >= 0.75f;
+    const bool cache_heavy_discovery =
+        !visit_evidence_sane && mcts_root_visits >= 1400 &&
+        mcts_root_visits <= 2600 && mcts_best_visits >= 1500 &&
+        visit_share >= 0.94f && root_q_gap >= 1.0f && mcts_cp >= 300 &&
+        eval_delta >= 350 && mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 3 &&
+        mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 2600 &&
+        ab_in_mcts_rank == 2 && ab_in_mcts_current_visits >= 20 &&
+        ab_in_mcts_current_visits <= 64 && mcts_q - ab_in_mcts_q >= 1.0f;
+    return low_ab_support_discovery || tiny_root_dominance ||
+           ultra_low_root_policy_confidence || ultra_dominant_low_root ||
+           medium_root_discovery || cache_heavy_discovery;
+  }
+
+  if ((mcts_in_ab_rank != 2 && mcts_in_ab_rank != 3) ||
+      mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_effort > 2500) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank != 2 || ab_in_mcts_current_visits < 20 ||
+      static_cast<uint64_t>(ab_in_mcts_current_visits) * 100 <
+          static_cast<uint64_t>(mcts_best_visits) * 75) {
+    return false;
+  }
+
+  return mcts_q - ab_in_mcts_q >= 0.55f;
+}
+
+bool HybridMCTSClockRootRejectQGapOverride(
+    bool clock_managed, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int mcts_in_ab_rank,
+    int mcts_in_ab_score, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  return clock_managed && visit_evidence_sane && ab_root_rejects_mcts &&
+         mcts_root_visits >= 100 && mcts_root_visits <= 300 &&
+         mcts_best_visits >= 72 && visit_share >= 0.65f &&
+         root_q_gap >= 0.90f && mcts_cp >= 220 && eval_delta >= 300 &&
+         mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 6 &&
+         mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 1000 &&
+         ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 6 &&
+         ab_in_mcts_current_visits <= 4 && mcts_q - ab_in_mcts_q >= 0.90f;
+}
+
+bool HybridPreserveLeadingHintAfterABVerify(
+    bool fixed_budget, bool visit_evidence_sane, bool candidate_shape,
+    uint64_t mcts_current_root_visits, uint32_t mcts_current_best_visits,
+    float current_visit_share, float mcts_q, float displaced_q,
+    float mcts_policy, float displaced_policy, int displaced_average_score,
+    int mcts_average_score, int displaced_score, bool displaced_lowerbound,
+    int mcts_score, bool mcts_lowerbound, bool mcts_upperbound,
+    uint64_t mcts_effort) {
+  if (!fixed_budget || !visit_evidence_sane || !candidate_shape)
+    return false;
+
+  if (mcts_current_root_visits < 18 || mcts_current_root_visits > 80 ||
+      mcts_current_best_visits < 17 ||
+      mcts_current_best_visits > mcts_current_root_visits ||
+      current_visit_share < 0.88f) {
+    return false;
+  }
+
+  if (mcts_q < 0.72f || mcts_q - displaced_q < 0.40f)
+    return false;
+
+  if (mcts_policy + 0.03f < displaced_policy)
+    return false;
+
+  if (displaced_average_score - mcts_average_score > 35)
+    return false;
+
+  if (displaced_lowerbound || displaced_score > 500)
+    return false;
+
+  const bool unresolved_or_shallow = mcts_score == -VALUE_INFINITE ||
+                                     mcts_lowerbound || mcts_upperbound ||
+                                     mcts_effort < 500000;
+  return unresolved_or_shallow;
+}
+
+bool HybridMCTSDiscoveredPawnPushOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool candidate_shape,
+    uint64_t mcts_current_root_visits, uint32_t mcts_current_best_visits,
+    uint32_t ab_current_visits, float current_visit_share, float q_gap_to_ab,
+    int mcts_cp, int eval_delta, int ab_score, int ab_average_score,
+    int mcts_average_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort) {
+  if (!fixed_budget || !visit_evidence_sane || !candidate_shape)
+    return false;
+
+  if (mcts_current_root_visits < 18 || mcts_current_root_visits > 64 ||
+      mcts_current_best_visits < 17 ||
+      mcts_current_best_visits > mcts_current_root_visits ||
+      ab_current_visits > 4 || current_visit_share < 0.90f) {
+    return false;
+  }
+
+  if (q_gap_to_ab < 0.40f || mcts_cp < 280 || eval_delta < 240 ||
+      std::abs(ab_score) > 120) {
+    return false;
+  }
+
+  if (ab_average_score - mcts_average_score > 50)
+    return false;
+
+  if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 3 ||
+      mcts_in_ab_effort > 500000) {
+    return false;
+  }
+
+  if (mcts_in_ab_score == -VALUE_INFINITE)
+    return true;
+
+  return mcts_in_ab_lowerbound && !mcts_in_ab_upperbound &&
+         mcts_in_ab_score >= 30;
+}
+
 bool HybridRootPawnLeverAgreementTieBreak(bool fixed_budget,
                                           bool visit_evidence_sane,
                                           float agreement_visit_share,
@@ -906,7 +1996,26 @@ bool HybridRootPawnLeverCandidate(
       selected_mcts_rank > 0 && candidate_mcts_policy >= 0.25f &&
       candidate_mcts_policy >= selected_mcts_policy * 1.15f;
   const int max_average_gap = high_policy_lever ? 80 : 60;
-  if (mcts_rank <= 0 || mcts_rank > 8 || mcts_current_visits < 8 ||
+  const uint32_t min_current_visits = mcts_rank >= 5 ? 7 : 8;
+  const bool low_visit_agreement_lever =
+      !high_policy_lever && selected_mcts_rank > 0 && selected_mcts_rank <= 3 &&
+      mcts_rank >= 5 && mcts_rank <= 6 && mcts_current_visits >= 3 &&
+      selected_average_score - candidate_average_score <= 40 &&
+      candidate_effort >= 300 && candidate_mcts_policy >= 0.035f &&
+      selected_mcts_q - candidate_mcts_q <= 0.07f &&
+      best_mcts_q - candidate_mcts_q <= 0.07f;
+  const bool defensive_low_visit_lever =
+      !high_policy_lever && selected_average_score <= -250 &&
+      selected_mcts_rank == 1 && mcts_rank >= 5 && mcts_rank <= 6 &&
+      mcts_current_visits >= 2 &&
+      selected_average_score - candidate_average_score <= 40 &&
+      candidate_effort >= 900 && candidate_mcts_policy >= 0.035f &&
+      selected_mcts_q - candidate_mcts_q <= 0.09f &&
+      best_mcts_q - candidate_mcts_q <= 0.09f;
+  const bool low_visit_lever =
+      low_visit_agreement_lever || defensive_low_visit_lever;
+  if (mcts_rank <= 0 || mcts_rank > 8 ||
+      (mcts_current_visits < min_current_visits && !low_visit_lever) ||
       selected_average_score - candidate_average_score > max_average_gap ||
       (!high_policy_lever && candidate_effort < 150)) {
     return false;
@@ -920,7 +2029,7 @@ bool HybridRootPawnLeverCandidate(
     if (mcts_rank < selected_mcts_rank &&
         candidate_mcts_policy < selected_mcts_policy && q_gap > -0.07f)
       return false;
-    if (mcts_rank > 4 && q_gap > 0.055f)
+    if (mcts_rank > 4 && q_gap > 0.060f && !low_visit_lever)
       return false;
     if (candidate_average_score < selected_average_score && mcts_rank <= 4 &&
         q_gap > 0.05f && candidate_mcts_policy <= selected_mcts_policy)
@@ -929,13 +2038,241 @@ bool HybridRootPawnLeverCandidate(
 
   if (!high_policy_lever) {
     const float top_q_gap = best_mcts_q - candidate_mcts_q;
-    if (top_q_gap > 0.07f)
+    if (top_q_gap > (defensive_low_visit_lever ? 0.09f : 0.07f))
       return false;
     if (candidate_mcts_policy >= 0.20f && top_q_gap > 0.03f)
       return false;
   }
 
   return true;
+}
+
+bool HybridMCTSRootSelectorConfirmsPawnLever(
+    uint64_t root_current_visits, uint32_t best_current_visits,
+    float best_policy, float best_q, int selected_average_score,
+    int candidate_average_score, int candidate_mcts_rank,
+    uint32_t candidate_mcts_current_visits, float candidate_mcts_q,
+    float candidate_mcts_policy) {
+  if (root_current_visits > std::numeric_limits<uint32_t>::max())
+    return false;
+  if (candidate_mcts_rank <= 0 || candidate_mcts_rank > 4)
+    return false;
+  if (selected_average_score - candidate_average_score > 60)
+    return false;
+
+  return MCTSRootHighPolicyLeverCandidate(
+      static_cast<uint32_t>(root_current_visits), best_current_visits,
+      candidate_mcts_current_visits, best_policy, best_q, candidate_mcts_policy,
+      candidate_mcts_q);
+}
+
+bool HybridRootQuietMinorMajorAttackCandidate(
+    int selected_average_score, int candidate_average_score,
+    uint64_t candidate_effort, int selected_mcts_rank,
+    uint32_t selected_mcts_current_visits, float selected_mcts_q,
+    int candidate_mcts_rank, uint32_t candidate_mcts_current_visits,
+    float candidate_mcts_q, float candidate_mcts_policy) {
+  if (candidate_mcts_rank <= 0 || candidate_mcts_rank > 2)
+    return false;
+  if (candidate_mcts_current_visits < 4 || candidate_mcts_policy < 0.10f)
+    return false;
+  if (candidate_effort < 1500 || candidate_effort > 10000)
+    return false;
+  if (selected_average_score - candidate_average_score > 60)
+    return false;
+
+  if (candidate_mcts_rank == 1) {
+    if (selected_mcts_rank > 0 && selected_mcts_rank <= 3 &&
+        selected_mcts_q - candidate_mcts_q > 0.12f) {
+      return false;
+    }
+    return true;
+  }
+
+  if (selected_mcts_rank != 1) {
+    return selected_mcts_rank > 2 && selected_mcts_current_visits <= 2 &&
+           candidate_mcts_current_visits >= 12 &&
+           candidate_mcts_q - selected_mcts_q >= 0.08f;
+  }
+  if (selected_mcts_q - candidate_mcts_q > 0.25f)
+    return false;
+  return selected_average_score - candidate_average_score <= 20;
+}
+
+bool HybridRootQuietAttackTieBreakAllowed(Move selected, Move mcts_best) {
+  return selected != Move::none() && selected != mcts_best;
+}
+
+bool HybridANERootPawnLeverCandidate(
+    bool ane_root_probe, int selected_ane_rank, float selected_ane_score,
+    int candidate_ane_rank, float candidate_ane_score,
+    int selected_average_score, int candidate_average_score,
+    uint64_t candidate_effort, int selected_mcts_rank, float selected_mcts_q,
+    float selected_mcts_policy, float best_mcts_q, int candidate_mcts_rank,
+    uint32_t candidate_mcts_current_visits, float candidate_mcts_q,
+    float candidate_mcts_policy) {
+  if (!ane_root_probe || selected_ane_rank <= 0 || candidate_ane_rank <= 0)
+    return false;
+  if (selected_mcts_rank != 1) {
+    if (selected_mcts_rank < 4 || selected_mcts_rank > 8 ||
+        selected_ane_rank < 5 || candidate_ane_rank != 1 ||
+        candidate_ane_score - selected_ane_score < 0.060f ||
+        candidate_mcts_rank <= 0 || candidate_mcts_rank > 3 ||
+        candidate_mcts_current_visits < 24 || candidate_mcts_policy < 0.18f ||
+        candidate_mcts_policy < selected_mcts_policy * 3.0f ||
+        candidate_effort < 5000 || std::abs(selected_average_score) > 1000 ||
+        selected_average_score - candidate_average_score > 40) {
+      return false;
+    }
+    return selected_mcts_q - candidate_mcts_q <= 0.16f &&
+           best_mcts_q - candidate_mcts_q <= 0.22f;
+  }
+  if (candidate_ane_rank > 2 || candidate_ane_rank >= selected_ane_rank)
+    return false;
+  if (candidate_ane_score - selected_ane_score < 0.015f)
+    return false;
+  if (candidate_mcts_rank <= 0 || candidate_mcts_rank > 6 ||
+      candidate_mcts_current_visits < 2 || candidate_mcts_policy < 0.035f) {
+    return false;
+  }
+  const bool defensive_position = selected_average_score <= -100;
+  const uint64_t min_effort = defensive_position ? 75 : 150;
+  const int max_average_gap = defensive_position ? 50 : 40;
+  if (candidate_effort < min_effort)
+    return false;
+  if (selected_average_score - candidate_average_score > max_average_gap)
+    return false;
+  return selected_mcts_q - candidate_mcts_q <= 0.09f;
+}
+
+bool HybridIsPawnOnlyEndgame(const Position &pos) {
+  return pos.non_pawn_material() == VALUE_ZERO;
+}
+
+bool HybridIsRookEndgame(const Position &pos) {
+  return pos.count<ROOK>() > 0 && pos.count<QUEEN>() == 0 &&
+         pos.count<BISHOP>() == 0 && pos.count<KNIGHT>() == 0;
+}
+
+bool HybridIsQuietCentralPawnPush(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL)
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  if (piece == NO_PIECE || type_of(piece) != PAWN || !pos.empty(to))
+    return false;
+
+  const File file = file_of(from);
+  if (file != FILE_D && file != FILE_E)
+    return false;
+
+  if (file != file_of(to))
+    return false;
+
+  const Color us = color_of(piece);
+  const Direction push = pawn_push(us);
+  if (to != from + push && to != from + push + push)
+    return false;
+
+  return relative_rank(us, to) >= RANK_4;
+}
+
+bool HybridIsQuietRookMove(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL)
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  return piece != NO_PIECE && type_of(piece) == ROOK && pos.empty(to);
+}
+
+bool HybridIsQuietCentralQueenMove(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL)
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  if (piece == NO_PIECE || type_of(piece) != QUEEN || !pos.empty(to))
+    return false;
+
+  if (rank_of(from) != rank_of(to))
+    return false;
+
+  const int file_delta = std::abs(int(file_of(to)) - int(file_of(from)));
+  if (file_delta != 1)
+    return false;
+
+  const File to_file = file_of(to);
+  if (to_file != FILE_D && to_file != FILE_E)
+    return false;
+
+  return relative_rank(color_of(piece), to) == RANK_3;
+}
+
+bool HybridIsQuietMinorMajorAttack(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL)
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  if (piece == NO_PIECE || !pos.empty(to))
+    return false;
+
+  const PieceType piece_type = type_of(piece);
+  if (piece_type != BISHOP && piece_type != KNIGHT)
+    return false;
+
+  const Color us = color_of(piece);
+  const Bitboard occupied_after = (pos.pieces() ^ from) | to;
+  return bool(attacks_bb(piece_type, to, occupied_after) &
+              pos.pieces(~us, QUEEN, ROOK));
+}
+
+bool HybridIsQuietMajorCheck(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL)
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  if (piece == NO_PIECE || !pos.empty(to))
+    return false;
+
+  const PieceType pieceType = type_of(piece);
+  if (pieceType != ROOK && pieceType != QUEEN)
+    return false;
+
+  return pos.gives_check(move);
+}
+
+bool HybridIsBishopOnlyEndgame(const Position &pos) {
+  return pos.count<BISHOP>() > 0 && pos.count<QUEEN>() == 0 &&
+         pos.count<ROOK>() == 0 && pos.count<KNIGHT>() == 0;
+}
+
+bool HybridIsQuietBishopBackRankRetreat(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL)
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  if (piece == NO_PIECE || type_of(piece) != BISHOP || !pos.empty(to))
+    return false;
+
+  const Color us = color_of(piece);
+  return relative_rank(us, from) >= RANK_2 && relative_rank(us, to) == RANK_1;
+}
+
+bool HybridANEProbeAllowedForPosition(const Position &pos,
+                                      bool only_pawn_endgames) {
+  return !only_pawn_endgames || HybridIsPawnOnlyEndgame(pos) ||
+         pos.count<QUEEN>() > 0;
 }
 
 bool HybridIsPawnLever(const Position &pos, Move move) {
@@ -962,6 +2299,323 @@ bool HybridIsPawnLever(const Position &pos, Move move) {
   return bool(attacks_bb<PAWN>(to, us) & pos.pieces(~us, PAWN));
 }
 
+bool HybridIsPawnOnlyMCTSANECandidate(const Position &pos, Move selected,
+                                      Move candidate) {
+  if (!HybridIsPawnOnlyEndgame(pos) || selected == Move::none() ||
+      candidate == Move::none() || selected == candidate ||
+      selected.type_of() != NORMAL || candidate.type_of() != NORMAL) {
+    return false;
+  }
+
+  const Piece candidate_piece = pos.piece_on(candidate.from_sq());
+  if (candidate_piece == NO_PIECE)
+    return false;
+
+  if (HybridIsPawnLever(pos, candidate))
+    return true;
+
+  if (HybridIsPawnOnlyPawnCaptureCandidate(pos, selected, candidate))
+    return true;
+
+  return HybridIsPawnOnlyKingRecaptureCandidate(pos, selected, candidate);
+}
+
+bool HybridIsPawnOnlyPawnCaptureCandidate(const Position &pos, Move selected,
+                                          Move candidate) {
+  if (!HybridIsPawnOnlyEndgame(pos) || selected == Move::none() ||
+      candidate == Move::none() || selected == candidate ||
+      candidate.type_of() != NORMAL) {
+    return false;
+  }
+
+  const Piece candidate_piece = pos.piece_on(candidate.from_sq());
+  const Piece captured_piece = pos.piece_on(candidate.to_sq());
+  if (candidate_piece == NO_PIECE || captured_piece == NO_PIECE ||
+      type_of(candidate_piece) != PAWN || type_of(captured_piece) != PAWN ||
+      color_of(candidate_piece) == color_of(captured_piece)) {
+    return false;
+  }
+
+  return bool(attacks_bb<PAWN>(candidate.from_sq(), color_of(candidate_piece)) &
+              candidate.to_sq());
+}
+
+bool HybridIsPawnOnlyKingRecaptureCandidate(const Position &pos, Move selected,
+                                            Move candidate) {
+  if (!HybridIsPawnOnlyEndgame(pos) || selected == Move::none() ||
+      candidate == Move::none() || selected == candidate ||
+      selected.type_of() != NORMAL || candidate.type_of() != NORMAL) {
+    return false;
+  }
+
+  const Piece candidate_piece = pos.piece_on(candidate.from_sq());
+  if (candidate_piece == NO_PIECE)
+    return false;
+
+  if (!pos.capture(selected) || !pos.capture(candidate) ||
+      selected.to_sq() != candidate.to_sq()) {
+    return false;
+  }
+
+  const Piece selected_piece = pos.piece_on(selected.from_sq());
+  const Piece captured_piece = pos.piece_on(candidate.to_sq());
+  return selected_piece != NO_PIECE && captured_piece != NO_PIECE &&
+         type_of(selected_piece) == PAWN && type_of(candidate_piece) == KING &&
+         type_of(captured_piece) == PAWN;
+}
+
+bool HybridPawnOnlyANEMCTSOverride(
+    bool enabled, bool ane_agrees_mcts, bool fixed_budget,
+    bool visit_evidence_sane, bool candidate_shape, bool king_recapture_shape,
+    bool pawn_lever_shape, uint64_t mcts_root_visits, uint32_t mcts_best_visits,
+    uint64_t mcts_current_root_visits, uint32_t mcts_current_best_visits,
+    uint32_t ab_mcts_visits, float visit_share, float root_q_gap,
+    float q_gap_to_ab, int mcts_cp, int eval_delta, int ab_average_score,
+    int mcts_average_score, float ane_score_margin) {
+  if (!enabled || !ane_agrees_mcts || !fixed_budget || !candidate_shape ||
+      mcts_best_visits > mcts_root_visits ||
+      mcts_current_best_visits > mcts_current_root_visits) {
+    return false;
+  }
+
+  const bool cache_heavy_current_evidence =
+      !visit_evidence_sane && !king_recapture_shape &&
+      mcts_current_root_visits >= 1500 && mcts_current_best_visits >= 1500 &&
+      visit_share >= 0.95f && root_q_gap >= 0.90f && q_gap_to_ab >= 0.90f &&
+      mcts_cp >= 400 && eval_delta >= 400 && ane_score_margin >= 0.75f &&
+      ab_mcts_visits <= 32;
+  const bool cache_heavy_pawn_lever =
+      !visit_evidence_sane && pawn_lever_shape && !king_recapture_shape &&
+      mcts_current_root_visits >= 1500 && mcts_current_best_visits >= 1500 &&
+      visit_share >= 0.95f && root_q_gap >= 0.25f && q_gap_to_ab >= 0.25f &&
+      mcts_cp >= 500 && eval_delta >= 450 && ane_score_margin >= 0.30f &&
+      ab_mcts_visits <= 80 && std::abs(ab_average_score) <= 200 &&
+      std::abs(mcts_average_score) <= 200 &&
+      std::abs(ab_average_score - mcts_average_score) <= 180;
+  if (cache_heavy_pawn_lever)
+    return true;
+  if (!visit_evidence_sane && !cache_heavy_current_evidence)
+    return false;
+
+  const bool root_gap_ok = root_q_gap >= 0.25f || q_gap_to_ab >= 0.50f;
+  const bool short_ane_king_recapture =
+      king_recapture_shape && mcts_root_visits >= 35 &&
+      mcts_root_visits <= 64 && mcts_best_visits >= 32 &&
+      mcts_current_root_visits >= 20 && mcts_current_best_visits >= 20 &&
+      visit_share >= 0.95f && root_q_gap >= 0.40f && q_gap_to_ab >= 0.42f &&
+      mcts_cp >= 110 && eval_delta >= 130 && ane_score_margin >= 0.40f &&
+      ab_mcts_visits <= 1 && std::abs(ab_average_score) <= 150 &&
+      std::abs(mcts_average_score) <= 150 &&
+      std::abs(ab_average_score - mcts_average_score) <= 120 &&
+      (mcts_root_visits <= 60 || (mcts_cp >= 210 && eval_delta >= 220));
+  if (short_ane_king_recapture)
+    return true;
+
+  const bool short_high_margin_ane_king_recapture =
+      king_recapture_shape && mcts_root_visits >= 35 &&
+      mcts_root_visits <= 40 && mcts_best_visits >= 30 &&
+      mcts_current_root_visits >= 20 && mcts_current_root_visits <= 24 &&
+      mcts_current_best_visits >= 20 && visit_share >= 0.95f &&
+      root_q_gap >= 0.40f && q_gap_to_ab >= 0.42f && mcts_cp >= 110 &&
+      eval_delta >= 120 && ane_score_margin >= 0.44f && ab_mcts_visits <= 1 &&
+      std::abs(ab_average_score) <= 150 &&
+      std::abs(mcts_average_score) <= 150 &&
+      std::abs(ab_average_score - mcts_average_score) <= 120;
+  if (short_high_margin_ane_king_recapture)
+    return true;
+
+  const bool tiny_ane_king_recapture =
+      king_recapture_shape && mcts_root_visits >= 12 &&
+      mcts_root_visits <= 34 && mcts_best_visits >= 10 &&
+      mcts_current_root_visits >= 12 && mcts_current_best_visits >= 10 &&
+      visit_share >= 0.80f && root_q_gap >= 0.35f && q_gap_to_ab >= 0.35f &&
+      mcts_cp >= 80 && eval_delta >= 100 && ane_score_margin >= 0.35f &&
+      ab_mcts_visits <= 2 && std::abs(ab_average_score) <= 170 &&
+      std::abs(mcts_average_score) <= 170 &&
+      std::abs(ab_average_score - mcts_average_score) <= 130;
+  if (tiny_ane_king_recapture)
+    return true;
+
+  const bool short_ane_pawn_lever =
+      pawn_lever_shape && !king_recapture_shape && visit_evidence_sane &&
+      mcts_root_visits >= 26 && mcts_root_visits <= 40 &&
+      mcts_best_visits >= 18 && mcts_current_root_visits >= 26 &&
+      mcts_current_best_visits >= 18 && visit_share >= 0.69f &&
+      root_q_gap >= 0.34f && q_gap_to_ab >= 0.36f && mcts_cp >= 60 &&
+      eval_delta >= 60 && ane_score_margin >= 0.15f && ab_mcts_visits <= 3 &&
+      std::abs(ab_average_score) <= 100 &&
+      std::abs(mcts_average_score) <= 100 &&
+      std::abs(ab_average_score - mcts_average_score) <= 80;
+  if (short_ane_pawn_lever)
+    return true;
+
+  const bool tiny_ane_pawn_lever =
+      pawn_lever_shape && !king_recapture_shape && visit_evidence_sane &&
+      mcts_root_visits >= 14 && mcts_root_visits <= 30 &&
+      mcts_best_visits >= 9 && mcts_current_root_visits >= 14 &&
+      mcts_current_best_visits >= 9 && visit_share >= 0.55f &&
+      root_q_gap >= 0.09f && q_gap_to_ab >= 0.10f && root_q_gap <= 0.45f &&
+      q_gap_to_ab <= 0.55f && mcts_cp >= -60 && eval_delta >= -60 &&
+      ane_score_margin >= 0.15f && ab_mcts_visits <= 4 &&
+      std::abs(ab_average_score) <= 120 &&
+      std::abs(mcts_average_score) <= 120 &&
+      std::abs(ab_average_score - mcts_average_score) <= 120;
+  if (tiny_ane_pawn_lever)
+    return true;
+
+  const bool pawn_capture_shape =
+      candidate_shape && !king_recapture_shape && !pawn_lever_shape;
+  const bool ultra_tiny_ane_pawn_capture =
+      pawn_capture_shape && visit_evidence_sane && mcts_root_visits >= 12 &&
+      mcts_root_visits <= 20 && mcts_best_visits >= 10 &&
+      mcts_current_root_visits >= 12 && mcts_current_root_visits <= 20 &&
+      mcts_current_best_visits >= 10 && visit_share >= 0.70f &&
+      root_q_gap >= 0.70f && q_gap_to_ab >= 0.70f && mcts_cp >= 130 &&
+      eval_delta >= 150 && ane_score_margin >= 1.0f && ab_mcts_visits <= 1 &&
+      std::abs(ab_average_score) <= 120 &&
+      std::abs(mcts_average_score) <= 220 &&
+      std::abs(ab_average_score - mcts_average_score) <= 160;
+  if (ultra_tiny_ane_pawn_capture)
+    return true;
+
+  const bool tiny_ane_pawn_capture =
+      pawn_capture_shape && visit_evidence_sane && mcts_root_visits >= 24 &&
+      mcts_root_visits <= 34 && mcts_best_visits >= 20 &&
+      mcts_current_root_visits >= 24 && mcts_current_best_visits >= 20 &&
+      visit_share >= 0.80f && root_q_gap >= 0.75f && q_gap_to_ab >= 0.75f &&
+      mcts_cp >= 180 && eval_delta >= 180 && ane_score_margin >= 0.75f &&
+      ab_mcts_visits <= 2 && std::abs(ab_average_score) <= 120 &&
+      std::abs(mcts_average_score) <= 120 &&
+      std::abs(ab_average_score - mcts_average_score) <= 120;
+  if (tiny_ane_pawn_capture)
+    return true;
+
+  if (mcts_root_visits < 40 || mcts_best_visits < 32 ||
+      mcts_current_root_visits < 20 || mcts_current_best_visits < 20 ||
+      visit_share < 0.75f || !root_gap_ok || q_gap_to_ab < 0.25f ||
+      mcts_cp < 80 || eval_delta < 80 || ane_score_margin < 0.15f) {
+    return false;
+  }
+
+  if (king_recapture_shape &&
+      (visit_share < 0.90f || q_gap_to_ab < 0.60f || mcts_cp < 210 ||
+       eval_delta < 220 || ane_score_margin < 0.30f)) {
+    return false;
+  }
+
+  const int max_average_score = king_recapture_shape ? 170 : 100;
+  const int max_average_gap = king_recapture_shape ? 90 : 40;
+  if (std::abs(ab_average_score) > max_average_score ||
+      std::abs(mcts_average_score) > max_average_score ||
+      std::abs(ab_average_score - mcts_average_score) > max_average_gap) {
+    return false;
+  }
+
+  return ab_mcts_visits <= std::max<uint32_t>(8, mcts_best_visits / 4);
+}
+
+bool HybridPawnOnlyMCTSOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool candidate_shape,
+    bool king_recapture_shape, bool pawn_lever_shape, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, uint64_t mcts_current_root_visits,
+    uint32_t mcts_current_best_visits, uint32_t ab_mcts_visits,
+    float visit_share, float root_q_gap, float q_gap_to_ab, int mcts_cp,
+    int eval_delta, int ab_average_score, int mcts_average_score,
+    int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank) {
+  if (!fixed_budget || !visit_evidence_sane || !candidate_shape ||
+      mcts_best_visits > mcts_root_visits ||
+      mcts_current_best_visits > mcts_current_root_visits) {
+    return false;
+  }
+
+  const bool ultra_tiny_pawn_lever =
+      pawn_lever_shape && !king_recapture_shape && mcts_root_visits >= 20 &&
+      mcts_root_visits <= 32 && mcts_best_visits >= 20 &&
+      mcts_current_root_visits >= 12 && mcts_current_root_visits <= 16 &&
+      mcts_current_best_visits == mcts_current_root_visits &&
+      visit_share >= 0.98f && root_q_gap == 0.0f && q_gap_to_ab >= 1.00f &&
+      mcts_cp >= 650 && eval_delta >= 600 && ab_mcts_visits == 0 &&
+      ab_in_mcts_rank == 2 && mcts_in_ab_rank == 2 &&
+      mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 60000;
+  if (ultra_tiny_pawn_lever)
+    return true;
+
+  if (std::abs(ab_average_score) > 170 || std::abs(mcts_average_score) > 220 ||
+      std::abs(ab_average_score - mcts_average_score) > 160) {
+    return false;
+  }
+
+  if (king_recapture_shape) {
+    const bool short_stable_king_recapture =
+        mcts_root_visits >= 35 && mcts_root_visits <= 50 &&
+        mcts_best_visits >= 32 && mcts_current_root_visits >= 28 &&
+        mcts_current_best_visits >= 28 && visit_share >= 0.92f &&
+        root_q_gap >= 0.50f && q_gap_to_ab >= 0.50f && mcts_cp >= 150 &&
+        eval_delta >= 150 && ab_mcts_visits <= 3 && ab_in_mcts_rank == 2 &&
+        mcts_in_ab_rank == 2 && mcts_in_ab_score == -VALUE_INFINITE &&
+        mcts_in_ab_upperbound && mcts_in_ab_effort >= 50000 &&
+        mcts_in_ab_effort <= 120000;
+    if (short_stable_king_recapture)
+      return true;
+
+    return mcts_root_visits >= 20 && mcts_root_visits <= 32 &&
+           mcts_best_visits >= 18 && mcts_current_root_visits >= 12 &&
+           mcts_current_best_visits >= 11 && visit_share >= 0.88f &&
+           q_gap_to_ab >= 0.41f && mcts_cp >= 105 && eval_delta >= 115 &&
+           ab_mcts_visits <= 2 && ab_in_mcts_rank == 2 &&
+           mcts_in_ab_rank == 2 && mcts_in_ab_score == -VALUE_INFINITE &&
+           mcts_in_ab_effort >= 4000 && mcts_in_ab_effort <= 120000;
+  }
+
+  if (pawn_lever_shape) {
+    const bool short_stable_pawn_lever =
+        mcts_root_visits >= 28 && mcts_root_visits <= 40 &&
+        mcts_best_visits >= 20 && mcts_current_root_visits >= 28 &&
+        mcts_current_best_visits >= 20 && visit_share >= 0.70f &&
+        root_q_gap >= 0.40f && q_gap_to_ab >= 0.40f && mcts_cp >= 80 &&
+        eval_delta >= 80 && ab_mcts_visits <= 3 && ab_in_mcts_rank == 3 &&
+        mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 3 &&
+        mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_upperbound &&
+        mcts_in_ab_effort >= 35000 && mcts_in_ab_effort <= 220000;
+    if (short_stable_pawn_lever)
+      return true;
+
+    return mcts_root_visits >= 17 && mcts_root_visits <= 24 &&
+           mcts_best_visits >= 10 && mcts_current_root_visits >= 17 &&
+           mcts_current_best_visits >= 10 && visit_share >= 0.58f &&
+           root_q_gap >= 0.13f && q_gap_to_ab >= 0.14f && eval_delta >= -10 &&
+           ab_mcts_visits <= 3 && ab_in_mcts_rank >= 3 &&
+           mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 4 &&
+           mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_upperbound &&
+           mcts_in_ab_effort >= 25000 && mcts_in_ab_effort <= 100000;
+  }
+
+  return false;
+}
+
+bool HybridMCTSRookEndgameQuietRookOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool rook_endgame,
+    bool quiet_rook_move, uint64_t mcts_root_visits, uint32_t mcts_best_visits,
+    uint64_t mcts_current_root_visits, uint32_t mcts_current_best_visits,
+    float visit_share, float q_gap_to_ab, int mcts_cp, int eval_delta,
+    int mcts_in_ab_rank, int mcts_in_ab_score, uint64_t mcts_in_ab_effort,
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits) {
+  if (!fixed_budget || !visit_evidence_sane || !rook_endgame ||
+      !quiet_rook_move) {
+    return false;
+  }
+
+  return mcts_root_visits >= 12 && mcts_root_visits <= 24 &&
+         mcts_best_visits >= 12 && mcts_current_root_visits >= 12 &&
+         mcts_current_best_visits >= 12 && visit_share >= 0.98f &&
+         q_gap_to_ab >= 1.55f && mcts_cp >= 300 && eval_delta >= 300 &&
+         mcts_in_ab_rank >= 4 && mcts_in_ab_rank <= 8 &&
+         mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 100 &&
+         ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 3 &&
+         ab_in_mcts_current_visits == 0;
+}
+
 bool HybridIsKingsidePawnLever(const Position &pos, Move move) {
   return HybridIsPawnLever(pos, move) && file_of(move.from_sq()) >= FILE_F;
 }
@@ -980,6 +2634,37 @@ bool HybridIsKingsidePawnPush(const Position &pos, Move move) {
   const Direction push = pawn_push(us);
   return file_of(from) >= FILE_F && file_of(from) == file_of(to) &&
          (to == from + push || to == from + push + push);
+}
+
+bool HybridIsPawnDiscoveredKingAttack(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL)
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  if (piece == NO_PIECE || type_of(piece) != PAWN || !pos.empty(to))
+    return false;
+
+  const Color us = color_of(piece);
+  const Direction push = pawn_push(us);
+  if (file_of(from) != file_of(to) ||
+      (to != from + push && to != from + push + push)) {
+    return false;
+  }
+
+  const Square enemy_king = pos.square<KING>(~us);
+  const Bitboard before_occupied = pos.pieces();
+  const Bitboard after_occupied = (before_occupied ^ from) | to;
+  const Bitboard sliders = pos.pieces(us, ROOK, QUEEN);
+  const Bitboard diagonals = pos.pieces(us, BISHOP, QUEEN);
+  const bool attacked_before =
+      bool(attacks_bb<ROOK>(enemy_king, before_occupied) & sliders) ||
+      bool(attacks_bb<BISHOP>(enemy_king, before_occupied) & diagonals);
+  const bool attacked_after =
+      bool(attacks_bb<ROOK>(enemy_king, after_occupied) & sliders) ||
+      bool(attacks_bb<BISHOP>(enemy_king, after_occupied) & diagonals);
+  return !attacked_before && attacked_after;
 }
 
 bool HybridRootPawnLeverCanChallengeSelected(const Position &pos, Move selected,
@@ -1041,6 +2726,11 @@ bool ParallelHybridSearch::should_stop() const {
         mcts_search_
             ? mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed)
             : 0;
+    if (HybridUseMCTSPrimaryForFixedNodeBudget(limits_) && mcts_search_) {
+      if (mcts_n >= limits_.nodes)
+        return true;
+      return false;
+    }
     uint64_t total =
         mcts_n + ab_state_.nodes_searched.load(std::memory_order_relaxed);
     if (total >= limits_.nodes)
@@ -1296,6 +2986,13 @@ std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
     const float leader_policy =
         root_moves.empty() ? 0.0f : root_moves.front().policy;
     for (const auto &root_move : root_moves) {
+      if (root_move.policy >= 0.08f &&
+          root_move.policy >= leader_policy * 0.35f &&
+          HybridIsQuietMinorMajorAttack(root_pos, root_move.move)) {
+        add_latest_hint(root_move.move);
+      }
+    }
+    for (const auto &root_move : root_moves) {
       if (HybridHighPolicyRootLeverHint(root_pos, root_move.move,
                                         root_move.policy, leader_policy)) {
         add_latest_hint(root_move.move);
@@ -1346,24 +3043,70 @@ std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
   return hints;
 }
 
-void ParallelHybridSearch::start_ane_root_probe() {
-  if (ane_root_hints_future_.valid())
-    ane_root_hints_future_.wait();
-
+void ParallelHybridSearch::start_ane_root_probe(bool reuse_existing) {
   auto trace_skip = [&](const std::string &reason) {
     if (config_.trace_decisions)
       send_info_string("Hybrid: ANE root probe skipped: " + reason);
   };
+  auto consume_existing_future = [&]() -> std::vector<Move> {
+    if (!ane_root_hints_future_.valid())
+      return {};
+    try {
+      return ane_root_hints_future_.get();
+    } catch (const std::exception &e) {
+      if (config_.trace_decisions) {
+        send_info_string(std::string("Hybrid: ANE root probe failed: ") +
+                         e.what());
+      }
+    } catch (...) {
+      if (config_.trace_decisions)
+        send_info_string("Hybrid: ANE root probe failed: unknown error");
+    }
+    return {};
+  };
+
+  if (reuse_existing) {
+    std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+    if (!ane_root_hints_.empty()) {
+      trace_skip("already ready");
+      return;
+    }
+  }
+
+  if (ane_root_hints_future_.valid()) {
+    if (reuse_existing) {
+      const auto status =
+          ane_root_hints_future_.wait_for(std::chrono::milliseconds(0));
+      if (status != std::future_status::ready) {
+        trace_skip("already running");
+        return;
+      }
+      {
+        std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+        if (!ane_root_hints_.empty()) {
+          trace_skip("already ready");
+          return;
+        }
+      }
+    }
+    std::vector<Move> existing_hints = consume_existing_future();
+    if (reuse_existing && !existing_hints.empty()) {
+      std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+      ane_root_hints_ = std::move(existing_hints);
+      trace_skip("already ready");
+      return;
+    }
+    if (!reuse_existing) {
+      std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+      ane_root_hints_.clear();
+      ane_root_hint_infos_.clear();
+    }
+  }
 
   if (!config_.ane_root_probe)
     return;
   if (!ane_evaluator_) {
     trace_skip("no evaluator");
-    return;
-  }
-  if (limits_.ponderMode &&
-      !ponderhit_received_.load(std::memory_order_acquire)) {
-    trace_skip("speculative ponder");
     return;
   }
   const int min_budget = std::max(0, config_.ane_min_budget_ms);
@@ -1378,6 +3121,15 @@ void ParallelHybridSearch::start_ane_root_probe() {
        limits_.mate > 0)) {
     trace_skip("fixed search budget");
     return;
+  }
+  if (config_.ane_only_pawn_endgames) {
+    StateInfo root_state;
+    Position root_pos;
+    root_pos.set(root_fen_, false, &root_state);
+    if (!HybridANEProbeAllowedForPosition(root_pos, true)) {
+      trace_skip("not a pawn-only endgame");
+      return;
+    }
   }
 
   if (config_.trace_decisions)
@@ -1460,20 +3212,29 @@ std::vector<Move> ParallelHybridSearch::compute_ane_root_order_hints() {
 
     size_t result_count = 0;
     if (!pending_positions.empty()) {
-      if (should_stop()) {
-        if (config_.trace_decisions)
-          send_info_string(
-              "Hybrid: ANE root probe aborted before Core ML batch");
-        return hints;
-      }
-      auto results = ane_evaluator_->EvaluateBatch(pending_positions.data(),
-                                                   pending_positions.size());
-      result_count = std::min(results.size(), pending_indices.size());
-      for (size_t i = 0; i < result_count; ++i) {
-        auto &child = *children[pending_indices[i]];
-        const float root_score = -results[i].value;
-        child.score = std::isfinite(root_score) ? root_score : 0.0f;
-        child.scored = true;
+      constexpr size_t kANERootProbeChunkSize = 8;
+      for (size_t offset = 0; offset < pending_positions.size();
+           offset += kANERootProbeChunkSize) {
+        if (should_stop()) {
+          if (config_.trace_decisions)
+            send_info_string(
+                "Hybrid: ANE root probe aborted before Core ML batch");
+          break;
+        }
+        const size_t chunk_size =
+            std::min(kANERootProbeChunkSize, pending_positions.size() - offset);
+        auto results = ane_evaluator_->EvaluateBatch(
+            pending_positions.data() + offset, chunk_size);
+        const size_t chunk_count = std::min(results.size(), chunk_size);
+        for (size_t i = 0; i < chunk_count; ++i) {
+          auto &child = *children[pending_indices[offset + i]];
+          const float root_score = -results[i].value;
+          child.score = std::isfinite(root_score) ? root_score : 0.0f;
+          child.scored = true;
+        }
+        result_count += chunk_count;
+        if (chunk_count < chunk_size)
+          break;
       }
     }
 
@@ -1589,8 +3350,31 @@ std::vector<Move> ParallelHybridSearch::collect_root_order_hints() {
   for (Move move : collect_mcts_root_order_hints())
     add_hint(move);
   if (config_.ane_root_hints) {
-    for (Move move : collect_ane_root_order_hints())
-      add_hint(move);
+    std::vector<Move> ane_hints = collect_ane_root_order_hints();
+    bool use_ane_hints = !ane_hints.empty();
+    float ane_top_score = 0.0f;
+    float ane_second_score = 0.0f;
+    size_t ane_hint_info_count = 0;
+    if (use_ane_hints) {
+      std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+      ane_hint_info_count = ane_root_hint_infos_.size();
+      if (ane_hint_info_count > 0)
+        ane_top_score = ane_root_hint_infos_[0].score;
+      if (ane_hint_info_count > 1)
+        ane_second_score = ane_root_hint_infos_[1].score;
+      use_ane_hints = HybridANERootHintMarginClear(
+          ane_hint_info_count, ane_top_score, ane_second_score);
+    }
+    if (use_ane_hints) {
+      for (Move move : ane_hints)
+        add_hint(move);
+    } else if (config_.trace_decisions && !ane_hints.empty()) {
+      std::ostringstream ss;
+      ss << "Hybrid: AB root hints from ANE suppressed low margin "
+         << std::fixed << std::setprecision(3)
+         << (ane_top_score - ane_second_score);
+      send_info_string(ss.str());
+    }
   }
 
   const int max_hints =
@@ -1651,13 +3435,15 @@ std::vector<Move> ParallelHybridSearch::verify_ab_root_candidates(
     }
   }
 
+  std::vector<Engine::RootMoveSnapshot> verify_snapshot;
   if (verify_started) {
     if (should_stop()) {
       engine_->stop();
     }
     engine_->wait_for_search_finished();
 
-    for (const auto &root_move : engine_->root_move_snapshot(candidate_count)) {
+    verify_snapshot = engine_->root_move_snapshot(candidate_count);
+    for (const auto &root_move : verify_snapshot) {
       if (root_move.move == Move::none())
         continue;
       if (std::find(limited_candidates.begin(), limited_candidates.end(),
@@ -1670,8 +3456,160 @@ std::vector<Move> ParallelHybridSearch::verify_ab_root_candidates(
     }
   }
 
+  if (verify_started && !should_stop() && !verified_order.empty()) {
+    StateInfo root_state;
+    Position root_pos;
+    root_pos.set(root_fen_, false, &root_state);
+    if (root_pos.count<QUEEN>() > 0) {
+      const auto find_verify_root = [&verify_snapshot](Move target) {
+        Engine::RootMoveSnapshot result;
+        for (const auto &root_move : verify_snapshot) {
+          if (root_move.move == target) {
+            result = root_move;
+            break;
+          }
+        }
+        return result;
+      };
+
+      const Move leading = verified_order.front();
+      const auto leading_snapshot = find_verify_root(leading);
+      const int lead_avg = leading_snapshot.move == leading
+                               ? leading_snapshot.average_score
+                               : std::numeric_limits<int>::min();
+      const int lead_score = leading_snapshot.move == leading
+                                 ? leading_snapshot.score
+                                 : std::numeric_limits<int>::min();
+      const int single_verify_ms = std::clamp(verify_ms / 2, 80, 160);
+      for (Move candidate : limited_candidates) {
+        if (candidate == leading ||
+            !HybridIsQuietMajorCheck(root_pos, candidate))
+          continue;
+
+        const auto candidate_snapshot = find_verify_root(candidate);
+        if (candidate_snapshot.move == candidate &&
+            candidate_snapshot.average_score + 80 < lead_avg)
+          continue;
+
+        ::MetalFish::Search::LimitsType single_limits;
+        single_limits.movetime = single_verify_ms;
+        single_limits.startTime = now();
+        single_limits.ponderMode = false;
+        single_limits.root_order_hints = {candidate};
+        single_limits.searchmoves.push_back(UCIEngine::move(candidate, false));
+
+        bool single_started = false;
+        {
+          std::lock_guard<std::mutex> lock(ab_start_mutex_);
+          if (!should_stop()) {
+            engine_->go(single_limits);
+            ab_search_started_.store(true, std::memory_order_release);
+            single_started = true;
+          }
+        }
+        if (!single_started)
+          break;
+
+        if (should_stop())
+          engine_->stop();
+        engine_->wait_for_search_finished();
+
+        const auto single_snapshot = engine_->root_move_snapshot(1);
+        if (single_snapshot.empty() || single_snapshot[0].move != candidate)
+          continue;
+
+        if (single_snapshot[0].average_score >= lead_avg + 120 ||
+            single_snapshot[0].score >= lead_score + 180) {
+          verified_order.erase(std::remove(verified_order.begin(),
+                                           verified_order.end(), candidate),
+                               verified_order.end());
+          verified_order.insert(verified_order.begin(), candidate);
+          break;
+        }
+      }
+    }
+  }
+
   engine_->set_on_update_full(std::move(saved_update_full));
   engine_->set_on_bestmove(std::move(saved_bestmove));
+
+  if (verify_started && !limited_candidates.empty() &&
+      !verified_order.empty() &&
+      verified_order.front() != limited_candidates.front() && mcts_search_) {
+    const Move leading_hint = limited_candidates.front();
+    const Move verified_top = verified_order.front();
+    StateInfo root_state;
+    Position root_pos;
+    root_pos.set(root_fen_, false, &root_state);
+
+    auto root_moves = mcts_search_->GetRootMoveStats();
+    const auto find_mcts_root = [&root_moves](Move target) {
+      Search::RootMoveStats result;
+      for (const auto &root_move : root_moves) {
+        if (root_move.move == target) {
+          result = root_move;
+          break;
+        }
+      }
+      return result;
+    };
+    const auto find_verify_root = [&verify_snapshot](Move target) {
+      Engine::RootMoveSnapshot result;
+      for (const auto &root_move : verify_snapshot) {
+        if (root_move.move == target) {
+          result = root_move;
+          break;
+        }
+      }
+      return result;
+    };
+
+    const auto leading_mcts = find_mcts_root(leading_hint);
+    const auto displaced_mcts = find_mcts_root(verified_top);
+    uint64_t current_root_visits = 0;
+    for (const auto &root_move : root_moves)
+      current_root_visits += root_move.current_visits;
+    const float current_visit_share =
+        current_root_visits > 0
+            ? static_cast<float>(leading_mcts.current_visits) /
+                  static_cast<float>(current_root_visits)
+            : 0.0f;
+
+    const auto leading_verify = find_verify_root(leading_hint);
+    const auto displaced_verify = find_verify_root(verified_top);
+    const bool fixed_budget = HybridHasMCTSDecisionBudget(
+        limits_, time_budget_ms_.load(std::memory_order_acquire),
+        ponderhit_received_.load(std::memory_order_acquire));
+    const bool visit_evidence_sane = HybridMCTSVisitEvidenceSane(
+        mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed),
+        mcts_search_->Stats().nn_evaluations.load(std::memory_order_relaxed),
+        current_root_visits, leading_mcts.current_visits);
+
+    if (leading_mcts.move == leading_hint &&
+        displaced_mcts.move == verified_top &&
+        HybridPreserveLeadingHintAfterABVerify(
+            fixed_budget, visit_evidence_sane,
+            HybridIsKingsidePawnPush(root_pos, leading_hint) &&
+                HybridIsPawnDiscoveredKingAttack(root_pos, leading_hint),
+            current_root_visits, leading_mcts.current_visits,
+            current_visit_share, leading_mcts.q, displaced_mcts.q,
+            leading_mcts.policy, displaced_mcts.policy,
+            displaced_verify.average_score, leading_verify.average_score,
+            displaced_verify.score, displaced_verify.score_lowerbound,
+            leading_verify.score, leading_verify.score_lowerbound,
+            leading_verify.score_upperbound, leading_verify.effort)) {
+      verified_order.erase(std::remove(verified_order.begin(),
+                                       verified_order.end(), leading_hint),
+                           verified_order.end());
+      verified_order.insert(verified_order.begin(), leading_hint);
+      if (config_.trace_decisions) {
+        send_info_string("Hybrid: preserving leading MCTS root hint after "
+                         "shallow AB verify " +
+                         UCIEngine::move(leading_hint, false) + " over " +
+                         UCIEngine::move(verified_top, false));
+      }
+    }
+  }
 
   for (Move candidate : limited_candidates) {
     if (std::find(verified_order.begin(), verified_order.end(), candidate) ==
@@ -1745,11 +3683,19 @@ void ParallelHybridSearch::run_ab_search() {
 
   ::MetalFish::Search::LimitsType ab_limits = limits_;
   ab_limits.startTime = now();
+  if (HybridUseMCTSPrimaryForFixedNodeBudget(limits_)) {
+    ab_limits.nodes = HybridLowNodeABProbeNodes(limits_.nodes);
+  }
   if (limits_.ponderMode &&
       ponderhit_received_.load(std::memory_order_acquire)) {
     ab_limits.ponderMode = false;
   }
   ab_limits.root_order_hints = collect_root_order_hints();
+  {
+    std::lock_guard<std::mutex> lock(ab_root_mutex_);
+    ab_root_order_hints_ = ab_limits.root_order_hints;
+    ab_verified_root_order_hints_.clear();
+  }
   const int candidate_verify_ms = HybridABCandidateVerifyBudgetMs(
       limits_, time_budget_ms_.load(std::memory_order_acquire),
       config_.ab_candidate_verify_ms,
@@ -1766,6 +3712,10 @@ void ParallelHybridSearch::run_ab_search() {
         }
       }
       ab_limits.root_order_hints = std::move(verified_order);
+    }
+    {
+      std::lock_guard<std::mutex> lock(ab_root_mutex_);
+      ab_verified_root_order_hints_ = ab_limits.root_order_hints;
     }
     ab_limits.startTime = now();
   }
@@ -2296,6 +4246,39 @@ Move ParallelHybridSearch::make_final_decision() {
     ss << "]";
     return ss.str();
   };
+  const auto move_list_to_string = [&](const std::vector<Move> &moves) {
+    std::ostringstream ss;
+    ss << "[";
+    for (size_t i = 0; i < moves.size(); ++i) {
+      if (i > 0)
+        ss << ",";
+      ss << move_to_string(moves[i]);
+    }
+    ss << "]";
+    return ss.str();
+  };
+  std::vector<Move> ab_root_order_hints_snapshot;
+  std::vector<Move> ab_verified_root_order_hints_snapshot;
+  {
+    std::lock_guard<std::mutex> lock(ab_root_mutex_);
+    ab_root_order_hints_snapshot = ab_root_order_hints_;
+    ab_verified_root_order_hints_snapshot = ab_verified_root_order_hints_;
+  }
+  const Move first_ab_hint = ab_root_order_hints_snapshot.empty()
+                                 ? Move::none()
+                                 : ab_root_order_hints_snapshot.front();
+  const Move first_verified_ab_hint =
+      ab_verified_root_order_hints_snapshot.empty()
+          ? Move::none()
+          : ab_verified_root_order_hints_snapshot.front();
+  const auto append_root_hint_trace = [&](std::ostringstream &ss) {
+    const bool engines_agree_off_first_hint =
+        first_ab_hint != Move::none() && ab_best == mcts_best &&
+        ab_best != Move::none() && ab_best != first_ab_hint;
+    ss << " FirstABHint=" << move_to_string(first_ab_hint)
+       << " FirstABVerifiedHint=" << move_to_string(first_verified_ab_hint)
+       << " ABMCTSAgreeOffFirstHint=" << (engines_agree_off_first_hint ? 1 : 0);
+  };
   struct MCTSRootLookup {
     int rank = -1;
     uint32_t visits = 0;
@@ -2396,6 +4379,36 @@ Move ParallelHybridSearch::make_final_decision() {
     ss << "]";
     return ss.str();
   };
+  struct ANERootLookup {
+    int rank = -1;
+    float score = 0.0f;
+  };
+  const auto find_ane_root_move = [&](Move target) {
+    ANERootLookup result;
+    if (!config_.ane_root_probe || target == Move::none())
+      return result;
+
+    const bool has_scores =
+        ane_root_hint_infos_snapshot.size() == ane_root_hints_snapshot.size();
+    for (size_t i = 0; i < ane_root_hints_snapshot.size(); ++i) {
+      if (ane_root_hints_snapshot[i] != target)
+        continue;
+      result.rank = static_cast<int>(i) + 1;
+      result.score = has_scores ? ane_root_hint_infos_snapshot[i].score : 0.0f;
+      break;
+    }
+    return result;
+  };
+  StateInfo decision_root_state;
+  Position decision_root_pos;
+  bool decision_root_pos_ready = false;
+  const auto get_decision_root_pos = [&]() -> const Position & {
+    if (!decision_root_pos_ready) {
+      decision_root_pos.set(root_fen_, false, &decision_root_state);
+      decision_root_pos_ready = true;
+    }
+    return decision_root_pos;
+  };
   const auto append_cross_root_trace = [&](std::ostringstream &ss) {
     const MCTSRootLookup ab_in_mcts = find_mcts_root_move(ab_best);
     const ABRootLookup mcts_in_ab = find_ab_root_move(mcts_best);
@@ -2442,21 +4455,29 @@ Move ParallelHybridSearch::make_final_decision() {
   const bool mcts_decision_budget = HybridHasMCTSDecisionBudget(
       limits_, time_budget_ms_.load(std::memory_order_acquire),
       ponderhit_received_.load(std::memory_order_acquire));
+  const bool clock_managed_search =
+      limits_.movetime <= 0 && limits_.nodes <= 0 && limits_.depth <= 0 &&
+      limits_.mate <= 0 && !limits_.infinite &&
+      (limits_.time[WHITE] > 0 || limits_.time[BLACK] > 0);
   const uint32_t mcts_confidence_visits = mcts_current_visits;
   const uint64_t mcts_confidence_total_nodes = mcts_total_current_nodes;
   const bool mcts_visit_evidence_sane = HybridMCTSVisitEvidenceSane(
       mcts_playouts, mcts_evals, mcts_confidence_total_nodes,
       mcts_confidence_visits);
+  const bool low_node_mcts_primary =
+      HybridUseMCTSPrimaryForFixedNodeBudget(limits_);
+  const bool low_node_mcts_primary_ready = HybridLowNodeMCTSPrimaryReady(
+      low_node_mcts_primary, limits_.nodes, mcts_confidence_total_nodes,
+      mcts_confidence_visits, mcts_visit_evidence_sane);
   const auto find_root_pawn_lever_tiebreak = [&](Move selected,
                                                  bool allow_non_pawn_selected) {
     if (!config_.root_pawn_lever_tiebreak || selected == Move::none() ||
-        !mcts_decision_budget || !mcts_visit_evidence_sane) {
+        low_node_mcts_primary || !mcts_decision_budget ||
+        !mcts_visit_evidence_sane) {
       return Move::none();
     }
 
-    StateInfo root_state;
-    Position root_pos;
-    root_pos.set(root_fen_, false, &root_state);
+    const Position &root_pos = get_decision_root_pos();
     if (!HybridRootPawnLeverCanChallengeSelected(root_pos, selected,
                                                  allow_non_pawn_selected)) {
       return Move::none();
@@ -2469,6 +4490,7 @@ Move ParallelHybridSearch::make_final_decision() {
       return Move::none();
     const MCTSRootLookup selected_mcts = find_mcts_root_move(selected);
     const MCTSRootLookup best_mcts = find_mcts_root_move(mcts_best);
+    const ANERootLookup selected_ane = find_ane_root_move(selected);
     const float best_mcts_q =
         best_mcts.rank > 0 ? best_mcts.q : selected_mcts.q;
 
@@ -2490,11 +4512,27 @@ Move ParallelHybridSearch::make_final_decision() {
       if (!HybridIsKingsidePawnLever(root_pos, candidate.move))
         continue;
       const MCTSRootLookup mcts_lookup = find_mcts_root_move(candidate.move);
-      if (!HybridRootPawnLeverCandidate(
-              selected_ab.average_score, candidate.average_score,
-              candidate.effort, mcts_lookup.rank, mcts_lookup.current_visits,
-              selected_mcts.rank, selected_mcts.q, selected_mcts.policy,
-              best_mcts_q, mcts_lookup.q, mcts_lookup.policy))
+      const bool mcts_confirms_lever = HybridRootPawnLeverCandidate(
+          selected_ab.average_score, candidate.average_score, candidate.effort,
+          mcts_lookup.rank, mcts_lookup.current_visits, selected_mcts.rank,
+          selected_mcts.q, selected_mcts.policy, best_mcts_q, mcts_lookup.q,
+          mcts_lookup.policy);
+      const bool mcts_selector_confirms_lever =
+          best_mcts.rank > 0 &&
+          HybridMCTSRootSelectorConfirmsPawnLever(
+              mcts_confidence_total_nodes, mcts_confidence_visits,
+              best_mcts.policy, best_mcts_q, selected_ab.average_score,
+              candidate.average_score, mcts_lookup.rank,
+              mcts_lookup.current_visits, mcts_lookup.q, mcts_lookup.policy);
+      const ANERootLookup candidate_ane = find_ane_root_move(candidate.move);
+      const bool ane_confirms_lever = HybridANERootPawnLeverCandidate(
+          config_.ane_root_probe, selected_ane.rank, selected_ane.score,
+          candidate_ane.rank, candidate_ane.score, selected_ab.average_score,
+          candidate.average_score, candidate.effort, selected_mcts.rank,
+          selected_mcts.q, selected_mcts.policy, best_mcts_q, mcts_lookup.rank,
+          mcts_lookup.current_visits, mcts_lookup.q, mcts_lookup.policy);
+      if (!mcts_confirms_lever && !mcts_selector_confirms_lever &&
+          !ane_confirms_lever)
         continue;
 
       if (candidate.average_score > best_lever_average ||
@@ -2506,6 +4544,64 @@ Move ParallelHybridSearch::make_final_decision() {
       }
     }
     return best_lever;
+  };
+  const auto find_root_quiet_attack_tiebreak = [&](Move selected) {
+    if (!config_.root_pawn_lever_tiebreak ||
+        !HybridRootQuietAttackTieBreakAllowed(selected, mcts_best) ||
+        low_node_mcts_primary || !mcts_decision_budget ||
+        !mcts_visit_evidence_sane) {
+      return Move::none();
+    }
+
+    const Position &root_pos = get_decision_root_pos();
+    const ABRootLookup selected_ab = find_ab_root_move(selected);
+    if (selected_ab.rank <= 0 || std::abs(selected_ab.average_score) > 1000)
+      return Move::none();
+    const MCTSRootLookup selected_mcts = find_mcts_root_move(selected);
+
+    std::vector<ABRootMoveInfo> root_moves;
+    {
+      std::lock_guard<std::mutex> lock(ab_root_mutex_);
+      root_moves = ab_root_moves_;
+    }
+
+    Move best_attack = Move::none();
+    int best_rank = MCTSSharedState::MAX_TOP_MOVES + 1;
+    uint32_t best_visits = 0;
+    const int count = std::min<int>(static_cast<int>(root_moves.size()),
+                                    ABSharedState::MAX_PV);
+    for (int i = 0; i < count; ++i) {
+      const ABRootMoveInfo &candidate = root_moves[i];
+      if (candidate.move == Move::none() || candidate.move == selected)
+        continue;
+      const auto hint_it =
+          std::find(ab_root_order_hints_snapshot.begin(),
+                    ab_root_order_hints_snapshot.end(), candidate.move);
+      if (hint_it == ab_root_order_hints_snapshot.end() ||
+          std::distance(ab_root_order_hints_snapshot.begin(), hint_it) > 3) {
+        continue;
+      }
+      if (!HybridIsQuietMinorMajorAttack(root_pos, candidate.move))
+        continue;
+
+      const MCTSRootLookup mcts_lookup = find_mcts_root_move(candidate.move);
+      if (!HybridRootQuietMinorMajorAttackCandidate(
+              selected_ab.average_score, candidate.average_score,
+              candidate.effort, selected_mcts.rank,
+              selected_mcts.current_visits, selected_mcts.q, mcts_lookup.rank,
+              mcts_lookup.current_visits, mcts_lookup.q, mcts_lookup.policy)) {
+        continue;
+      }
+
+      if (mcts_lookup.rank < best_rank ||
+          (mcts_lookup.rank == best_rank &&
+           mcts_lookup.current_visits > best_visits)) {
+        best_attack = candidate.move;
+        best_rank = mcts_lookup.rank;
+        best_visits = mcts_lookup.current_visits;
+      }
+    }
+    return best_attack;
   };
   const auto trace_simple = [&](const char *reason, Move selected) {
     if (!config_.trace_decisions)
@@ -2526,13 +4622,19 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSConfidenceRootVisits=" << mcts_confidence_total_nodes
        << " MCTSDecisionBudget=" << (mcts_decision_budget ? 1 : 0)
        << " MCTSVisitEvidenceSane=" << (mcts_visit_evidence_sane ? 1 : 0)
+       << " LowNodeMCTSPrimary=" << (low_node_mcts_primary ? 1 : 0)
+       << " LowNodeMCTSReady=" << (low_node_mcts_primary_ready ? 1 : 0)
        << " ANETop=" << move_to_string(ane_top)
        << " ANEAgreesMCTS=" << (ane_agrees_mcts ? 1 : 0)
        << " ANEConfirmedMCTS=" << (ane_confirmed_mcts_override ? 1 : 0)
        << " ANETopScore=" << std::fixed << std::setprecision(3) << ane_top_score
        << " ANEScoreMargin=" << std::fixed << std::setprecision(3)
        << ane_score_margin << " ANERoot=" << ane_root_hints_to_string()
+       << " ABHints=" << move_list_to_string(ab_root_order_hints_snapshot)
+       << " ABVerifiedHints="
+       << move_list_to_string(ab_verified_root_order_hints_snapshot)
        << " MCTSTop=" << top_moves_to_string();
+    append_root_hint_trace(ss);
     append_cross_root_trace(ss);
     ss << " ABRoot=" << ab_root_moves_to_string();
     send_info_string(ss.str());
@@ -2553,8 +4655,16 @@ Move ParallelHybridSearch::make_final_decision() {
     return first_allowed_legal_move();
   }
 
+  Move quiet_attack_tiebreak = find_root_quiet_attack_tiebreak(ab_best);
+  if (quiet_attack_tiebreak != Move::none()) {
+    stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+    trace_simple("root_quiet_attack_tiebreak", quiet_attack_tiebreak);
+    return quiet_attack_tiebreak;
+  }
+
   if (ab_best == mcts_best) {
     Move policy_tiebreak = Move::none();
+    Move q_conflict_tiebreak = Move::none();
     const int top_count =
         std::min<int>(mcts_state_.num_top_moves.load(std::memory_order_acquire),
                       MCTSSharedState::MAX_TOP_MOVES);
@@ -2570,6 +4680,8 @@ Move ParallelHybridSearch::make_final_decision() {
         const float top_policy =
             mcts_state_.top_moves[0].policy.load(std::memory_order_relaxed);
         float best_policy = 0.0f;
+        float best_q_conflict_gap = 0.0f;
+        const ABRootLookup selected_ab = find_ab_root_move(top_move);
         for (int i = 1; i < top_count; ++i) {
           Move move(mcts_state_.top_moves[i].move_raw.load(
               std::memory_order_relaxed));
@@ -2590,6 +4702,17 @@ Move ParallelHybridSearch::make_final_decision() {
             best_policy = candidate_policy;
             policy_tiebreak = move;
           }
+          const ABRootLookup candidate_ab = find_ab_root_move(move);
+          const float q_gap = candidate_q - top_q;
+          if (q_gap > best_q_conflict_gap &&
+              HybridRootQConflictTieBreak(
+                  mcts_decision_budget, mcts_visit_evidence_sane,
+                  mcts_confidence_total_nodes, top_visits, top_q, top_policy,
+                  candidate_visits, candidate_q, candidate_policy,
+                  selected_ab.average_score, candidate_ab.average_score)) {
+            best_q_conflict_gap = q_gap;
+            q_conflict_tiebreak = move;
+          }
         }
       }
     }
@@ -2597,6 +4720,11 @@ Move ParallelHybridSearch::make_final_decision() {
       stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
       trace_simple("root_policy_tiebreak", policy_tiebreak);
       return policy_tiebreak;
+    }
+    if (q_conflict_tiebreak != Move::none()) {
+      stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+      trace_simple("root_q_conflict_tiebreak", q_conflict_tiebreak);
+      return q_conflict_tiebreak;
     }
 
     const float agreement_visit_share =
@@ -2657,6 +4785,9 @@ Move ParallelHybridSearch::make_final_decision() {
   const ABRootLookup ab_in_ab = find_ab_root_move(ab_best);
   const ABRootLookup mcts_in_ab = find_ab_root_move(mcts_best);
   const MCTSRootLookup ab_in_mcts = find_mcts_root_move(ab_best);
+  const ABRootLookup ane_in_ab = find_ab_root_move(ane_top);
+  const MCTSRootLookup ane_in_mcts = find_mcts_root_move(ane_top);
+  const ANERootLookup ane_top_lookup = find_ane_root_move(ane_top);
   const bool ab_root_rejects_mcts =
       config_.ab_root_reject_mcts &&
       HybridABRootRejectsMCTS(ab_verified, ab_in_ab.rank, mcts_in_ab.rank,
@@ -2689,11 +4820,62 @@ Move ParallelHybridSearch::make_final_decision() {
       HybridMCTSRootConfidenceFixedBudgetOverride(
           mcts_decision_budget, mcts_strong, mcts_confidence_total_nodes,
           mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta);
+  const bool mcts_low_node_root_confidence =
+      HybridMCTSLowNodeRootConfidenceOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane,
+          ab_has_clear_preference, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+          ab_in_ab.average_score, mcts_in_ab.average_score, mcts_in_ab.rank,
+          mcts_in_ab.score, mcts_in_ab.score_lowerbound,
+          mcts_in_ab.score_upperbound, mcts_in_ab.effort, ab_in_mcts.rank,
+          ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool mcts_ultra_low_node_root_confidence =
+      HybridMCTSUltraLowNodeRootConfidenceOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane,
+          mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
+          root_q_gap, mcts_cp, eval_delta, ab_score, ab_in_ab.average_score,
+          mcts_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
+          ab_in_mcts.q, mcts_q);
+  const bool mcts_short_root_tactical = HybridMCTSShortRootTacticalOverride(
+      mcts_decision_budget, mcts_visit_evidence_sane, ab_root_rejects_mcts,
+      mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
+      root_q_gap, mcts_cp, eval_delta, ab_in_ab.average_score,
+      mcts_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
+      mcts_in_ab.score_lowerbound, mcts_in_ab.effort, ab_in_mcts.rank,
+      ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool ab_verified_hint_supports_mcts =
+      !ab_verified_root_order_hints_snapshot.empty() &&
+      ab_verified_root_order_hints_snapshot.front() == mcts_best;
+  const bool mcts_verified_hint_support = HybridMCTSVerifiedHintSupportOverride(
+      mcts_decision_budget, mcts_visit_evidence_sane,
+      ab_verified_hint_supports_mcts, mcts_confidence_total_nodes,
+      mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+      ab_in_ab.average_score, mcts_in_ab.average_score, mcts_in_ab.rank,
+      mcts_in_ab.score, mcts_in_ab.score_lowerbound,
+      mcts_in_ab.score_upperbound, mcts_in_ab.effort, ab_in_mcts.rank,
+      ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool mcts_ab_lowerbound_confirmed =
+      HybridMCTSABLowerBoundConfirmedOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane,
+          mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
+          root_q_gap, ab_score, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.score_lowerbound, mcts_in_ab.effort, ab_in_mcts.rank,
+          ab_in_mcts.current_visits);
+  const Position &decision_root = get_decision_root_pos();
+  const bool pawn_only_root = HybridIsPawnOnlyEndgame(decision_root);
   const bool mcts_compact_fixed_budget = HybridMCTSCompactFixedBudgetOverride(
       mcts_decision_budget, mcts_visit_evidence_sane, ab_has_clear_preference,
       mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
       root_q_gap, mcts_cp, eval_delta, ab_in_ab.average_score,
       mcts_in_ab.average_score);
+  const bool mcts_compact_pawn_endgame = HybridMCTSCompactPawnEndgameOverride(
+      mcts_decision_budget, mcts_visit_evidence_sane, pawn_only_root,
+      ab_has_clear_preference, mcts_confidence_total_nodes,
+      mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+      ab_in_ab.average_score, mcts_in_ab.average_score, mcts_in_ab.rank,
+      mcts_in_ab.score, mcts_in_ab.score_lowerbound, mcts_in_ab.effort,
+      ab_in_mcts.rank, ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
   const bool mcts_compact_clear_preference =
       HybridMCTSCompactClearPreferenceOverride(
           mcts_decision_budget, mcts_visit_evidence_sane,
@@ -2717,6 +4899,100 @@ Move ParallelHybridSearch::make_final_decision() {
           mcts_in_ab.score_upperbound, mcts_in_ab.effort,
           ab_in_ab.average_score, mcts_in_ab.average_score, ab_in_mcts.rank,
           ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool low_material_root = decision_root.non_pawn_material() <= RookValue;
+  const bool mcts_kingside_pawn_push =
+      HybridIsKingsidePawnPush(decision_root, mcts_best);
+  const bool mcts_discovered_pawn_push =
+      mcts_kingside_pawn_push &&
+      HybridIsPawnDiscoveredKingAttack(decision_root, mcts_best);
+  const bool mcts_discovered_pawn_push_override =
+      HybridMCTSDiscoveredPawnPushOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane,
+          mcts_discovered_pawn_push, mcts_confidence_total_nodes,
+          mcts_confidence_visits, ab_in_mcts.current_visits, visit_share,
+          ab_in_mcts.rank > 0 ? mcts_q - ab_in_mcts.q : 0.0f, mcts_cp,
+          eval_delta, ab_score, ab_in_ab.average_score,
+          mcts_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.score_lowerbound, mcts_in_ab.score_upperbound,
+          mcts_in_ab.effort);
+  const bool mcts_root_reject_low_material_push =
+      HybridMCTSRootRejectLowMaterialPushOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane, ab_root_rejects_mcts,
+          low_material_root, mcts_kingside_pawn_push,
+          mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
+          root_q_gap, mcts_cp, eval_delta, ab_in_ab.average_score,
+          mcts_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
+          ab_in_mcts.q, mcts_q);
+  const bool mcts_root_reject_kingside_pawn_push =
+      HybridMCTSRootRejectKingsidePawnPushOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane, ab_root_rejects_mcts,
+          mcts_kingside_pawn_push, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+          mcts_in_ab.rank, mcts_in_ab.score, mcts_in_ab.effort, ab_in_mcts.rank,
+          ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool rook_endgame_root = HybridIsRookEndgame(decision_root);
+  const bool mcts_quiet_central_pawn_push =
+      HybridIsQuietCentralPawnPush(decision_root, mcts_best);
+  const bool mcts_root_reject_rook_pawn_push_sentinel =
+      HybridMCTSRootRejectRookEndgamePawnPushOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane, ab_root_rejects_mcts,
+          rook_endgame_root, mcts_quiet_central_pawn_push,
+          mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
+          root_q_gap, mcts_cp, eval_delta, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
+          ab_in_mcts.q, mcts_q);
+  const bool mcts_root_reject_rook_pawn_push_lowerbound =
+      HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane, rook_endgame_root,
+          mcts_quiet_central_pawn_push, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+          ab_score, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.score_lowerbound, mcts_in_ab.score_upperbound,
+          mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
+          ab_in_mcts.q, mcts_q);
+  const bool mcts_root_reject_rook_pawn_push =
+      mcts_root_reject_rook_pawn_push_sentinel ||
+      mcts_root_reject_rook_pawn_push_lowerbound;
+  const bool mcts_quiet_rook_move =
+      HybridIsQuietRookMove(decision_root, mcts_best);
+  const bool mcts_rook_endgame_quiet_rook =
+      HybridMCTSRookEndgameQuietRookOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane, rook_endgame_root,
+          mcts_quiet_rook_move, mcts_confidence_total_nodes,
+          mcts_confidence_visits, mcts_total_current_nodes, mcts_current_visits,
+          visit_share, ab_in_mcts.rank > 0 ? mcts_q - ab_in_mcts.q : 0.0f,
+          mcts_cp, eval_delta, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits);
+  const bool mcts_quiet_central_queen_move =
+      HybridIsQuietCentralQueenMove(decision_root, mcts_best);
+  const bool mcts_root_reject_quiet_queen_move =
+      HybridMCTSRootRejectQuietQueenMoveOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane, ab_root_rejects_mcts,
+          mcts_quiet_central_queen_move, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+          mcts_in_ab.rank, mcts_in_ab.score, mcts_in_ab.score_lowerbound,
+          mcts_in_ab.score_upperbound, mcts_in_ab.effort, ab_in_mcts.rank,
+          ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool mcts_quiet_minor_major_attack =
+      HybridIsQuietMinorMajorAttack(decision_root, mcts_best);
+  const bool mcts_root_reject_quiet_minor_major_attack =
+      HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane,
+          ab_has_clear_preference, ab_root_rejects_mcts,
+          mcts_quiet_minor_major_attack, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+          mcts_in_ab.rank, mcts_in_ab.score, mcts_in_ab.score_lowerbound,
+          mcts_in_ab.score_upperbound, mcts_in_ab.effort, ab_in_mcts.rank,
+          ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool mcts_mid_root_tactical_q_gap =
+      HybridMCTSMidRootTacticalQGapOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane, ab_root_rejects_mcts,
+          mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
+          root_q_gap, mcts_cp, eval_delta, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.score_lowerbound, mcts_in_ab.score_upperbound,
+          mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
+          ab_in_mcts.q, mcts_q);
   const bool mcts_reused_root_confidence =
       HybridMCTSReusedRootConfidenceOverride(
           mcts_decision_budget, mcts_total_nodes, mcts_visits,
@@ -2733,11 +5009,81 @@ Move ParallelHybridSearch::make_final_decision() {
       mcts_in_ab.score, mcts_in_ab.score_lowerbound,
       mcts_in_ab.score_upperbound, mcts_in_ab.effort, ab_in_mcts.rank,
       ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool bishop_endgame_root = HybridIsBishopOnlyEndgame(decision_root);
+  const bool mcts_bishop_back_rank_retreat =
+      HybridIsQuietBishopBackRankRetreat(decision_root, mcts_best);
+  const bool mcts_bishop_endgame_retreat =
+      HybridMCTSBishopEndgameRetreatOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane,
+          ab_has_clear_preference, bishop_endgame_root,
+          mcts_bishop_back_rank_retreat, mcts_total_nodes, mcts_visits,
+          mcts_total_current_nodes, mcts_current_visits, absolute_visit_share,
+          visit_share, mcts_cp, eval_delta, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.score_lowerbound, mcts_in_ab.score_upperbound,
+          mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
+          ab_in_mcts.q, mcts_q);
+  const bool mcts_root_reject_q_gap = HybridMCTSRootRejectQGapOverride(
+      mcts_decision_budget, mcts_visit_evidence_sane, ab_root_rejects_mcts,
+      mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
+      root_q_gap, mcts_cp, eval_delta, mcts_in_ab.rank, mcts_in_ab.score,
+      mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
+      ab_in_mcts.q, mcts_q);
+  const bool mcts_clock_root_reject_q_gap =
+      HybridMCTSClockRootRejectQGapOverride(
+          clock_managed_search, mcts_visit_evidence_sane, ab_root_rejects_mcts,
+          mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
+          root_q_gap, mcts_cp, eval_delta, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
+          ab_in_mcts.q, mcts_q);
   ane_confirmed_mcts_override = HybridANEConfirmedMCTSOverride(
       config_.ane_confirm_mcts_override, ane_agrees_mcts, mcts_decision_budget,
       mcts_visit_evidence_sane, mcts_confidence_total_nodes,
       mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
       ane_score_margin);
+  const bool pawn_only_ane_mcts_shape =
+      config_.ane_root_probe && ane_agrees_mcts &&
+      HybridIsPawnOnlyMCTSANECandidate(decision_root, ab_best, mcts_best);
+  const bool pawn_only_ane_mcts_king_recapture =
+      pawn_only_ane_mcts_shape &&
+      HybridIsPawnOnlyKingRecaptureCandidate(decision_root, ab_best, mcts_best);
+  const bool pawn_only_ane_mcts_pawn_lever =
+      pawn_only_ane_mcts_shape && HybridIsPawnLever(decision_root, mcts_best);
+  const bool pawn_only_ane_mcts_override = HybridPawnOnlyANEMCTSOverride(
+      config_.ane_confirm_mcts_override, ane_agrees_mcts, mcts_decision_budget,
+      mcts_visit_evidence_sane, pawn_only_ane_mcts_shape,
+      pawn_only_ane_mcts_king_recapture, pawn_only_ane_mcts_pawn_lever,
+      mcts_total_nodes, mcts_visits, mcts_confidence_total_nodes,
+      mcts_confidence_visits, ab_in_mcts.current_visits, visit_share,
+      root_q_gap, ab_in_mcts.rank > 0 ? mcts_q - ab_in_mcts.q : 0.0f, mcts_cp,
+      eval_delta, ab_in_ab.average_score, mcts_in_ab.average_score,
+      ane_score_margin);
+  const bool pawn_only_mcts_shape =
+      HybridIsPawnOnlyMCTSANECandidate(decision_root, ab_best, mcts_best);
+  const bool pawn_only_mcts_king_recapture =
+      pawn_only_mcts_shape &&
+      HybridIsPawnOnlyKingRecaptureCandidate(decision_root, ab_best, mcts_best);
+  const bool pawn_only_mcts_pawn_lever =
+      pawn_only_mcts_shape && HybridIsPawnLever(decision_root, mcts_best);
+  const bool pawn_only_mcts_override = HybridPawnOnlyMCTSOverride(
+      mcts_decision_budget, mcts_visit_evidence_sane, pawn_only_mcts_shape,
+      pawn_only_mcts_king_recapture, pawn_only_mcts_pawn_lever,
+      mcts_total_nodes, mcts_visits, mcts_confidence_total_nodes,
+      mcts_confidence_visits, ab_in_mcts.current_visits, visit_share,
+      root_q_gap, ab_in_mcts.rank > 0 ? mcts_q - ab_in_mcts.q : 0.0f, mcts_cp,
+      eval_delta, ab_in_ab.average_score, mcts_in_ab.average_score,
+      mcts_in_ab.rank, mcts_in_ab.score, mcts_in_ab.score_upperbound,
+      mcts_in_ab.effort, ab_in_mcts.rank);
+  const bool ane_q_supported_root_override =
+      ane_top != Move::none() && ane_top != ab_best && ane_top != mcts_best &&
+      HybridANEQSupportedRootOverride(
+          config_.ane_confirm_mcts_override, mcts_decision_budget,
+          mcts_visit_evidence_sane, ab_root_rejects_mcts, ane_top_lookup.rank,
+          ane_score_margin, mcts_confidence_total_nodes, ane_in_mcts.rank,
+          ane_in_mcts.current_visits, ane_in_mcts.q, ane_in_mcts.policy,
+          mcts_current_visits, mcts_q, ab_in_mcts.rank,
+          ab_in_mcts.current_visits, ab_in_mcts.q, ane_in_ab.rank,
+          ane_in_ab.score, ane_in_ab.average_score, ane_in_ab.score_upperbound,
+          ane_in_ab.effort, ab_in_ab.average_score);
   bool mcts_root_rejects_ab = false;
   {
     const int top_count =
@@ -2776,12 +5122,23 @@ Move ParallelHybridSearch::make_final_decision() {
     }
   }
   const bool mcts_override_allowed =
-      !ab_root_rejects_mcts || ane_confirmed_mcts_override ||
-      mcts_compact_fixed_budget || mcts_compact_clear_preference ||
+      low_node_mcts_primary_ready || !ab_root_rejects_mcts ||
+      ane_confirmed_mcts_override || pawn_only_ane_mcts_override ||
+      pawn_only_mcts_override || ane_q_supported_root_override ||
+      mcts_short_root_tactical || mcts_verified_hint_support ||
+      mcts_compact_fixed_budget || mcts_compact_pawn_endgame ||
+      mcts_ab_lowerbound_confirmed || mcts_low_node_root_confidence ||
+      mcts_ultra_low_node_root_confidence || mcts_compact_clear_preference ||
       mcts_cross_root_confidence_fixed_budget ||
       mcts_root_confidence_reject_override || mcts_reused_root_confidence ||
-      mcts_reused_root_current || mcts_root_rejects_ab ||
-      (mcts_overwhelming && eval_delta >= 250);
+      mcts_root_reject_low_material_push || mcts_root_reject_rook_pawn_push ||
+      mcts_root_reject_kingside_pawn_push || mcts_rook_endgame_quiet_rook ||
+      mcts_root_reject_quiet_queen_move ||
+      mcts_root_reject_quiet_minor_major_attack ||
+      mcts_mid_root_tactical_q_gap || mcts_bishop_endgame_retreat ||
+      mcts_root_reject_q_gap || mcts_clock_root_reject_q_gap ||
+      mcts_discovered_pawn_push_override || mcts_reused_root_current ||
+      mcts_root_rejects_ab || (mcts_overwhelming && eval_delta >= 250);
 
   bool choose_mcts = false;
   const char *reason = "ab_default";
@@ -2789,11 +5146,48 @@ Move ParallelHybridSearch::make_final_decision() {
   case ParallelHybridConfig::DecisionMode::MCTS_PRIMARY:
     choose_mcts =
         mcts_override_allowed &&
-        (ane_confirmed_mcts_override ||
+        (low_node_mcts_primary_ready || ane_confirmed_mcts_override ||
+         pawn_only_ane_mcts_override || pawn_only_mcts_override ||
+         mcts_ab_lowerbound_confirmed || mcts_low_node_root_confidence ||
+         mcts_ultra_low_node_root_confidence ||
+         mcts_discovered_pawn_push_override ||
+         mcts_root_reject_low_material_push ||
+         mcts_root_reject_kingside_pawn_push ||
+         mcts_root_reject_rook_pawn_push || mcts_rook_endgame_quiet_rook ||
+         mcts_root_reject_quiet_queen_move ||
+         mcts_root_reject_quiet_minor_major_attack ||
+         mcts_mid_root_tactical_q_gap || mcts_bishop_endgame_retreat ||
+         mcts_root_reject_q_gap || mcts_clock_root_reject_q_gap ||
+         mcts_verified_hint_support ||
          (mcts_reliable && (!ab_has_clear_preference || eval_delta >= 180)));
     if (choose_mcts)
-      reason = ane_confirmed_mcts_override ? "ane_confirmed_mcts"
-                                           : "mcts_primary_reliable";
+      reason =
+          low_node_mcts_primary_ready     ? "low_node_mcts_primary"
+          : ane_confirmed_mcts_override   ? "ane_confirmed_mcts"
+          : pawn_only_ane_mcts_override   ? "pawn_only_ane_mcts"
+          : pawn_only_mcts_override       ? "pawn_only_mcts"
+          : mcts_compact_pawn_endgame     ? "mcts_compact_pawn_endgame"
+          : mcts_ab_lowerbound_confirmed  ? "mcts_ab_lowerbound_confirmed"
+          : mcts_low_node_root_confidence ? "mcts_low_node_root_confidence"
+          : mcts_ultra_low_node_root_confidence
+              ? "mcts_ultra_low_node_root_confidence"
+          : mcts_discovered_pawn_push_override ? "mcts_discovered_pawn_push"
+          : mcts_root_reject_low_material_push
+              ? "mcts_root_reject_low_material_push"
+          : mcts_root_reject_kingside_pawn_push
+              ? "mcts_root_reject_kingside_pawn_push"
+          : mcts_root_reject_rook_pawn_push ? "mcts_root_reject_rook_pawn_push"
+          : mcts_rook_endgame_quiet_rook    ? "mcts_rook_endgame_quiet_rook"
+          : mcts_root_reject_quiet_queen_move
+              ? "mcts_root_reject_quiet_queen_move"
+          : mcts_root_reject_quiet_minor_major_attack
+              ? "mcts_root_reject_quiet_minor_major_attack"
+          : mcts_mid_root_tactical_q_gap ? "mcts_mid_root_tactical_q_gap"
+          : mcts_bishop_endgame_retreat  ? "mcts_bishop_endgame_retreat"
+          : mcts_root_reject_q_gap       ? "mcts_root_reject_q_gap"
+          : mcts_clock_root_reject_q_gap ? "mcts_clock_root_reject_q_gap"
+          : mcts_verified_hint_support   ? "mcts_verified_hint_support"
+                                         : "mcts_primary_reliable";
     break;
   case ParallelHybridConfig::DecisionMode::AB_PRIMARY:
     choose_mcts =
@@ -2805,9 +5199,20 @@ Move ParallelHybridSearch::make_final_decision() {
   case ParallelHybridConfig::DecisionMode::DYNAMIC:
     if (!mcts_override_allowed) {
       reason = "ab_root_rejects_mcts";
+    } else if (low_node_mcts_primary_ready) {
+      choose_mcts = true;
+      reason = "low_node_mcts_primary";
     } else if (ane_confirmed_mcts_override) {
       choose_mcts = true;
       reason = "ane_confirmed_mcts";
+    } else if (pawn_only_ane_mcts_override) {
+      choose_mcts = true;
+      reason = "pawn_only_ane_mcts";
+    } else if (pawn_only_mcts_override) {
+      choose_mcts = true;
+      reason = "pawn_only_mcts";
+    } else if (ane_q_supported_root_override) {
+      reason = "ane_q_supported_root";
     } else if (mcts_visit_evidence_sane && mcts_overwhelming &&
                eval_delta >= 180) {
       choose_mcts = true;
@@ -2824,6 +5229,54 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_root_confidence_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_root_confidence_fixed_budget";
+    } else if (mcts_low_node_root_confidence) {
+      choose_mcts = true;
+      reason = "mcts_low_node_root_confidence";
+    } else if (mcts_ultra_low_node_root_confidence) {
+      choose_mcts = true;
+      reason = "mcts_ultra_low_node_root_confidence";
+    } else if (mcts_short_root_tactical) {
+      choose_mcts = true;
+      reason = "mcts_short_root_tactical";
+    } else if (mcts_verified_hint_support) {
+      choose_mcts = true;
+      reason = "mcts_verified_hint_support";
+    } else if (mcts_ab_lowerbound_confirmed) {
+      choose_mcts = true;
+      reason = "mcts_ab_lowerbound_confirmed";
+    } else if (mcts_discovered_pawn_push_override) {
+      choose_mcts = true;
+      reason = "mcts_discovered_pawn_push";
+    } else if (mcts_root_reject_low_material_push) {
+      choose_mcts = true;
+      reason = "mcts_root_reject_low_material_push";
+    } else if (mcts_root_reject_kingside_pawn_push) {
+      choose_mcts = true;
+      reason = "mcts_root_reject_kingside_pawn_push";
+    } else if (mcts_root_reject_rook_pawn_push) {
+      choose_mcts = true;
+      reason = "mcts_root_reject_rook_pawn_push";
+    } else if (mcts_rook_endgame_quiet_rook) {
+      choose_mcts = true;
+      reason = "mcts_rook_endgame_quiet_rook";
+    } else if (mcts_root_reject_quiet_queen_move) {
+      choose_mcts = true;
+      reason = "mcts_root_reject_quiet_queen_move";
+    } else if (mcts_root_reject_quiet_minor_major_attack) {
+      choose_mcts = true;
+      reason = "mcts_root_reject_quiet_minor_major_attack";
+    } else if (mcts_mid_root_tactical_q_gap) {
+      choose_mcts = true;
+      reason = "mcts_mid_root_tactical_q_gap";
+    } else if (mcts_bishop_endgame_retreat) {
+      choose_mcts = true;
+      reason = "mcts_bishop_endgame_retreat";
+    } else if (mcts_root_reject_q_gap) {
+      choose_mcts = true;
+      reason = "mcts_root_reject_q_gap";
+    } else if (mcts_clock_root_reject_q_gap) {
+      choose_mcts = true;
+      reason = "mcts_clock_root_reject_q_gap";
     } else if (mcts_reused_root_confidence) {
       choose_mcts = true;
       reason = "mcts_reused_root_confidence";
@@ -2833,6 +5286,9 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_compact_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_compact_fixed_budget";
+    } else if (mcts_compact_pawn_endgame) {
+      choose_mcts = true;
+      reason = "mcts_compact_pawn_endgame";
     } else if (mcts_compact_clear_preference) {
       choose_mcts = true;
       reason = "mcts_compact_clear_preference";
@@ -2875,6 +5331,8 @@ Move ParallelHybridSearch::make_final_decision() {
        << " VisitShare=" << visit_share
        << " MCTSDecisionBudget=" << (mcts_decision_budget ? 1 : 0)
        << " MCTSVisitEvidenceSane=" << (mcts_visit_evidence_sane ? 1 : 0)
+       << " LowNodeMCTSPrimary=" << (low_node_mcts_primary ? 1 : 0)
+       << " LowNodeMCTSReady=" << (low_node_mcts_primary_ready ? 1 : 0)
        << " RootQGap=" << root_q_gap
        << " MCTSReliable=" << (mcts_reliable ? 1 : 0)
        << " MCTSStrong=" << (mcts_strong ? 1 : 0)
@@ -2882,12 +5340,40 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSRootDominant=" << (mcts_root_dominant_fixed_budget ? 1 : 0)
        << " MCTSTacticalGap=" << (mcts_tactical_gap_fixed_budget ? 1 : 0)
        << " MCTSRootConfidence=" << (mcts_root_confidence_fixed_budget ? 1 : 0)
+       << " MCTSLowNodeRootConfidence="
+       << (mcts_low_node_root_confidence ? 1 : 0)
+       << " MCTSUltraLowNodeRootConfidence="
+       << (mcts_ultra_low_node_root_confidence ? 1 : 0)
+       << " MCTSShortRootTactical=" << (mcts_short_root_tactical ? 1 : 0)
+       << " MCTSVerifiedHintSupport=" << (mcts_verified_hint_support ? 1 : 0)
+       << " ABVerifiedHintSupportsMCTS="
+       << (ab_verified_hint_supports_mcts ? 1 : 0)
+       << " MCTSABLowerBoundConfirmed="
+       << (mcts_ab_lowerbound_confirmed ? 1 : 0)
        << " MCTSCompact=" << (mcts_compact_fixed_budget ? 1 : 0)
+       << " MCTSCompactPawnEndgame=" << (mcts_compact_pawn_endgame ? 1 : 0)
        << " MCTSCompactClearPreference="
        << (mcts_compact_clear_preference ? 1 : 0) << " MCTSCrossRootConfidence="
        << (mcts_cross_root_confidence_fixed_budget ? 1 : 0)
        << " MCTSRootConfidenceRejectOverride="
        << (mcts_root_confidence_reject_override ? 1 : 0)
+       << " MCTSDiscoveredPawnPush="
+       << (mcts_discovered_pawn_push_override ? 1 : 0)
+       << " MCTSRootRejectLowMaterialPush="
+       << (mcts_root_reject_low_material_push ? 1 : 0)
+       << " MCTSRootRejectKingsidePawnPush="
+       << (mcts_root_reject_kingside_pawn_push ? 1 : 0)
+       << " MCTSRootRejectRookPawnPush="
+       << (mcts_root_reject_rook_pawn_push ? 1 : 0)
+       << " MCTSRookEndgameQuietRook=" << (mcts_rook_endgame_quiet_rook ? 1 : 0)
+       << " MCTSRootRejectQuietQueenMove="
+       << (mcts_root_reject_quiet_queen_move ? 1 : 0)
+       << " MCTSRootRejectQuietMinorMajorAttack="
+       << (mcts_root_reject_quiet_minor_major_attack ? 1 : 0)
+       << " MCTSMidRootTacticalQGap=" << (mcts_mid_root_tactical_q_gap ? 1 : 0)
+       << " MCTSBishopEndgameRetreat=" << (mcts_bishop_endgame_retreat ? 1 : 0)
+       << " MCTSRootRejectQGap=" << (mcts_root_reject_q_gap ? 1 : 0)
+       << " MCTSClockRootRejectQGap=" << (mcts_clock_root_reject_q_gap ? 1 : 0)
        << " MCTSReusedRootConfidence=" << (mcts_reused_root_confidence ? 1 : 0)
        << " MCTSReusedRootCurrent=" << (mcts_reused_root_current ? 1 : 0)
        << " MCTSOverwhelming=" << (mcts_overwhelming ? 1 : 0)
@@ -2899,23 +5385,47 @@ Move ParallelHybridSearch::make_final_decision() {
        << " ANETop=" << move_to_string(ane_top)
        << " ANEAgreesMCTS=" << (ane_agrees_mcts ? 1 : 0)
        << " ANEConfirmedMCTS=" << (ane_confirmed_mcts_override ? 1 : 0)
+       << " PawnOnlyANEMCTS=" << (pawn_only_ane_mcts_override ? 1 : 0)
+       << " PawnOnlyMCTS=" << (pawn_only_mcts_override ? 1 : 0)
+       << " ANEQSupportedRoot=" << (ane_q_supported_root_override ? 1 : 0)
        << " ANETopScore=" << std::fixed << std::setprecision(3) << ane_top_score
        << " ANEScoreMargin=" << std::fixed << std::setprecision(3)
-       << ane_score_margin << " ANERoot=" << ane_root_hints_to_string()
+       << ane_score_margin << " ANETopInMCTSRank=" << ane_in_mcts.rank
+       << " ANETopInMCTSCurrentVisits=" << ane_in_mcts.current_visits
+       << " ANETopInMCTSQ=" << std::fixed << std::setprecision(3)
+       << ane_in_mcts.q << " ANETopInMCTSPolicy=" << std::fixed
+       << std::setprecision(3) << ane_in_mcts.policy
+       << " ANETopInABRank=" << ane_in_ab.rank
+       << " ANETopInABScore=" << ane_in_ab.score
+       << " ANETopInABAvg=" << ane_in_ab.average_score
+       << " ANETopInABEffort=" << ane_in_ab.effort
+       << " ANETopInABUB=" << (ane_in_ab.score_upperbound ? 1 : 0)
+       << " ANERoot=" << ane_root_hints_to_string()
+       << " ABHints=" << move_list_to_string(ab_root_order_hints_snapshot)
+       << " ABVerifiedHints="
+       << move_list_to_string(ab_verified_root_order_hints_snapshot)
        << " MCTSTop=" << top_moves_to_string();
+    append_root_hint_trace(ss);
     append_cross_root_trace(ss);
     ss << " ABRoot=" << ab_root_moves_to_string();
     send_info_string(ss.str());
   };
 
-  trace_final(reason, choose_mcts ? mcts_best : ab_best);
+  Move selected = ane_q_supported_root_override
+                      ? ane_top
+                      : (choose_mcts ? mcts_best : ab_best);
+  trace_final(reason, selected);
 
-  Move selected = choose_mcts ? mcts_best : ab_best;
   Move pawn_lever_tiebreak = find_root_pawn_lever_tiebreak(selected, true);
   if (pawn_lever_tiebreak != Move::none()) {
     stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
     trace_final("root_pawn_lever_tiebreak", pawn_lever_tiebreak);
     return pawn_lever_tiebreak;
+  }
+
+  if (ane_q_supported_root_override) {
+    stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+    return ane_top;
   }
 
   if (choose_mcts) {

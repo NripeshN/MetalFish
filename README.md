@@ -116,8 +116,11 @@ out on BK.24, which is why pure MCTS now caps Apple workers unless
 `MCTSParallelSearch=true` is set.
 
 MetalFish's pure-MCTS strength profile intentionally uses a small
-`MCTSMinimumKLDGainPerNode=0.00005` tactical stopper. For an exact Lc0-style
-KLD-off diagnostic comparison, run:
+`MCTSMinimumKLDGainPerNode=0.00005` tactical stopper and
+`PureMCTSSmartPruningFactor=0.0`. This keeps pure MCTS from freezing low-root
+alternatives too early while leaving Hybrid's MCTS worker on its separate
+hybrid profile. For an exact Lc0-style KLD-off diagnostic
+comparison, run:
 
 ```bash
 python3 tests/bk_parity.py --engine both --movetime 5000 \
@@ -237,7 +240,7 @@ setoption name NNWeights value networks/BT4-1024x15x32h-swa-6147500.pb
 setoption name Threads value 8
 setoption name Hash value 4096
 setoption name Ponder value true
-setoption name HybridABCandidateVerifyMs value 120
+setoption name HybridABCandidateVerifyMs value 240
 isready
 position startpos
 go movetime 5000
@@ -252,12 +255,15 @@ to run on Metal/MPSGraph:
 
 ```text
 setoption name HybridANERootProbe value true
+setoption name HybridANERootHints value false
 setoption name HybridANEWeights value networks/t1-512x15x8h-distilled-swa-3395000.pb.gz
 setoption name HybridANEModelPath value build/coreml/compiled/t1-512-heads-b8.mlmodelc
 setoption name HybridANEComputeUnits value cpu-ne
+setoption name HybridANEOnlyPawnEndgames value false
+setoption name HybridANEConfirmMCTSOverride value true
 setoption name HybridANERootHintCount value 10
 setoption name HybridANERootHintWaitMs value 0
-setoption name HybridANEMinBudgetMs value 1000
+setoption name HybridANEMinBudgetMs value 500
 ```
 
 Current ANE findings:
@@ -266,10 +272,14 @@ Current ANE findings:
   `cpu-gpu` are faster in isolation but compete with Metal inference.
 - T1-512 is retained over T1-256. T1-256 is lower latency, but it regressed the
   ANE-sensitive repeat gate.
-- The retained wait profile is `0 ms`: the ANE probe runs concurrently and can
-  support final MCTS overrides, but AB does not pause for ANE root ordering.
-  This preserved the ANE-sensitive repeat gate and improved the local hard-200
-  sample from 199/200 to 200/200 at 3s.
+- The Lichess bot probes all roots when ANE is explicitly enabled. The current
+  retained profile keeps root hints off, allows ANE to confirm narrowly gated
+  MCTS overrides, and starts ANE probes at 500 ms or larger move budgets.
+- ANE root hints are available as an explicit experiment, but they are disabled
+  by default. After the low-visit pawn-lever update, ANE root hints regressed
+  the local 1s BK repeat from 67/72 to 66/72, while ANE probe without root
+  hints matched the retained non-ANE profile. The retained wait profile remains
+  `250 ms` for explicit root-hint runs.
 - ANE is retained as a confirming sidecar, not as a third equal engine. Puzzle
   summaries report `ANE searches`, non-empty roots, top moves, failures,
   agreement with MCTS, and ANE-confirmed MCTS overrides so runs distinguish
@@ -283,9 +293,11 @@ python3 tools/lichess_puzzle_runner.py \
   --engine build/metalfish --mode hybrid \
   --weights networks/BT4-1024x15x32h-swa-6147500.pb \
   --hybrid-ane-root-probe \
+  --hybrid-ane-confirm-mcts-override \
   --hybrid-ane-weights networks/t1-512x15x8h-distilled-swa-3395000.pb.gz \
   --hybrid-ane-model-path build/coreml/compiled/t1-512-heads-b8.mlmodelc \
   --hybrid-ane-compute-units cpu-ne \
+  --hybrid-ane-min-budget-ms 500 \
   --threads 8 --hash-mb 4096 --movetime-ms 3000
 
 python3 tools/lc0_coreml_concurrency_benchmark.py \
