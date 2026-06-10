@@ -172,7 +172,8 @@ def assert_hybrid_trace_jsonl_decisions() -> None:
                         "selected=f6f5 ABMove=g6g5 MCTSMove=f6f5 "
                         "MCTSBestVisits=81 ANETop=f6f5 ANEAgreesMCTS=1 "
                         "ANEConfirmedMCTS=1 PawnOnlyANEMCTS=1 "
-                        "MCTSUltraLowNodeRootConfidence=1"
+                        "MCTSUltraLowNodeRootConfidence=1 "
+                        "ABMCTSAgreeOffFirstHint=1"
                     ),
                 }
             ],
@@ -213,6 +214,7 @@ def assert_hybrid_trace_jsonl_decisions() -> None:
         or stats.ane_hints != 1
         or stats.ane_hint_moves != 6
         or stats.mcts_ultra_low_root_confidence != 1
+        or stats.ab_mcts_agree_off_first_hint != 1
     ):
         raise AssertionError("trace analyzer did not count ANE puzzle coverage")
 
@@ -2634,6 +2636,8 @@ def main() -> int:
             "MCTS-to-AB root hint sizes",
             "MCTS arbitration",
             "ultra-low root confidence overrides",
+            "Root hint diagnostics",
+            "AB/MCTS agreed off first root hint",
             "expand_results_paths",
             "MCTSBestCurrentVisits",
             "MCTSRootCurrentVisits",

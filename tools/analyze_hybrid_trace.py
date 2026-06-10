@@ -82,6 +82,7 @@ class TraceLogStats:
     root_hint_moves_total: int = 0
     root_hint_sizes: dict[int, int] = field(default_factory=dict)
     mcts_ultra_low_root_confidence: int = 0
+    ab_mcts_agree_off_first_hint: int = 0
 
 
 def latest_results_file() -> pathlib.Path:
@@ -245,6 +246,9 @@ def collect_trace_log_stats(results_paths: list[pathlib.Path]) -> TraceLogStats:
         stats.ane_q_supported_root += field_int(fields, "ANEQSupportedRoot")
         stats.mcts_ultra_low_root_confidence += field_int(
             fields, "MCTSUltraLowNodeRootConfidence"
+        )
+        stats.ab_mcts_agree_off_first_hint += field_int(
+            fields, "ABMCTSAgreeOffFirstHint"
         )
 
     def add_structured_ane_fields(search: dict) -> None:
@@ -690,6 +694,12 @@ def print_trace_log_stats(stats: TraceLogStats) -> None:
         print(
             "    ultra-low root confidence overrides: "
             f"{stats.mcts_ultra_low_root_confidence}"
+        )
+    if stats.ab_mcts_agree_off_first_hint:
+        print("  Root hint diagnostics:")
+        print(
+            "    AB/MCTS agreed off first root hint: "
+            f"{stats.ab_mcts_agree_off_first_hint}"
         )
     print(f"  time-safety AB fallbacks: {stats.time_safety_fallbacks}")
     if stats.time_safety_reasons:
