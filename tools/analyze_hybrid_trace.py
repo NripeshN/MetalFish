@@ -251,14 +251,17 @@ def collect_trace_log_stats(results_paths: list[pathlib.Path]) -> TraceLogStats:
             fields, "ABMCTSAgreeOffFirstHint"
         )
 
+    def add_structured_ane_aux_fields(search: dict) -> None:
+        stats.ane_failures += int(search.get("ane_failures") or 0)
+        stats.ane_hints += int(search.get("ane_hints") or 0)
+        stats.ane_hint_moves += int(search.get("ane_hint_moves") or 0)
+
     def add_structured_ane_fields(search: dict) -> None:
         if str(search.get("hybrid_ane_top", "none")) not in {"", "none"}:
             stats.ane_top_entries += 1
         stats.ane_agrees_mcts += int(search.get("hybrid_ane_agrees_mcts") or 0)
         stats.ane_confirmed_mcts += int(search.get("hybrid_ane_confirmed_mcts") or 0)
-        stats.ane_failures += int(search.get("ane_failures") or 0)
-        stats.ane_hints += int(search.get("ane_hints") or 0)
-        stats.ane_hint_moves += int(search.get("ane_hint_moves") or 0)
+        add_structured_ane_aux_fields(search)
 
     for results_path in results_paths:
         for record in load_result_records(results_path):
@@ -303,6 +306,7 @@ def collect_trace_log_stats(results_paths: list[pathlib.Path]) -> TraceLogStats:
                     if trace:
                         stats.trace_entries += 1
                         add_ane_fields(parse_fields(trace))
+                        add_structured_ane_aux_fields(search)
                     else:
                         add_structured_ane_fields(search)
     return stats

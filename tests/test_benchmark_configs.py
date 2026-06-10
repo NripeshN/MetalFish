@@ -175,6 +175,8 @@ def assert_hybrid_trace_jsonl_decisions() -> None:
                         "MCTSUltraLowNodeRootConfidence=1 "
                         "ABMCTSAgreeOffFirstHint=1"
                     ),
+                    "ane_hints": 1,
+                    "ane_hint_moves": 3,
                 }
             ],
         },
@@ -211,8 +213,8 @@ def assert_hybrid_trace_jsonl_decisions() -> None:
         or stats.ane_confirmed_mcts != 1
         or stats.ane_pawn_only_mcts != 1
         or stats.ane_failures != 1
-        or stats.ane_hints != 1
-        or stats.ane_hint_moves != 6
+        or stats.ane_hints != 2
+        or stats.ane_hint_moves != 9
         or stats.mcts_ultra_low_root_confidence != 1
         or stats.ab_mcts_agree_off_first_hint != 1
     ):
