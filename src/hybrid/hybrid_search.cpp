@@ -694,14 +694,14 @@ bool HybridMCTSUltraLowNodeRootConfidenceOverride(
     uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
     int eval_delta, int ab_score, int ab_average_score, int mcts_average_score,
     int mcts_in_ab_rank, int mcts_in_ab_score, uint64_t mcts_in_ab_effort,
-    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits,
-    float ab_in_mcts_q, float mcts_q) {
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q,
+    float mcts_q) {
   if (!fixed_budget || !visit_evidence_sane)
     return false;
 
-  if (mcts_root_visits < 20 || mcts_root_visits > 40 ||
-      mcts_best_visits < 20 || visit_share < 0.74f || root_q_gap < 0.55f ||
-      mcts_cp < 170 || eval_delta < 170) {
+  if (mcts_root_visits < 20 || mcts_root_visits > 40 || mcts_best_visits < 20 ||
+      visit_share < 0.74f || root_q_gap < 0.55f || mcts_cp < 170 ||
+      eval_delta < 170) {
     return false;
   }
 
@@ -5088,8 +5088,7 @@ Move ParallelHybridSearch::make_final_decision() {
       mcts_short_root_tactical || mcts_verified_hint_support ||
       mcts_compact_fixed_budget || mcts_compact_pawn_endgame ||
       mcts_ab_lowerbound_confirmed || mcts_low_node_root_confidence ||
-      mcts_ultra_low_node_root_confidence ||
-      mcts_compact_clear_preference ||
+      mcts_ultra_low_node_root_confidence || mcts_compact_clear_preference ||
       mcts_cross_root_confidence_fixed_budget ||
       mcts_root_confidence_reject_override || mcts_reused_root_confidence ||
       mcts_root_reject_low_material_push || mcts_root_reject_rook_pawn_push ||
@@ -5123,13 +5122,13 @@ Move ParallelHybridSearch::make_final_decision() {
          (mcts_reliable && (!ab_has_clear_preference || eval_delta >= 180)));
     if (choose_mcts)
       reason =
-          low_node_mcts_primary_ready          ? "low_node_mcts_primary"
-          : ane_confirmed_mcts_override        ? "ane_confirmed_mcts"
-          : pawn_only_ane_mcts_override        ? "pawn_only_ane_mcts"
-          : pawn_only_mcts_override            ? "pawn_only_mcts"
-          : mcts_compact_pawn_endgame          ? "mcts_compact_pawn_endgame"
-          : mcts_ab_lowerbound_confirmed       ? "mcts_ab_lowerbound_confirmed"
-          : mcts_low_node_root_confidence      ? "mcts_low_node_root_confidence"
+          low_node_mcts_primary_ready     ? "low_node_mcts_primary"
+          : ane_confirmed_mcts_override   ? "ane_confirmed_mcts"
+          : pawn_only_ane_mcts_override   ? "pawn_only_ane_mcts"
+          : pawn_only_mcts_override       ? "pawn_only_mcts"
+          : mcts_compact_pawn_endgame     ? "mcts_compact_pawn_endgame"
+          : mcts_ab_lowerbound_confirmed  ? "mcts_ab_lowerbound_confirmed"
+          : mcts_low_node_root_confidence ? "mcts_low_node_root_confidence"
           : mcts_ultra_low_node_root_confidence
               ? "mcts_ultra_low_node_root_confidence"
           : mcts_discovered_pawn_push_override ? "mcts_discovered_pawn_push"
