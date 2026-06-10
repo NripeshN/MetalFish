@@ -919,7 +919,7 @@ bool MCTSRootLowPolicyLeverCandidate(uint32_t root_visits, uint32_t best_visits,
          candidate_visits * 3 < std::max<uint32_t>(1, best_visits) &&
          candidate_policy >= 0.035f && candidate_policy <= 0.08f &&
          candidate_policy <= best_policy * 0.35f &&
-         best_q - candidate_q <= 0.09f;
+         best_q - candidate_q <= 0.095f;
 }
 
 bool MCTSRootLowPolicyLeverProbeCandidate(uint32_t root_visits,

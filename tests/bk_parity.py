@@ -84,6 +84,13 @@ def warmup_movetime_ms(movetime_ms: int, *, hybrid: bool = False) -> int:
     return warmup_ms
 
 
+def warmup_session(
+    sess: "UCISession", mode: str, movetime_ms: int, nodes: int, repeats: int
+) -> None:
+    for _ in range(max(1, repeats)):
+        sess.warmup(mode, movetime_ms, nodes)
+
+
 @dataclass
 class SearchResult:
     bestmove: str
@@ -868,7 +875,13 @@ def run_once(
                 return 2
             s = UCISession([str(args.metalfish)], "metalfish-ab")
             setup_metalfish_ab(s, threads, args.multipv)
-            s.warmup(mode, warmup_movetime_ms(movetime_ms), min(200, nodes))
+            warmup_session(
+                s,
+                mode,
+                warmup_movetime_ms(movetime_ms),
+                min(200, nodes),
+                args.warmup_repeats,
+            )
             sessions["metalfish-ab"] = s
 
         if want_mcts:
@@ -902,7 +915,13 @@ def run_once(
                 args.mcts_cache_history_length,
                 args.mcts_nn_cache_size,
             )
-            s.warmup(mode, warmup_movetime_ms(movetime_ms), min(200, nodes))
+            warmup_session(
+                s,
+                mode,
+                warmup_movetime_ms(movetime_ms),
+                min(200, nodes),
+                args.warmup_repeats,
+            )
             sessions["metalfish-mcts"] = s
 
         if want_hybrid:
@@ -957,10 +976,12 @@ def run_once(
                 args.mcts_cache_history_length,
                 args.mcts_nn_cache_size,
             )
-            s.warmup(
+            warmup_session(
+                s,
                 mode,
                 warmup_movetime_ms(movetime_ms, hybrid=True),
                 min(200, nodes),
+                args.warmup_repeats,
             )
             sessions["metalfish-hybrid"] = s
 
@@ -977,7 +998,13 @@ def run_once(
                 "lc0",
             )
             setup_lc0(s, threads)
-            s.warmup(mode, warmup_movetime_ms(movetime_ms), min(200, nodes))
+            warmup_session(
+                s,
+                mode,
+                warmup_movetime_ms(movetime_ms),
+                min(200, nodes),
+                args.warmup_repeats,
+            )
             sessions["lc0"] = s
 
         all_results: Dict[str, Dict[str, SearchResult]] = {}
@@ -1061,6 +1088,12 @@ def main() -> int:
     parser.add_argument("--deterministic", action="store_true")
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument(
+        "--warmup-repeats",
+        type=int,
+        default=1,
+        help="Number of pre-benchmark warmup searches per engine session",
+    )
+    parser.add_argument(
         "--repeat-summary",
         action="store_true",
         help="Print per-engine move counts and pass rates across repeats",
@@ -1102,7 +1135,7 @@ def main() -> int:
     parser.add_argument(
         "--hybrid-root-reject",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
     )
     parser.add_argument("--hybrid-shared-tt", action="store_true")
     parser.add_argument(

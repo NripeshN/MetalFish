@@ -781,6 +781,9 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(MCTSRootLowPolicyLeverCandidate(87, 44, 3, 5, 0.314f, -0.188f, 0.038f,
                                          -0.270f),
          "BK.17 post-rescue low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(82, 35, 3, 5, 0.258f, -0.179f, 0.043f,
+                                         -0.270f),
+         "BK.17 observed rank-five low-policy lever passes", tc);
   expect(!MCTSRootLowPolicyLeverCandidate(96, 17, 39, 1, 0.260f, -0.612f,
                                           0.208f, -0.426f),
          "already-dominant non-low-policy move blocked", tc);
