@@ -368,6 +368,21 @@ def assert_tactical_fail_under_guard() -> None:
         raise AssertionError(f"unexpected tactical floor failures: {failures!r}")
 
 
+def assert_bk_aggregate_fail_under_guard() -> None:
+    aggregate = {
+        "metalfish-mcts": {
+            "BK.07": bk_parity.AggregateStats(runs=10, passes=10, nodes_total=500),
+            "BK.17": bk_parity.AggregateStats(runs=10, passes=9, nodes_total=650),
+        },
+        "metalfish-hybrid": {
+            "BK.07": bk_parity.AggregateStats(runs=8, passes=8, nodes_total=144),
+        },
+    }
+    scores = bk_parity.aggregate_scores(aggregate)
+    if scores != {"metalfish-mcts": (19, 20), "metalfish-hybrid": (8, 8)}:
+        raise AssertionError(f"unexpected aggregate BK scores: {scores!r}")
+
+
 def detect_paper_engines_clean() -> dict[str, paper_benchmarks.EngineConfig]:
     return with_clean_hybrid_env(
         lambda: paper_benchmarks.detect_engines(threads=8, hash_mb=4096)
@@ -376,6 +391,7 @@ def detect_paper_engines_clean() -> dict[str, paper_benchmarks.EngineConfig]:
 
 def main() -> int:
     assert_tactical_fail_under_guard()
+    assert_bk_aggregate_fail_under_guard()
     assert_bk_ane_scope_default()
     assert_bk_ane_root_hints_default()
     paper = detect_paper_engines_clean()
@@ -762,6 +778,7 @@ def main() -> int:
             "not full Hybrid MCTS",
             "METALFISH_MCTS_ROOT_TRACE_MOVES",
             "--root-trace-moves",
+            "--aggregate-fail-under",
             "--mcts-minibatch-size",
             "--mcts-kld",
             "--mcts-policy-temperature",
