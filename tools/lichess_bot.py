@@ -844,6 +844,10 @@ CHALLENGE_TIMEOUT = max(20.0, env_float("METALFISH_CHALLENGE_TIMEOUT_S", 21.0))
 CHALLENGE_CANCEL_GRACE_S = max(
     0.0, min(10.0, env_float("METALFISH_CHALLENGE_CANCEL_GRACE_S", 2.0))
 )
+OUTGOING_CANCEL_RESERVE_TTL_S = max(
+    CHALLENGE_CANCEL_GRACE_S,
+    min(30.0, env_float("METALFISH_OUTGOING_CANCEL_RESERVE_TTL_S", 4.0)),
+)
 MAX_CHALLENGE_RETRIES = 3
 
 
@@ -1821,6 +1825,7 @@ class LichessBot:
         self._pending_challenge_target: str | None = None
         self._pending_challenge_speed: str | None = None
         self._accepted_challenge_reservations: dict[str, float] = {}
+        self._outgoing_cancel_reservations: dict[str, dict[str, object]] = {}
         self._challenge_sent_at: float = 0
         self._challenge_retries = 0
         self.book = OpeningBook(
@@ -2527,8 +2532,80 @@ class LichessBot:
     def _reserved_games(self) -> int:
         pending = 1 if self._pending_challenge_id else 0
         return (
-            len(self.active_games) + pending + self._accepted_challenge_reserve_count()
+            len(self.active_games)
+            + pending
+            + self._accepted_challenge_reserve_count()
+            + self._outgoing_cancel_reserve_count()
         )
+
+    def _cleanup_outgoing_cancel_reservations(self) -> None:
+        reservations = getattr(self, "_outgoing_cancel_reservations", {})
+        now = time.time()
+        clean: dict[str, dict[str, object]] = {}
+        for challenge_id, entry in reservations.items():
+            if not isinstance(entry, dict):
+                continue
+            try:
+                expires_at = float(entry.get("expires_at", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if expires_at > now:
+                clean[str(challenge_id)] = entry
+        self._outgoing_cancel_reservations = clean
+
+    def _outgoing_cancel_reserve_count(self) -> int:
+        self._cleanup_outgoing_cancel_reservations()
+        return len(getattr(self, "_outgoing_cancel_reservations", {}))
+
+    def _reserve_outgoing_cancel(
+        self,
+        challenge_id: str | None,
+        target: str | None,
+        speed: str | None,
+    ) -> None:
+        if not challenge_id:
+            return
+        self._cleanup_outgoing_cancel_reservations()
+        self._outgoing_cancel_reservations[str(challenge_id)] = {
+            "expires_at": time.time() + OUTGOING_CANCEL_RESERVE_TTL_S,
+            "target": target,
+            "speed": speed,
+        }
+
+    def _clear_outgoing_cancel_reservation(
+        self, challenge_id: str | None = None
+    ) -> dict[str, object] | None:
+        if not challenge_id:
+            return None
+        reservations = getattr(self, "_outgoing_cancel_reservations", {})
+        entry = reservations.pop(str(challenge_id), None)
+        self._outgoing_cancel_reservations = reservations
+        return entry if isinstance(entry, dict) else None
+
+    def _consume_outgoing_cancel_reservation_for_game(
+        self,
+        game_id: str | None,
+        opponent: str | None,
+        speed: str | None,
+    ) -> dict[str, object] | None:
+        self._cleanup_outgoing_cancel_reservations()
+        reservations = getattr(self, "_outgoing_cancel_reservations", {})
+        if not reservations:
+            return None
+        if game_id and str(game_id) in reservations:
+            return self._clear_outgoing_cancel_reservation(str(game_id))
+        opponent_key = self._cooldown_key(opponent)
+        for challenge_id, entry in list(reservations.items()):
+            if not isinstance(entry, dict):
+                continue
+            target_key = self._cooldown_key(entry.get("target"))
+            entry_speed = entry.get("speed")
+            speed_matches = not speed or not entry_speed or speed == entry_speed
+            if opponent_key and target_key == opponent_key and speed_matches:
+                reservations.pop(challenge_id, None)
+                self._outgoing_cancel_reservations = reservations
+                return entry
+        return None
 
     def _cleanup_accepted_challenge_reservations(self) -> None:
         reservations = getattr(self, "_accepted_challenge_reservations", {})
@@ -2553,6 +2630,7 @@ class LichessBot:
 
     def _clear_accepted_challenge_reservations(self) -> None:
         self._accepted_challenge_reservations = {}
+        self._outgoing_cancel_reservations = {}
 
     def _clear_accepted_challenge_reservation(self, challenge_id: str | None) -> None:
         if not challenge_id:
@@ -2712,10 +2790,12 @@ class LichessBot:
     def _cancel_pending_challenge(self, reason: str):
         challenge_id = self._pending_challenge_id
         target = self._pending_challenge_target or challenge_id
+        speed = getattr(self, "_pending_challenge_speed", None)
         if not challenge_id:
             return
 
         if reason == "game started":
+            self._clear_outgoing_cancel_reservation(challenge_id)
             self._clear_pending_challenge()
             return
 
@@ -2724,6 +2804,8 @@ class LichessBot:
             self.api_post(f"/challenge/{challenge_id}/cancel")
         except Exception as e:
             print(f"  Could not cancel challenge {challenge_id}: {e}")
+        if reason in {"timeout", "expired"}:
+            self._reserve_outgoing_cancel(challenge_id, target, speed)
         self._clear_pending_challenge()
 
     def _enter_drain_mode(self):
@@ -3189,7 +3271,9 @@ class LichessBot:
             self._cancel_pending_challenge("expired")
             self._cooldown_bot(target)
             self._audit_seek("challenge_expired", target=target, speed=speed)
-            self._schedule_retry(CHALLENGE_CANCEL_GRACE_S)
+            self._schedule_retry(
+                max(CHALLENGE_CANCEL_GRACE_S, OUTGOING_CANCEL_RESERVE_TTL_S)
+            )
             return
 
         limit, inc = self._next_tc()
@@ -3517,7 +3601,7 @@ class LichessBot:
         else:
             with seek_lock:
                 retry_delay = self._challenge_timed_out_locked()
-        if retry_delay is not None and self._should_seek():
+        if retry_delay is not None:
             self._schedule_retry(retry_delay)
 
     def _challenge_timed_out_locked(self) -> float | None:
@@ -3546,9 +3630,14 @@ class LichessBot:
                 self._tc_failures = 0
                 self._challenge_retries = 0
                 self._cleanup_cooldowns()
-            if self._challenge_retries < MAX_CHALLENGE_RETRIES and self._should_seek():
-                return CHALLENGE_CANCEL_GRACE_S
-            elif self._should_seek():
+            can_retry = (
+                self.args.seek
+                and not self._draining.is_set()
+                and not self._completed_limit_reached()
+            )
+            if self._challenge_retries < MAX_CHALLENGE_RETRIES and can_retry:
+                return max(CHALLENGE_CANCEL_GRACE_S, OUTGOING_CANCEL_RESERVE_TTL_S)
+            elif can_retry:
                 self._challenge_retries = 0
                 self._cleanup_cooldowns()
                 return 15
@@ -5131,7 +5220,18 @@ class LichessBot:
                 self._cancel_pending_challenge("game started elsewhere")
         self._clear_accepted_challenge_reservation(game_id)
         if not matched_pending:
-            self._consume_accepted_challenge_reservation()
+            outgoing_entry = self._consume_outgoing_cancel_reservation_for_game(
+                game_id, event_opponent, event_speed
+            )
+            if outgoing_entry:
+                matched_pending = True
+                outgoing_target = str(outgoing_entry.get("target") or "")
+                outgoing_speed = str(outgoing_entry.get("speed") or "")
+                pending_target = outgoing_target or pending_target
+                pending_speed = outgoing_speed or pending_speed
+                self._mark_seek_opponent_played(pending_target, pending_speed)
+            else:
+                self._consume_accepted_challenge_reservation()
 
         self._reset_elo_range()
         self._tc_failures = 0

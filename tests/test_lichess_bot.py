@@ -3349,8 +3349,10 @@ def test_challenge_timeout_waits_for_cancel_grace_before_retry() -> None:
     expect("timeout pending cleared", bot._pending_challenge_id is None)
     expect(
         "timeout retry delayed by cancel grace",
-        scheduled == [lichess_bot.CHALLENGE_CANCEL_GRACE_S],
+        scheduled == [lichess_bot.OUTGOING_CANCEL_RESERVE_TTL_S],
     )
+    expect("timeout cancel reserves game slot", bot._reserved_games() == 1)
+    expect("timeout cancel blocks immediate seek", not bot._should_seek())
 
 
 def test_expired_challenge_waits_for_cancel_grace_before_next_api_call() -> None:
@@ -3360,6 +3362,8 @@ def test_expired_challenge_waits_for_cancel_grace_before_next_api_call() -> None
     bot._pending_challenge_speed = "rapid"
     bot._challenge_sent_at = time.time() - lichess_bot.CHALLENGE_TIMEOUT - 1
     bot._seek_timer = None
+    bot.active_games = {}
+    bot._accepted_challenge_reservations = {}
 
     posted: list[str] = []
     cooled: list[str | None] = []
@@ -3389,9 +3393,10 @@ def test_expired_challenge_waits_for_cancel_grace_before_next_api_call() -> None
     expect("expired pending cleared", bot._pending_challenge_id is None)
     expect(
         "expired retry delayed by cancel grace",
-        scheduled == [lichess_bot.CHALLENGE_CANCEL_GRACE_S],
+        scheduled == [lichess_bot.OUTGOING_CANCEL_RESERVE_TTL_S],
     )
     expect("expired event audited", audited and audited[0][0] == "challenge_expired")
+    expect("expired cancel reserves game slot", bot._reserved_games() == 1)
 
 
 def test_game_start_claims_slot_and_clears_pending() -> None:
@@ -3458,6 +3463,68 @@ def test_game_start_claims_slot_and_clears_pending() -> None:
     expect("seek blocked by unrelated accepted reservation", not bot._should_seek())
     expect(
         "target marked as played in speed",
+        "targetbot" in bot._played_by_speed.get("rapid", {}),
+    )
+
+
+def test_game_start_claims_recently_canceled_outgoing_challenge() -> None:
+    class Args:
+        seek = True
+        max_games = 1
+        include_zero_increment = False
+        include_bullet = False
+        avoid_repeat_format = True
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {}
+    bot._pending_challenge_id = None
+    bot._pending_challenge_target = None
+    bot._pending_challenge_speed = None
+    bot._challenge_sent_at = 0.0
+    bot._rotation_idx = 0
+    bot._tc_failures = 2
+    bot._draining = threading.Event()
+    bot._shutdown = threading.Event()
+    bot._seek_timer = None
+    bot._played_by_speed = {}
+    bot._persist_played_format_history = False
+    bot._accepted_challenge_reservations = {}
+    bot._outgoing_cancel_reservations = {
+        "challenge-id": {
+            "expires_at": time.time() + 30,
+            "target": "TargetBot",
+            "speed": "rapid",
+        }
+    }
+
+    played: list[str] = []
+    bot.play_game = lambda game_id: played.append(game_id)
+
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(
+            {
+                "type": "gameStart",
+                "game": {
+                    "gameId": "lategame",
+                    "opponent": {"id": "targetbot"},
+                    "speed": "rapid",
+                },
+            }
+        )
+
+    thread = bot.active_games.get("lategame")
+    if thread is not None:
+        thread.join(timeout=1)
+
+    expect("late outgoing game started", played == ["lategame"])
+    expect(
+        "late outgoing reservation cleared",
+        bot._outgoing_cancel_reservations == {},
+    )
+    expect("late outgoing game occupies slot", not bot._should_seek())
+    expect(
+        "late outgoing target marked played",
         "targetbot" in bot._played_by_speed.get("rapid", {}),
     )
 
@@ -4297,6 +4364,7 @@ def main() -> int:
     test_challenge_timeout_waits_for_cancel_grace_before_retry()
     test_expired_challenge_waits_for_cancel_grace_before_next_api_call()
     test_game_start_claims_slot_and_clears_pending()
+    test_game_start_claims_recently_canceled_outgoing_challenge()
     test_game_start_matches_pending_challenge_by_opponent_when_ids_differ()
     test_game_start_cancels_unrelated_pending_challenge()
     test_overflow_game_start_is_audited_and_marks_format_played()
