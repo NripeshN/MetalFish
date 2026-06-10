@@ -243,8 +243,10 @@ def assert_hybrid_trace_directory_expansion() -> None:
         ignored = root / "summary.md"
         ignored.write_text("# ignored\n")
         expanded = analyze_hybrid_trace.expand_results_paths([root])
-    if expanded != [result]:
-        raise AssertionError("trace analyzer did not expand result directories")
+        if [path.name for path in expanded] != [result.name]:
+            raise AssertionError("trace analyzer did not expand result directories")
+        if not expanded[0].is_file():
+            raise AssertionError("trace analyzer returned a non-file result")
 
 
 def assert_tournament_draw_reason_precision() -> None:
