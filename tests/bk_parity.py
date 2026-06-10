@@ -317,6 +317,7 @@ def setup_metalfish(
     mcts_policy_temperature: Optional[float],
     mcts_cpuct_at_root: Optional[float],
     pure_mcts_cpuct_at_root: Optional[float],
+    pure_mcts_smart_pruning_factor: Optional[float],
     mcts_fpu_reduction: Optional[float],
     mcts_fpu_reduction_at_root: Optional[float],
     mcts_fpu_value: Optional[float],
@@ -346,6 +347,10 @@ def setup_metalfish(
         sess.setoption("MCTSCPuctAtRoot", str(mcts_cpuct_at_root))
     if pure_mcts_cpuct_at_root is not None:
         sess.setoption("PureMCTSCPuctAtRoot", str(pure_mcts_cpuct_at_root))
+    if pure_mcts_smart_pruning_factor is not None:
+        sess.setoption(
+            "PureMCTSSmartPruningFactor", str(pure_mcts_smart_pruning_factor)
+        )
     if mcts_fpu_reduction is not None:
         sess.setoption("MCTSFpuReduction", str(mcts_fpu_reduction))
     if mcts_fpu_reduction_at_root is not None:
@@ -887,6 +892,7 @@ def run_once(
                 args.mcts_policy_temperature,
                 args.mcts_cpuct_at_root,
                 args.pure_mcts_cpuct_at_root,
+                args.pure_mcts_smart_pruning_factor,
                 args.mcts_fpu_reduction,
                 args.mcts_fpu_reduction_at_root,
                 args.mcts_fpu_value,
@@ -1128,6 +1134,12 @@ def main() -> int:
         type=float,
         default=None,
         help="Override PureMCTSCPuctAtRoot for pure-MCTS strength probes",
+    )
+    parser.add_argument(
+        "--pure-mcts-smart-pruning-factor",
+        type=float,
+        default=None,
+        help="Override PureMCTSSmartPruningFactor for pure-MCTS stopper probes",
     )
     parser.add_argument(
         "--mcts-fpu-reduction",
