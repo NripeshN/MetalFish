@@ -4240,6 +4240,22 @@ Move ParallelHybridSearch::make_final_decision() {
     ab_root_order_hints_snapshot = ab_root_order_hints_;
     ab_verified_root_order_hints_snapshot = ab_verified_root_order_hints_;
   }
+  const Move first_ab_hint = ab_root_order_hints_snapshot.empty()
+                                 ? Move::none()
+                                 : ab_root_order_hints_snapshot.front();
+  const Move first_verified_ab_hint =
+      ab_verified_root_order_hints_snapshot.empty()
+          ? Move::none()
+          : ab_verified_root_order_hints_snapshot.front();
+  const auto append_root_hint_trace = [&](std::ostringstream &ss) {
+    const bool engines_agree_off_first_hint =
+        first_ab_hint != Move::none() && ab_best == mcts_best &&
+        ab_best != Move::none() && ab_best != first_ab_hint;
+    ss << " FirstABHint=" << move_to_string(first_ab_hint)
+       << " FirstABVerifiedHint=" << move_to_string(first_verified_ab_hint)
+       << " ABMCTSAgreeOffFirstHint="
+       << (engines_agree_off_first_hint ? 1 : 0);
+  };
   struct MCTSRootLookup {
     int rank = -1;
     uint32_t visits = 0;
@@ -4595,6 +4611,7 @@ Move ParallelHybridSearch::make_final_decision() {
        << " ABVerifiedHints="
        << move_list_to_string(ab_verified_root_order_hints_snapshot)
        << " MCTSTop=" << top_moves_to_string();
+    append_root_hint_trace(ss);
     append_cross_root_trace(ss);
     ss << " ABRoot=" << ab_root_moves_to_string();
     send_info_string(ss.str());
@@ -5365,6 +5382,7 @@ Move ParallelHybridSearch::make_final_decision() {
        << " ABVerifiedHints="
        << move_list_to_string(ab_verified_root_order_hints_snapshot)
        << " MCTSTop=" << top_moves_to_string();
+    append_root_hint_trace(ss);
     append_cross_root_trace(ss);
     ss << " ABRoot=" << ab_root_moves_to_string();
     send_info_string(ss.str());

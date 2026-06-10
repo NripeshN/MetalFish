@@ -81,6 +81,7 @@ class TraceLogStats:
     root_hint_events: int = 0
     root_hint_moves_total: int = 0
     root_hint_sizes: dict[int, int] = field(default_factory=dict)
+    mcts_ultra_low_root_confidence: int = 0
 
 
 def latest_results_file() -> pathlib.Path:
@@ -101,6 +102,23 @@ def latest_results_file() -> pathlib.Path:
         ):
             return path
     raise FileNotFoundError("no traced tournament results found")
+
+
+def expand_results_paths(paths: list[pathlib.Path]) -> list[pathlib.Path]:
+    expanded: list[pathlib.Path] = []
+    for path in paths:
+        if not path.is_dir():
+            expanded.append(path)
+            continue
+        files = sorted(
+            p
+            for p in path.iterdir()
+            if p.is_file() and p.suffix.lower() in {".json", ".jsonl"}
+        )
+        if not files:
+            raise FileNotFoundError(f"No .json/.jsonl results found in {path}")
+        expanded.extend(files)
+    return expanded
 
 
 def parse_fields(line: str) -> dict[str, str]:
@@ -225,6 +243,9 @@ def collect_trace_log_stats(results_paths: list[pathlib.Path]) -> TraceLogStats:
         stats.ane_confirmed_mcts += field_int(fields, "ANEConfirmedMCTS")
         stats.ane_pawn_only_mcts += field_int(fields, "PawnOnlyANEMCTS")
         stats.ane_q_supported_root += field_int(fields, "ANEQSupportedRoot")
+        stats.mcts_ultra_low_root_confidence += field_int(
+            fields, "MCTSUltraLowNodeRootConfidence"
+        )
 
     def add_structured_ane_fields(search: dict) -> None:
         if str(search.get("hybrid_ane_top", "none")) not in {"", "none"}:
@@ -664,6 +685,12 @@ def print_trace_log_stats(stats: TraceLogStats) -> None:
         )
         print(f"  MCTS-to-AB root hint avg moves: {avg_hints:.2f}")
         print(f"  MCTS-to-AB root hint sizes: {sizes}")
+    if stats.mcts_ultra_low_root_confidence:
+        print("  MCTS arbitration:")
+        print(
+            "    ultra-low root confidence overrides: "
+            f"{stats.mcts_ultra_low_root_confidence}"
+        )
     print(f"  time-safety AB fallbacks: {stats.time_safety_fallbacks}")
     if stats.time_safety_reasons:
         print("  fallback reasons:")
@@ -1040,7 +1067,7 @@ def main() -> int:
     parser.add_argument("--replay-low-time-fallback-ms", type=int, default=3000)
     args = parser.parse_args()
 
-    results_paths = args.results_json or [latest_results_file()]
+    results_paths = expand_results_paths(args.results_json or [latest_results_file()])
     decisions = [
         decision
         for results_path in results_paths

@@ -171,7 +171,8 @@ def assert_hybrid_trace_jsonl_decisions() -> None:
                         "HybridTrace: reason=mcts_root_reject_q_gap "
                         "selected=f6f5 ABMove=g6g5 MCTSMove=f6f5 "
                         "MCTSBestVisits=81 ANETop=f6f5 ANEAgreesMCTS=1 "
-                        "ANEConfirmedMCTS=1 PawnOnlyANEMCTS=1"
+                        "ANEConfirmedMCTS=1 PawnOnlyANEMCTS=1 "
+                        "MCTSUltraLowNodeRootConfidence=1"
                     ),
                 }
             ],
@@ -211,8 +212,37 @@ def assert_hybrid_trace_jsonl_decisions() -> None:
         or stats.ane_failures != 1
         or stats.ane_hints != 1
         or stats.ane_hint_moves != 6
+        or stats.mcts_ultra_low_root_confidence != 1
     ):
         raise AssertionError("trace analyzer did not count ANE puzzle coverage")
+
+
+def assert_hybrid_trace_directory_expansion() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        result = root / "puzzles.jsonl"
+        result.write_text(
+            json.dumps(
+                {
+                    "id": "puzzle-a",
+                    "searches": [
+                        {
+                            "ply": 0,
+                            "actual": "a2a4",
+                            "hybrid_trace": (
+                                "HybridTrace: reason=engines_agree selected=a2a4 "
+                                "ABMove=a2a4 MCTSMove=a2a4"
+                            ),
+                        }
+                    ],
+                }
+            )
+        )
+        ignored = root / "summary.md"
+        ignored.write_text("# ignored\n")
+        expanded = analyze_hybrid_trace.expand_results_paths([root])
+    if expanded != [result]:
+        raise AssertionError("trace analyzer did not expand result directories")
 
 
 def assert_tournament_draw_reason_precision() -> None:
@@ -422,6 +452,7 @@ def main() -> int:
     assert_paper_hybrid_env_overrides()
     assert_hybrid_trace_final_decision_only()
     assert_hybrid_trace_jsonl_decisions()
+    assert_hybrid_trace_directory_expansion()
     assert_tournament_draw_reason_precision()
     assert_transformer_low_time_warnings_cover_mcts()
     assert_bk_hybrid_fallback_warning()
@@ -823,6 +854,9 @@ def main() -> int:
             "MCTSInABScore=",
             "MCTSInABAvg=",
             "MCTSInABEffort=",
+            "FirstABHint=",
+            "FirstABVerifiedHint=",
+            "ABMCTSAgreeOffFirstHint=",
         ],
     )
     assert_file_contains(
@@ -2598,6 +2632,9 @@ def main() -> int:
             "MCTS-to-AB root hint events",
             "MCTS-to-AB root hint avg moves",
             "MCTS-to-AB root hint sizes",
+            "MCTS arbitration",
+            "ultra-low root confidence overrides",
+            "expand_results_paths",
             "MCTSBestCurrentVisits",
             "MCTSRootCurrentVisits",
             "MCTSConfidenceVisits",
