@@ -644,7 +644,7 @@ bool HybridMCTSRootConfidenceFixedBudgetOverride(
       visit_share >= 0.74f && root_q_gap >= 0.06f && eval_delta >= 70;
   const bool clear_root_q_confident =
       mcts_total_nodes >= 300 && mcts_visits >= 240 && visit_share >= 0.64f &&
-      root_q_gap >= 0.12f && mcts_cp >= 200 && eval_delta >= 60;
+      root_q_gap >= 0.12f && mcts_cp >= 200 && eval_delta >= 55;
   return value_gap_confident || compact_root_confident ||
          clear_root_q_confident;
 }

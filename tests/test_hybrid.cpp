@@ -468,7 +468,7 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
                    true, true, 380, 260, 0.684f, 0.137f, 199, 65));
     EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
-                   true, true, 380, 260, 0.684f, 0.137f, 222, 59));
+                   true, true, 380, 260, 0.684f, 0.137f, 222, 54));
     EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
                    true, true, 262, 137, 0.523f, 0.066f, 20, 20));
   }
