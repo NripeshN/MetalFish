@@ -300,7 +300,6 @@ if(USE_CUDA)
       src/nn/cuda/cuda_execution_tape.cpp
       src/nn/cuda/cuda_executor.cpp
       src/nn/cuda/cuda_network.cpp
-      src/nn/cuda/cuda_null_executor_smoke.cpp
       src/nn/cuda/cuda_output_mapping.cpp
       src/nn/cuda/cuda_plan_analysis.cpp
       src/nn/cuda/cuda_attention_plan.cpp
@@ -449,6 +448,13 @@ if(BUILD_TESTS)
     ${MCTS_SOURCES}
     ${HYBRID_SOURCES}
     ${NN_SOURCES})
+  # The CUDA null-executor smoke harness is exercised only by
+  # test_mcts_module.cpp, so it is compiled into the test target rather than
+  # shipped in the production engine library.
+  if(USE_CUDA)
+    target_sources(metalfish_tests
+                   PRIVATE src/nn/cuda/cuda_null_executor_smoke.cpp)
+  endif()
   if(METALFISH_IPO_SUPPORTED)
     set_property(TARGET metalfish_tests
                  PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
