@@ -94,6 +94,10 @@ Engine::Engine(std::optional<std::string> path)
   options.add("Skill Level", Option(20, 0, 20));
 
   options.add("Move Overhead", Option(10, 0, 5000));
+  // Draw aversion in centipawns (0 = objective). Positive values make the
+  // engine value a draw slightly below equality on both the AB and MCTS paths,
+  // so a stronger engine keeps playing for a win instead of repeating.
+  options.add("Contempt", Option(0, 0, 100));
 
   options.add("nodestime", Option(0, 0, 10000));
 

@@ -305,6 +305,7 @@ private:
   int selDepth, nmpMinPly;
 
   Value optimism[COLOR_NB];
+  int rootContempt = 0; // centipawns subtracted from draw evals (avoid draws)
 
   Position rootPos;
   StateInfo rootState;

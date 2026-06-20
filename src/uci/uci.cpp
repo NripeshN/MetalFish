@@ -976,6 +976,14 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
   config.cpuct_factor_at_root = get_float_option(
       engine, "MCTSCPuctFactorAtRoot", config.cpuct_factor_at_root);
 
+  // Map the shared Contempt option (centipawns) onto the MCTS draw score in
+  // win units. Set draw_score directly (it is part of the network cache key,
+  // unlike params_.contempt) so a draw is valued below equality and MCTS keeps
+  // fighting. 0 = objective draws.
+  config.draw_score =
+      -static_cast<float>(static_cast<int>(engine.get_options()["Contempt"])) /
+      100.0f;
+
   config.fpu_absolute = engine.get_options()["MCTSFpuAbsolute"];
   config.fpu_absolute_at_root = engine.get_options()["MCTSFpuAbsoluteAtRoot"];
   config.fpu_value = get_float_option(engine, "MCTSFpuValue", config.fpu_value);

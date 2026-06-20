@@ -159,8 +159,13 @@ void update_correction_history(const Position &pos, Stack *const ss,
   }
 }
 
-// Add a small random component to draw evaluations to avoid 3-fold blindness
-Value value_draw(size_t nodes) { return VALUE_DRAW - 1 + Value(nodes & 0x2); }
+// Add a small random component to draw evaluations to avoid 3-fold blindness.
+// `contempt` (centipawns) is subtracted so a draw is worth slightly less than
+// equality from the side-to-move's perspective, biasing a stronger engine to
+// keep playing for a win instead of acquiescing to a draw.
+Value value_draw(size_t nodes, int contempt = 0) {
+  return VALUE_DRAW - 1 + Value(nodes & 0x2) - Value(contempt);
+}
 Value value_to_tt(Value v, int ply);
 Value value_from_tt(Value v, int ply, int r50c);
 void update_pv(Move *pv, Move move, const Move *childPv);
@@ -292,6 +297,10 @@ void Search::Worker::iterative_deepening() {
   Color us = rootPos.side_to_move();
   double timeReduction = 1, totBestMoveChanges = 0;
   int delta, iterIdx = 0;
+
+  // Read contempt once per search so every draw evaluation (and TT entry) in
+  // this search is consistent. 0 = objective draws (default).
+  rootContempt = int(options["Contempt"]);
 
   // Allocate stack with extra size to allow access from (ss - 7) to (ss + 2):
   // (ss - 7) is needed for update_continuation_histories(ss - 1) which accesses
@@ -664,7 +673,7 @@ Value Search::Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
 
   // Check if we have an upcoming move that draws by repetition
   if (!rootNode && alpha < VALUE_DRAW && pos.upcoming_repetition(ss->ply)) {
-    alpha = value_draw(nodes);
+    alpha = value_draw(nodes, rootContempt);
     if (alpha >= beta)
       return alpha;
   }
@@ -707,8 +716,9 @@ Value Search::Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
     // Step 2. Check for aborted search and immediate draw
     if (threads.stop.load(std::memory_order_relaxed) || pos.is_draw(ss->ply) ||
         ss->ply >= MAX_PLY) [[unlikely]]
-      return (ss->ply >= MAX_PLY && !ss->inCheck) ? evaluate(pos)
-                                                  : value_draw(nodes);
+      return (ss->ply >= MAX_PLY && !ss->inCheck)
+                 ? evaluate(pos)
+                 : value_draw(nodes, rootContempt);
 
     // Step 3. Mate distance pruning. Even if we mate at the next move our score
     // would be at best mate_in(ss->ply + 1), but if alpha is already bigger
@@ -1511,7 +1521,7 @@ Value Search::Worker::qsearch(Position &pos, Stack *ss, Value alpha,
 
   // Check if we have an upcoming move that draws by repetition
   if (alpha < VALUE_DRAW && pos.upcoming_repetition(ss->ply)) {
-    alpha = value_draw(nodes);
+    alpha = value_draw(nodes, rootContempt);
     if (alpha >= beta)
       return alpha;
   }
@@ -1541,7 +1551,9 @@ Value Search::Worker::qsearch(Position &pos, Stack *ss, Value alpha,
 
   // Step 2. Check for an immediate draw or maximum ply reached
   if (pos.is_draw(ss->ply) || ss->ply >= MAX_PLY)
-    return (ss->ply >= MAX_PLY && !ss->inCheck) ? evaluate(pos) : VALUE_DRAW;
+    return (ss->ply >= MAX_PLY && !ss->inCheck)
+               ? evaluate(pos)
+               : value_draw(nodes, rootContempt);
 
   assert(0 <= ss->ply && ss->ply < MAX_PLY);
 
