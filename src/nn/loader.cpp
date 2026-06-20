@@ -175,38 +175,7 @@ WeightsFile LoadWeightsFromFile(const std::string &filename) {
 }
 
 std::optional<WeightsFile> LoadWeights(std::string_view location) {
-  std::string loc(location);
-
-  if (loc == "<autodiscover>") {
-    auto discovered = DiscoverWeightsFile();
-    if (discovered.empty()) {
-      return std::nullopt;
-    }
-    loc = discovered;
-  }
-
-  return LoadWeightsFromFile(loc);
-}
-
-std::string DiscoverWeightsFile() {
-  const std::vector<std::string> locations = {
-      "networks/",
-      "./",
-      "../networks/",
-  };
-
-  const std::vector<std::string> extensions = {
-      ".pb.gz",
-      ".pb",
-  };
-
-  for (const auto &dir : locations) {
-    for (const auto &ext : extensions) {
-      std::string pattern = dir + "*" + ext;
-    }
-  }
-
-  return "";
+  return LoadWeightsFromFile(std::string(location));
 }
 
 FloatVector DecodeLayer(const MetalFishNN::Weights::Layer &layer) {

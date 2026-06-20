@@ -25,8 +25,6 @@ WeightsFile LoadWeightsFromFile(const std::string &filename);
 
 std::optional<WeightsFile> LoadWeights(std::string_view location);
 
-std::string DiscoverWeightsFile();
-
 FloatVector DecodeLayer(const MetalFishNN::Weights::Layer &layer);
 
 } // namespace NN
