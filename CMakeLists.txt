@@ -51,6 +51,16 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
   set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} ${APPLE_ARM_FLAGS}")
 endif()
 
+# Surface silly errors at build time. GCC/Clang only: MSVC's -Wall is a
+# different, far noisier flag set, and nvcc forwards host flags it does not own.
+# No -Werror: the macOS/Linux/Windows/CUDA matrix uses different compilers that
+# emit different warnings, so a hard error would make CI fragile.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+  set(METALFISH_WARNING_FLAGS "-Wall -Wextra -Wno-unused-parameter")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${METALFISH_WARNING_FLAGS}")
+  set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} ${METALFISH_WARNING_FLAGS}")
+endif()
+
 # Metal transformer acceleration (Apple Silicon)
 if(APPLE)
   option(USE_METAL "Enable Metal transformer acceleration" ON)

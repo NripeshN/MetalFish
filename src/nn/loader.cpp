@@ -64,9 +64,11 @@ std::string DecompressGzip(const std::string &filename) {
     const int sz =
         gzread(file, &buffer[bytes_read], buffer.size() - bytes_read);
     if (sz < 0) {
-      int errnum;
+      int errnum = 0;
+      const char *gzmsg = gzerror(file, &errnum);
+      std::string detail = gzmsg ? gzmsg : "unknown gzip error";
       gzclose(file);
-      throw std::runtime_error("gzip error reading file");
+      throw std::runtime_error("gzip error reading file: " + detail);
     }
     if (sz == static_cast<int>(buffer.size()) - bytes_read) {
       bytes_read = buffer.size();

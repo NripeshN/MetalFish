@@ -14,7 +14,7 @@ using namespace MetalFish;
 using namespace MetalFish::Test;
 
 static bool test_metal_availability() {
-  TestCase tc{"Metal backend detection"};
+  TestCase tc("Metal backend detection");
 
 #ifdef USE_METAL
   bool available = GPU::gpu_available();
@@ -41,7 +41,7 @@ static bool test_metal_availability() {
 }
 
 static bool test_metal_buffers() {
-  TestCase tc{"Metal buffer allocation and read/write"};
+  TestCase tc("Metal buffer allocation and read/write");
 
 #ifdef USE_METAL
   if (!GPU::gpu_available()) {
@@ -81,7 +81,7 @@ static bool test_metal_buffers() {
 }
 
 static bool test_gpu_nnue_disabled() {
-  TestCase tc{"GPU NNUE disabled by policy"};
+  TestCase tc("GPU NNUE disabled by policy");
 
   Eval::set_use_apple_silicon_nnue(true);
   EXPECT(tc, !Eval::use_apple_silicon_nnue());
