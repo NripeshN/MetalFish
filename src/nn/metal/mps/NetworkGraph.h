@@ -40,6 +40,13 @@
   dispatch_semaphore_t _doubleBufferingSemaphore;
 
   float *__nullable _globalSmolgenWeights;
+
+  // Compute precision for the transformer body. FP32 by default; set to
+  // MPSDataTypeFloat16 (via METALFISH_METAL_FP16) to run weights/activations in
+  // half precision. Inputs are fed and outputs decoded as FP32 regardless.
+  MPSDataType _computeType;
+  // Keeps host-converted FP16 weight buffers alive for the graph's lifetime.
+  NSMutableArray<NSData *> *__nullable _retainedWeightData;
 }
 
 + (MetalNetworkGraph *_Nullable)getGraphAt:(NSNumber *_Nonnull)index;
@@ -205,6 +212,13 @@
                       label:(NSString *__nonnull)label;
 
 - (void)setGlobalSmolgenWeights:(float *__nonnull)weights;
+
+// Creates a weight variable from FP32 host data, converting to the graph's
+// compute precision (_computeType) when running in FP16.
+- (nonnull MPSGraphTensor *)weightVariableWithData:(NSData *__nonnull)data
+                                             shape:(MPSShape *__nonnull)shape
+                                          dataType:(MPSDataType)dataType
+                                              name:(NSString *__nonnull)name;
 
 - (void)setResultTensors:(NSArray<MPSGraphTensor *> *__nonnull)results;
 

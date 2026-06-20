@@ -164,7 +164,8 @@ std::string MetalNetwork::GetNetworkInfo() const {
       << (attn_policy_ ? "attention" : (conv_policy_ ? "conv" : "classical"))
       << "\n";
   oss << "Value head: " << (wdl_ ? "WDL" : "scalar") << "\n";
-  oss << "Moves left: " << (moves_left_ ? "yes" : "no");
+  oss << "Moves left: " << (moves_left_ ? "yes" : "no") << "\n";
+  oss << "Precision: " << (HalfPrecisionEnabled() ? "FP16" : "FP32");
   return oss.str();
 }
 
