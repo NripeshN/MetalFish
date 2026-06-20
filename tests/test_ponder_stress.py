@@ -343,6 +343,7 @@ def main():
         "low_clock_ponder_mcts_ok": 0,
         "nbcejrue_regression_ok": 0,
         "filqkzru_regression_ok": 0,
+        "repetition_history_ok": 0,
         "ane_ponder_probe_ok": 0,
         "ane_ponder_reuse_ok": 0,
         "crashes": 0,
@@ -595,6 +596,38 @@ def main():
                 else:
                     stats["nbcejrue_regression_ok"] = 1
 
+    if alive() and stats["crashes"] == 0 and stats["timeouts"] == 0:
+        repetition_fen = "4Q3/6pk/2p2p2/2Pp4/q2P1B1P/5P2/5PK1/b7 w - - 0 41"
+        repetition_moves = "e8h5 h7g8 h5e8 g8h7 e8h5 h7g8 h5e8 g8h7"
+        send(f"position fen {repetition_fen} moves {repetition_moves}")
+        send("go movetime 1000")
+        r = read_until("bestmove", TIMEOUT_BESTMOVE)
+        if r is None or r == "TIMEOUT":
+            print("  [repetition-history] TIMEOUT waiting for bestmove")
+            stats["timeouts"] += 1
+        else:
+            parts = r.split()
+            best = parts[1] if len(parts) > 1 else "0000"
+            board = chess.Board(repetition_fen)
+            for move in repetition_moves.split():
+                board.push_uci(move)
+            try:
+                selected = chess.Move.from_uci(best)
+            except ValueError:
+                selected = None
+            if selected is None or selected not in board.legal_moves:
+                print(f"  [repetition-history] invalid bestmove: {best}")
+                stats["timeouts"] += 1
+            else:
+                board.push(selected)
+                if board.is_repetition(3):
+                    print(
+                        "  [repetition-history] winning Hybrid repeated " f"with {best}"
+                    )
+                    stats["timeouts"] += 1
+                else:
+                    stats["repetition_history_ok"] = 1
+
     if (
         run_extended_probes
         and alive()
@@ -656,7 +689,9 @@ def main():
         and stats["low_clock_ponder_mcts_ok"] == 1
         and stats["nbcejrue_regression_ok"] == 1
     )
-    regression_passed = stats["filqkzru_regression_ok"] == 1
+    regression_passed = (
+        stats["filqkzru_regression_ok"] == 1 and stats["repetition_history_ok"] == 1
+    )
     ane_passed = not args.ane_ponder_smoke or (
         stats["ane_ponder_probe_ok"] == 1 and stats["ane_ponder_reuse_ok"] == 1
     )

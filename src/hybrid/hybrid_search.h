@@ -404,6 +404,9 @@ std::unique_ptr<ParallelHybridSearch> create_parallel_hybrid_search(
 bool HybridShouldContinueMCTSAfterAB(
     const ::MetalFish::Search::LimitsType &limits);
 
+bool HybridCanReuseABPositionHistory(const std::string &engine_fen,
+                                     const std::string &root_fen);
+
 bool HybridCanStopEarlyOnAgreement(
     const ::MetalFish::Search::LimitsType &limits);
 

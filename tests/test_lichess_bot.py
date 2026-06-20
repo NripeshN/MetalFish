@@ -47,6 +47,11 @@ def test_live_defaults_avoid_crash_prone_resources() -> None:
             "syzygy path validated",
             lichess_bot.syzygy_path_is_safe(pathlib.Path(options["SyzygyPath"])),
         )
+        expect(
+            "syzygy probe limit matches installed coverage",
+            int(options["SyzygyProbeLimit"])
+            <= lichess_bot.SYZYGY_MAX_PIECES,
+        )
     expect("resource reserve", lichess_bot.RESOURCE_RESERVE_MB >= 1024)
     expect("thread lower bound", int(options["Threads"]) >= 3)
     expect(
@@ -58,6 +63,37 @@ def test_live_defaults_avoid_crash_prone_resources() -> None:
         "profile mirrors threads",
         int(profile["threads"]) == int(options["Threads"]),
     )
+
+
+def test_syzygy_piece_coverage_detection() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        expect(
+            "empty Syzygy directory has no coverage",
+            lichess_bot.syzygy_max_pieces(root) == 0,
+        )
+        (root / "KRvK.rtbw").touch()
+        (root / "KRvK.rtbz").touch()
+        expect(
+            "paired base tables imply five-piece set",
+            lichess_bot.syzygy_max_pieces(root) == 5,
+        )
+        (root / "KPPvKPP.rtbw").touch()
+        expect(
+            "unpaired six-piece marker ignored",
+            lichess_bot.syzygy_max_pieces(root) == 5,
+        )
+        (root / "KPPvKPP.rtbz").touch()
+        expect(
+            "paired six-piece marker detected",
+            lichess_bot.syzygy_max_pieces(root) == 6,
+        )
+        (root / "KPPPvKPP.rtbw").touch()
+        (root / "KPPPvKPP.rtbz").touch()
+        expect(
+            "paired seven-piece marker detected",
+            lichess_bot.syzygy_max_pieces(root) == 7,
+        )
 
 
 def test_runtime_ane_options_are_explicitly_opt_in() -> None:
@@ -1467,6 +1503,37 @@ def test_engine_configure_applies_changed_options() -> None:
     expect("options updated", engine.options["Hash"] == "2048")
 
 
+def test_engine_search_diagnostics_capture_final_hybrid_state() -> None:
+    engine = object.__new__(lichess_bot.UCIEngine)
+    engine._last_search_info = {}
+    engine._record_search_info(
+        "info depth 23 seldepth 41 score cp 384 nodes 27311768 time 3030 "
+        "nps 9013784 pv f4e3 a1c3 string hybrid-final"
+    )
+    engine._record_search_info(
+        "info string HybridTrace: reason=engines_agree selected=f4e3"
+    )
+    engine._record_search_info(
+        "info string Final: MCTSPlayouts=200 ABDepth=23 ABMove=f4e3"
+    )
+
+    diagnostics = engine.search_diagnostics()
+    expect("diagnostic depth", diagnostics.get("depth") == 23)
+    expect("diagnostic score", diagnostics.get("score_cp") == 384)
+    expect("diagnostic nodes", diagnostics.get("nodes") == 27311768)
+    expect("diagnostic PV", diagnostics.get("pv") == ["f4e3", "a1c3"])
+    expect(
+        "diagnostic hybrid trace",
+        diagnostics.get("hybrid_trace")
+        == "HybridTrace: reason=engines_agree selected=f4e3",
+    )
+    expect(
+        "diagnostic component summary",
+        diagnostics.get("component_summary")
+        == "Final: MCTSPlayouts=200 ABDepth=23 ABMove=f4e3",
+    )
+
+
 def test_engine_send_fails_fast_for_dead_process() -> None:
     engine = object.__new__(lichess_bot.UCIEngine)
     engine.proc = None
@@ -1907,6 +1974,184 @@ def test_duplicate_game_state_does_not_resubmit() -> None:
     expect("single submit", submitted == ["e2e4"])
 
 
+def test_concurrent_duplicate_game_state_searches_once() -> None:
+    class Args:
+        ponder = False
+
+    class Book:
+        def lookup(self, fen: str) -> None:
+            return None
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class Engine:
+        ponder_move = None
+
+        def __init__(self) -> None:
+            self.go_calls = 0
+
+        def alive(self) -> bool:
+            return True
+
+        def stop_pondering(self, timeout: float = 0) -> bool:
+            return True
+
+        def set_position(self, initial_fen: str, moves: list[str]) -> None:
+            return None
+
+        def go(self, **kwargs) -> tuple[str, None]:
+            self.go_calls += 1
+            entered.set()
+            release.wait(timeout=1)
+            return "e2e4", None
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.book = Book()
+    bot._submitted_turns = {}
+    bot._submitted_moves = {}
+    bot._inflight_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._ponder_disabled_games = set()
+    bot._ponder_disabled_lock = threading.Lock()
+    submitted: list[str] = []
+    bot.make_move = lambda game_id, move, **kwargs: submitted.append(move) or True
+    engine = Engine()
+    state = {"wtime": 900000, "btime": 900000, "winc": 10000, "binc": 10000}
+
+    worker = threading.Thread(
+        target=lambda: bot._try_move("game", engine, "startpos", [], "white", state)
+    )
+    with redirect_stdout(io.StringIO()):
+        worker.start()
+        expect("first search entered", entered.wait(timeout=1))
+        bot._try_move("game", engine, "startpos", [], "white", state)
+        release.set()
+        worker.join(timeout=1)
+
+    expect("concurrent search finished", not worker.is_alive())
+    expect("single concurrent search", engine.go_calls == 1)
+    expect("single concurrent submit", submitted == ["e2e4"])
+
+
+def test_server_move_mismatch_discards_stale_ponder() -> None:
+    class Args:
+        ponder = False
+
+    class Engine:
+        ponder_move = None
+
+        def __init__(self) -> None:
+            self.restart_calls = 0
+
+        def restart(self) -> None:
+            self.restart_calls += 1
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot._submitted_turns = {}
+    bot._submitted_moves = {}
+    bot._inflight_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._record_submitted_turn("game", [], "e2e4")
+    records: list[dict] = []
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+    engine = Engine()
+    state = {"wtime": 900000, "btime": 900000, "winc": 10000, "binc": 10000}
+
+    with redirect_stdout(io.StringIO()):
+        bot._try_move("game", engine, "startpos", ["d2d4"], "white", state)
+
+    expect("mismatched server move restarted engine", engine.restart_calls == 1)
+    expect(
+        "mismatched server move audited",
+        any(
+            row["event"] == "submitted_move_mismatch"
+            and row.get("expected") == "e2e4"
+            and row.get("actual") == "d2d4"
+            for row in records
+        ),
+    )
+
+
+def test_server_move_mismatch_restart_failure_is_nonfatal() -> None:
+    class Args:
+        ponder = False
+
+    class Engine:
+        ponder_move = None
+
+        def restart(self) -> None:
+            raise RuntimeError("restart failed")
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot._submitted_turns = {}
+    bot._submitted_moves = {}
+    bot._inflight_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._record_submitted_turn("game", [], "e2e4")
+    records: list[dict] = []
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+    state = {"wtime": 900000, "btime": 900000, "winc": 10000, "binc": 10000}
+
+    with redirect_stdout(io.StringIO()):
+        bot._try_move("game", Engine(), "startpos", ["d2d4"], "white", state)
+
+    expect(
+        "mismatch restart failure audited",
+        any(
+            row["event"] == "engine_restart_failed"
+            and row.get("reason") == "submitted_move_mismatch"
+            for row in records
+        ),
+    )
+
+
+def test_stale_mismatch_does_not_restart_engine() -> None:
+    class Args:
+        ponder = False
+
+    class Engine:
+        ponder_move = None
+
+        def __init__(self) -> None:
+            self.restart_calls = 0
+
+        def restart(self) -> None:
+            self.restart_calls += 1
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot._submitted_turns = {}
+    bot._submitted_moves = {}
+    bot._inflight_turns = {}
+    bot._max_seen_ply = {"game": 2}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._record_submitted_turn("game", [], "e2e4")
+    records: list[dict] = []
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+    engine = Engine()
+    state = {"wtime": 900000, "btime": 900000, "winc": 10000, "binc": 10000}
+
+    with redirect_stdout(io.StringIO()):
+        bot._try_move("game", engine, "startpos", ["d2d4"], "white", state)
+
+    expect("stale mismatch did not restart", engine.restart_calls == 0)
+    expect(
+        "stale mismatch only audited as stale",
+        any(row["event"] == "turn_stale" for row in records)
+        and not any(row["event"] == "submitted_move_mismatch" for row in records),
+    )
+
+
 def test_stale_stream_ply_does_not_search_old_position() -> None:
     class Args:
         ponder = False
@@ -2228,6 +2473,47 @@ def test_draw_offer_reason_requires_claim_and_tablebase_draw() -> None:
     bot._draw_claim_available = lambda candidate: False
     bot._tablebase_wdl = lambda candidate: 0
     expect("no claim does not offer draw", bot._draw_offer_reason(board) is None)
+
+
+def test_draw_state_records_winning_tablebase_without_draw_claim() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    board = lichess_bot.chess.Board("8/4K3/8/3k4/8/8/8/7R w - - 19 119")
+    bot._draw_claim_available = lambda candidate: False
+    bot._tablebase_wdl = lambda candidate: 2
+
+    fields = bot._draw_state_fields(board)
+
+    expect("winning tablebase WDL recorded", fields["tablebase_wdl"] == 2)
+    expect("winning tablebase does not offer draw", not fields["draw_offer_eligible"])
+
+
+def test_missing_syzygy_table_does_not_disable_later_probes() -> None:
+    class Tablebase:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def probe_wdl(self, board) -> int:
+            self.calls += 1
+            if self.calls == 1:
+                raise lichess_bot.chess.syzygy.MissingTableError("missing table")
+            return 2
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._python_tablebase = Tablebase()
+    bot._python_tablebase_failed = False
+    bot._python_tablebase_lock = threading.Lock()
+    board = lichess_bot.chess.Board("8/4K3/8/3k4/8/8/8/7R w - - 19 119")
+    old_enabled = lichess_bot.DRAW_OFFER_TABLEBASE
+    old_path = lichess_bot.SYZYGY_PATH
+    try:
+        lichess_bot.DRAW_OFFER_TABLEBASE = True
+        lichess_bot.SYZYGY_PATH = "/missing-larger-tables"
+        expect("missing Syzygy table is unavailable", bot._tablebase_wdl(board) is None)
+        expect("missing table does not poison probes", not bot._python_tablebase_failed)
+        expect("later available table still probes", bot._tablebase_wdl(board) == 2)
+    finally:
+        lichess_bot.DRAW_OFFER_TABLEBASE = old_enabled
+        lichess_bot.SYZYGY_PATH = old_path
 
 
 def test_draw_offer_caps_search_and_marks_move_request() -> None:
@@ -2813,6 +3099,22 @@ def test_incoming_challenge_waits_for_seek_lock_before_accepting() -> None:
     expect(
         "incoming challenge declined after pending appeared", declined == ["incoming"]
     )
+
+
+def test_keyboard_interrupt_drains_without_resigning_active_game() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.active_games = {"game": object()}
+    drained: list[bool] = []
+    resigned: list[str] = []
+    bot._enter_drain_mode = lambda: drained.append(True)
+    bot.resign = lambda game_id: resigned.append(game_id)
+
+    with redirect_stdout(io.StringIO()):
+        should_exit = bot._handle_keyboard_interrupt()
+
+    expect("active interrupt keeps process alive", not should_exit)
+    expect("active interrupt enters drain mode", drained == [True])
+    expect("active interrupt never resigns", resigned == [])
 
 
 def test_transient_move_rejection_remains_retryable() -> None:
@@ -4260,6 +4562,7 @@ def test_quit_after_games_limit() -> None:
 def main() -> int:
     test_reader_uses_launch_queue()
     test_live_defaults_avoid_crash_prone_resources()
+    test_syzygy_piece_coverage_detection()
     test_runtime_ane_options_are_explicitly_opt_in()
     test_verbose_runtime_enables_trace_without_forcing_ane_hints()
     test_verbose_path_enables_trace_and_resolves_log_path()
@@ -4308,6 +4611,7 @@ def main() -> int:
     test_opening_book_local_reader_uses_entry_move_attribute()
     test_online_bots_request_is_cached_briefly()
     test_engine_configure_applies_changed_options()
+    test_engine_search_diagnostics_capture_final_hybrid_state()
     test_engine_send_fails_fast_for_dead_process()
     test_ponderhit_stops_after_timeout()
     test_set_position_stops_active_search()
@@ -4323,6 +4627,10 @@ def main() -> int:
     test_book_ponder_start_failure_is_nonfatal()
     test_submitted_turn_guard()
     test_duplicate_game_state_does_not_resubmit()
+    test_concurrent_duplicate_game_state_searches_once()
+    test_server_move_mismatch_discards_stale_ponder()
+    test_server_move_mismatch_restart_failure_is_nonfatal()
+    test_stale_mismatch_does_not_restart_engine()
     test_stale_stream_ply_does_not_search_old_position()
     test_stale_move_rejection_suppresses_duplicate_turn()
     test_game_over_move_rejection_marks_completed()
@@ -4343,11 +4651,14 @@ def main() -> int:
     test_accepted_incoming_challenge_reserves_game_slot()
     test_incoming_game_start_consumes_accepted_challenge_reservation()
     test_incoming_challenge_waits_for_seek_lock_before_accepting()
+    test_keyboard_interrupt_drains_without_resigning_active_game()
     test_transient_move_rejection_remains_retryable()
     test_ponder_game_circuit_breaker()
     test_submit_skips_locally_completed_game_without_api_call()
     test_make_move_can_offer_draw_on_same_request()
     test_draw_offer_reason_requires_claim_and_tablebase_draw()
+    test_draw_state_records_winning_tablebase_without_draw_claim()
+    test_missing_syzygy_table_does_not_disable_later_probes()
     test_draw_offer_caps_search_and_marks_move_request()
     test_stale_challenge_event_preserves_current_pending()
     test_challenge_resolution_waits_for_seek_lock_before_clearing_pending()
