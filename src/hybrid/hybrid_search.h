@@ -214,6 +214,9 @@ struct ParallelHybridConfig {
   int ab_candidate_verify_ms = 120;
   int ab_candidate_verify_count = 5;
   bool root_pawn_lever_tiebreak = true;
+  // Thin-regime MCTS rescue (default off pending game validation): route to a
+  // shape-confident MCTS move when its tree is thin and AB has not refuted it.
+  bool thin_mcts_confident_override = false;
   bool ane_root_probe = false;
   bool ane_root_hints = false;
   bool ane_confirm_mcts_override = false;
@@ -622,6 +625,13 @@ bool HybridMCTSBishopEndgameRetreatOverride(
 
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits);
+
+bool HybridThinMCTSConfidentOverride(bool enabled, bool visit_evidence_sane,
+                                     bool ab_root_rejects_mcts,
+                                     uint64_t mcts_total_current_nodes,
+                                     uint32_t mcts_best_current_visits,
+                                     float visit_share, float root_q_gap,
+                                     int eval_delta);
 
 bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
                                     bool fixed_budget, bool visit_evidence_sane,

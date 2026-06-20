@@ -1218,6 +1218,8 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
       static_cast<int>(engine.get_options()["HybridABCandidateVerifyCount"]);
   config.root_pawn_lever_tiebreak =
       engine.get_options()["HybridRootPawnLeverTieBreak"];
+  config.thin_mcts_confident_override =
+      engine.get_options()["HybridThinMCTSOverride"];
   config.ane_root_probe = engine.get_options()["HybridANERootProbe"];
   config.ane_root_hints = engine.get_options()["HybridANERootHints"];
   config.ane_confirm_mcts_override =

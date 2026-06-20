@@ -1554,6 +1554,32 @@ bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
   return best_visits <= best_eval_limit && root_visits <= root_eval_limit;
 }
 
+// Thin-regime MCTS rescue. When the MCTS tree is small (few nodes -- fast time
+// controls or time pressure) but MCTS is shape-confident on one move and AB has
+// not tactically refuted it, trust MCTS. In the thin regime the neural
+// policy/value dominates a shallow alpha-beta (e.g. at 50 nodes pure MCTS
+// solves Bratko-Kopec 24/24 vs AB 8/24); once the tree is thick (>= 1024 nodes)
+// this guard disables itself so AB's deep search and the existing arbitration
+// prevail (the hybrid already scores 24/24 at full movetime). Pure and
+// unit-tested; the AB tactical veto (ab_root_rejects_mcts) is always honored
+// first.
+bool HybridThinMCTSConfidentOverride(bool enabled, bool visit_evidence_sane,
+                                     bool ab_root_rejects_mcts,
+                                     uint64_t mcts_total_current_nodes,
+                                     uint32_t mcts_best_current_visits,
+                                     float visit_share, float root_q_gap,
+                                     int eval_delta) {
+  if (!enabled || !visit_evidence_sane || ab_root_rejects_mcts)
+    return false;
+  if (mcts_total_current_nodes >= 1024)
+    return false;
+  if (mcts_best_current_visits < 16)
+    return false;
+  if (visit_share < 0.70f || root_q_gap < 0.50f)
+    return false;
+  return eval_delta >= -20;
+}
+
 bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
                                     bool fixed_budget, bool visit_evidence_sane,
                                     uint64_t mcts_root_visits,
@@ -5126,14 +5152,19 @@ Move ParallelHybridSearch::make_final_decision() {
       }
     }
   }
+  const bool thin_mcts_confident_override = HybridThinMCTSConfidentOverride(
+      config_.thin_mcts_confident_override, mcts_visit_evidence_sane,
+      ab_root_rejects_mcts, mcts_total_current_nodes, mcts_current_visits,
+      visit_share, root_q_gap, eval_delta);
   const bool mcts_override_allowed =
-      low_node_mcts_primary_ready || !ab_root_rejects_mcts ||
-      ane_confirmed_mcts_override || pawn_only_ane_mcts_override ||
-      pawn_only_mcts_override || ane_q_supported_root_override ||
-      mcts_short_root_tactical || mcts_verified_hint_support ||
-      mcts_compact_fixed_budget || mcts_compact_pawn_endgame ||
-      mcts_ab_lowerbound_confirmed || mcts_low_node_root_confidence ||
-      mcts_ultra_low_node_root_confidence || mcts_compact_clear_preference ||
+      thin_mcts_confident_override || low_node_mcts_primary_ready ||
+      !ab_root_rejects_mcts || ane_confirmed_mcts_override ||
+      pawn_only_ane_mcts_override || pawn_only_mcts_override ||
+      ane_q_supported_root_override || mcts_short_root_tactical ||
+      mcts_verified_hint_support || mcts_compact_fixed_budget ||
+      mcts_compact_pawn_endgame || mcts_ab_lowerbound_confirmed ||
+      mcts_low_node_root_confidence || mcts_ultra_low_node_root_confidence ||
+      mcts_compact_clear_preference ||
       mcts_cross_root_confidence_fixed_budget ||
       mcts_root_confidence_reject_override || mcts_reused_root_confidence ||
       mcts_root_reject_low_material_push || mcts_root_reject_rook_pawn_push ||
@@ -5207,6 +5238,9 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (low_node_mcts_primary_ready) {
       choose_mcts = true;
       reason = "low_node_mcts_primary";
+    } else if (thin_mcts_confident_override) {
+      choose_mcts = true;
+      reason = "thin_mcts_confident";
     } else if (ane_confirmed_mcts_override) {
       choose_mcts = true;
       reason = "ane_confirmed_mcts";

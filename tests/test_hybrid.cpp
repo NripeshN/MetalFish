@@ -2029,6 +2029,34 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSVisitEvidenceSane(0, 0, 10, 1));
   }
   {
+    TestCase tc("Thin-regime confident MCTS override stays tightly gated");
+    // Confident, thin tree, AB does not refute -> fires.
+    EXPECT(tc, HybridThinMCTSConfidentOverride(true, true, false, 200, 80,
+                                               0.80f, 0.60f, 10));
+    // Disabled (default) -> never fires; behavior stays byte-identical.
+    EXPECT(tc, !HybridThinMCTSConfidentOverride(false, true, false, 200, 80,
+                                                0.80f, 0.60f, 10));
+    // Thick tree (>=1024 nodes) -> deep AB / existing arbitration prevails.
+    EXPECT(tc, !HybridThinMCTSConfidentOverride(true, true, false, 1024, 80,
+                                                0.80f, 0.60f, 10));
+    // AB tactical veto always wins.
+    EXPECT(tc, !HybridThinMCTSConfidentOverride(true, true, true, 200, 80,
+                                                0.80f, 0.60f, 10));
+    // Not visit-concentrated, or value not separated -> no fire.
+    EXPECT(tc, !HybridThinMCTSConfidentOverride(true, true, false, 200, 80,
+                                                0.65f, 0.60f, 10));
+    EXPECT(tc, !HybridThinMCTSConfidentOverride(true, true, false, 200, 80,
+                                                0.80f, 0.40f, 10));
+    // Visit noise floor and contradicted value -> no fire.
+    EXPECT(tc, !HybridThinMCTSConfidentOverride(true, true, false, 200, 8,
+                                                0.80f, 0.60f, 10));
+    EXPECT(tc, !HybridThinMCTSConfidentOverride(true, true, false, 200, 80,
+                                                0.80f, 0.60f, -50));
+    // Insane visit evidence -> no fire.
+    EXPECT(tc, !HybridThinMCTSConfidentOverride(true, false, false, 200, 80,
+                                                0.80f, 0.60f, 10));
+  }
+  {
     TestCase tc("AB root rejection blocks low-effort MCTS blunders");
 
     EXPECT(tc,
