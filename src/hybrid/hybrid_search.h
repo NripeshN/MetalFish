@@ -305,8 +305,6 @@ private:
   StrategySelector strategy_selector_;
   SearchStrategy current_strategy_;
 
-  std::unordered_map<uint16_t, float> nn_policy_hints_;
-
   ABSharedState ab_state_;
   MCTSSharedState mcts_state_;
 

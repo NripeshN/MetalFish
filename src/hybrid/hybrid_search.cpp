@@ -259,7 +259,6 @@ void ParallelHybridSearch::start_search(
   search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
   const int time_budget_ms = calculate_time_budget();
   time_budget_ms_.store(time_budget_ms, std::memory_order_release);
-  nn_policy_hints_.clear();
   start_ane_root_probe();
 
   if (config_.use_position_classifier) {

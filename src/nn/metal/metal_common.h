@@ -16,7 +16,6 @@ namespace MetalFish {
 namespace NN {
 namespace Metal {
 
-static int kNumOutputPolicy = kNetworkPolicyOutputs;
 static int kInputPlanes = kPackedInputPlaneCount;
 
 struct InputsOutputs {

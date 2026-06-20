@@ -23,9 +23,6 @@
 
 @end
 
-static MPSImageFeatureChannelFormat fcFormat =
-    MPSImageFeatureChannelFormatFloat16;
-
 @interface MetalNetworkGraph : MPSGraph {
 @public
   MPSGraphDevice *_device;

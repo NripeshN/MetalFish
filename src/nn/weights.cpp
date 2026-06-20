@@ -213,29 +213,6 @@ MultiHeadWeights::ValueHead::ValueHead(
       ip_val_err_w(LayerAdapter(valuehead.ip_val_err_w()).as_vector()),
       ip_val_err_b(LayerAdapter(valuehead.ip_val_err_b()).as_vector()) {}
 
-LegacyWeights::LegacyWeights(const MetalFishNN::Weights &weights)
-    : BaseWeights(weights), policy1(weights.policy1()),
-      policy(weights.policy()),
-      ip_pol_w(LayerAdapter(weights.ip_pol_w()).as_vector()),
-      ip_pol_b(LayerAdapter(weights.ip_pol_b()).as_vector()),
-      ip2_pol_w(LayerAdapter(weights.ip2_pol_w()).as_vector()),
-      ip2_pol_b(LayerAdapter(weights.ip2_pol_b()).as_vector()),
-      ip3_pol_w(LayerAdapter(weights.ip3_pol_w()).as_vector()),
-      ip3_pol_b(LayerAdapter(weights.ip3_pol_b()).as_vector()),
-      ip4_pol_w(LayerAdapter(weights.ip4_pol_w()).as_vector()),
-      value(weights.value()),
-      ip_val_w(LayerAdapter(weights.ip_val_w()).as_vector()),
-      ip_val_b(LayerAdapter(weights.ip_val_b()).as_vector()),
-      ip1_val_w(LayerAdapter(weights.ip1_val_w()).as_vector()),
-      ip1_val_b(LayerAdapter(weights.ip1_val_b()).as_vector()),
-      ip2_val_w(LayerAdapter(weights.ip2_val_w()).as_vector()),
-      ip2_val_b(LayerAdapter(weights.ip2_val_b()).as_vector()) {
-  pol_encoder_head_count = weights.pol_headcount();
-  for (const auto &enc : weights.pol_encoder()) {
-    pol_encoder.emplace_back(enc);
-  }
-}
-
 MultiHeadWeights::MultiHeadWeights(const MetalFishNN::Weights &weights)
     : BaseWeights(weights),
       ip_pol_w(LayerAdapter(weights.policy_heads().has_ip_pol_w()
