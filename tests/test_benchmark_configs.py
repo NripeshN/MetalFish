@@ -730,7 +730,7 @@ def main() -> int:
             '"MCTSRootPolicySoftmaxTemp": "1.6"',
             "if SYZYGY_PATH:",
             "dynamic up to {MAX_SEARCH_WORKERS}",
-            "Syzygy:   {SYZYGY_PATH if SYZYGY_PATH else 'disabled'}",
+            "Syzygy:   {syzygy}",
         ],
     )
     assert_file_contains(
