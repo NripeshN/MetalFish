@@ -140,30 +140,6 @@ struct BaseWeights {
   bool has_smolgen;
 };
 
-struct LegacyWeights : public BaseWeights {
-  explicit LegacyWeights(const MetalFishNN::Weights &weights);
-
-  ConvBlock policy1;
-  ConvBlock policy;
-  Vec ip_pol_w;
-  Vec ip_pol_b;
-  Vec ip2_pol_w;
-  Vec ip2_pol_b;
-  Vec ip3_pol_w;
-  Vec ip3_pol_b;
-  Vec ip4_pol_w;
-  int pol_encoder_head_count;
-  std::vector<EncoderLayer> pol_encoder;
-
-  ConvBlock value;
-  Vec ip_val_w;
-  Vec ip_val_b;
-  Vec ip1_val_w;
-  Vec ip1_val_b;
-  Vec ip2_val_w;
-  Vec ip2_val_b;
-};
-
 struct MultiHeadWeights : public BaseWeights {
   explicit MultiHeadWeights(const MetalFishNN::Weights &weights);
 

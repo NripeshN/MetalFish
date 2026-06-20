@@ -305,8 +305,6 @@ private:
   StrategySelector strategy_selector_;
   SearchStrategy current_strategy_;
 
-  std::unordered_map<uint16_t, float> nn_policy_hints_;
-
   ABSharedState ab_state_;
   MCTSSharedState mcts_state_;
 
@@ -403,6 +401,9 @@ std::unique_ptr<ParallelHybridSearch> create_parallel_hybrid_search(
 // search budget and should keep MCTS running after AB has produced a result.
 bool HybridShouldContinueMCTSAfterAB(
     const ::MetalFish::Search::LimitsType &limits);
+
+bool HybridCanReuseABPositionHistory(const std::string &engine_fen,
+                                     const std::string &root_fen);
 
 bool HybridCanStopEarlyOnAgreement(
     const ::MetalFish::Search::LimitsType &limits);

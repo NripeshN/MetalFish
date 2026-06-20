@@ -259,7 +259,6 @@ void ParallelHybridSearch::start_search(
   search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
   const int time_budget_ms = calculate_time_budget();
   time_budget_ms_.store(time_budget_ms, std::memory_order_release);
-  nn_policy_hints_.clear();
   start_ane_root_probe();
 
   if (config_.use_position_classifier) {
@@ -495,6 +494,11 @@ bool HybridShouldContinueMCTSAfterAB(
   if (limits.depth > 0 || limits.mate > 0)
     return false;
   return limits.time[WHITE] > 0 || limits.time[BLACK] > 0;
+}
+
+bool HybridCanReuseABPositionHistory(const std::string &engine_fen,
+                                     const std::string &root_fen) {
+  return !engine_fen.empty() && engine_fen == root_fen;
 }
 
 bool HybridCanStopEarlyOnAgreement(
@@ -3679,7 +3683,8 @@ void ParallelHybridSearch::run_ab_search() {
     set_engine_option("MultiPV", 1);
   }
 
-  engine_->set_position(root_fen_, {});
+  if (!HybridCanReuseABPositionHistory(engine_->fen(), root_fen_))
+    engine_->set_position(root_fen_, {});
 
   ::MetalFish::Search::LimitsType ab_limits = limits_;
   ab_limits.startTime = now();

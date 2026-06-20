@@ -480,27 +480,27 @@ void UCIEngine::benchmark(std::istream &args) {
 
   // clang-format off
 
-    std::cerr << "==========================="
-              << "\nVersion                    : "
-              << engine_version_info()
-              // "\nCompiled by                : "
-              << compiler_info()
-              << "Large pages                : " << (has_large_pages() ? "yes" : "no")
-              << "\nUser invocation            : " << BenchmarkCommand << " "
-              << setup.originalInvocation << "\nFilled invocation          : " << BenchmarkCommand
-              << " " << setup.filledInvocation
-              << "\nAvailable processors       : " << engine.get_numa_config_as_string()
-              << "\nThread count               : " << setup.threads
-              << "\nThread binding             : " << threadBinding
-              << "\nTT size [MiB]              : " << setup.ttSize
-              << "\nHash max, avg [per mille]  : "
-              << "\n    single search          : " << maxHashfull[0] << ", "
-              << totalHashfull[0] / numHashfullReadings
-              << "\n    single game            : " << maxHashfull[1] << ", "
-              << totalHashfull[1] / numHashfullReadings
-              << "\nTotal nodes searched       : " << nodes
-              << "\nTotal search time [s]      : " << totalTime / 1000.0
-              << "\nNodes/second               : " << 1000 * nodes / totalTime << std::endl;
+  std::cerr << "==========================="
+            << "\nVersion                    : "
+            << engine_version_info()
+            // "\nCompiled by                : "
+            << compiler_info()
+            << "Large pages                : " << (has_large_pages() ? "yes" : "no")
+            << "\nUser invocation            : " << BenchmarkCommand << " "
+            << setup.originalInvocation << "\nFilled invocation          : " << BenchmarkCommand
+            << " " << setup.filledInvocation
+            << "\nAvailable processors       : " << engine.get_numa_config_as_string()
+            << "\nThread count               : " << setup.threads
+            << "\nThread binding             : " << threadBinding
+            << "\nTT size [MiB]              : " << setup.ttSize
+            << "\nHash max, avg [per mille]  : "
+            << "\n    single search          : " << maxHashfull[0] << ", "
+            << totalHashfull[0] / numHashfullReadings
+            << "\n    single game            : " << maxHashfull[1] << ", "
+            << totalHashfull[1] / numHashfullReadings
+            << "\nTotal nodes searched       : " << nodes
+            << "\nTotal search time [s]      : " << totalTime / 1000.0
+            << "\nNodes/second               : " << 1000 * nodes / totalTime << std::endl;
 
   // clang-format on
 
@@ -811,7 +811,7 @@ static int env_int_or_default(const char *name, int fallback, int min_value,
   return std::clamp(static_cast<int>(parsed), min_value, max_value);
 }
 
-static bool backend_can_select_cuda(std::string_view backend) {
+[[maybe_unused]] static bool backend_can_select_cuda(std::string_view backend) {
 #ifdef USE_CUDA
   return backend == "auto" || backend == "cuda" || backend == "accelerator";
 #else
@@ -836,7 +836,7 @@ static bool auto_mcts_can_scale_workers(Engine &engine) {
 #endif
 }
 
-static int cuda_auto_mcts_minibatch_size(Engine &engine) {
+[[maybe_unused]] static int cuda_auto_mcts_minibatch_size(Engine &engine) {
   const int requested =
       static_cast<int>(engine.get_options()["MCTSCudaAutoMinibatchSize"]);
   if (requested > 0)

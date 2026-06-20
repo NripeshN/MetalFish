@@ -35,6 +35,7 @@ import traceback
 
 import chess
 import chess.polyglot
+import chess.syzygy
 
 try:
     import fcntl
@@ -304,9 +305,6 @@ DRAW_OFFER_TABLEBASE = env_bool_string("METALFISH_DRAW_OFFER_TABLEBASE", True) =
 DRAW_OFFER_SEARCH_CAP_MS = max(
     0, min(30_000, env_int("METALFISH_DRAW_OFFER_SEARCH_CAP_MS", 1500))
 )
-DRAW_OFFER_MAX_SYZYGY_PIECES = max(
-    2, min(7, env_int("METALFISH_DRAW_OFFER_MAX_SYZYGY_PIECES", 7))
-)
 
 
 def syzygy_path_is_safe(path: pathlib.Path) -> bool:
@@ -343,6 +341,25 @@ def resolve_syzygy_path() -> str:
 
 
 SYZYGY_PATH = resolve_syzygy_path()
+
+
+def syzygy_max_pieces(path: str | pathlib.Path) -> int:
+    root = pathlib.Path(path) if path else None
+    if root is None or not root.is_dir():
+        return 0
+    if not any(root.glob("*.rtbw")) or not any(root.glob("*.rtbz")):
+        return 0
+    for pieces, stem in ((7, "KPPPvKPP"), (6, "KPPvKPP")):
+        if (root / f"{stem}.rtbw").is_file() and (root / f"{stem}.rtbz").is_file():
+            return pieces
+    return 5
+
+
+SYZYGY_MAX_PIECES = syzygy_max_pieces(SYZYGY_PATH)
+DRAW_OFFER_MAX_SYZYGY_PIECES = min(
+    SYZYGY_MAX_PIECES or 7,
+    max(2, min(7, env_int("METALFISH_DRAW_OFFER_MAX_SYZYGY_PIECES", 7))),
+)
 RESOURCE_RESERVE_MB = max(1024, env_int("METALFISH_RESOURCE_RESERVE_MB", 2048))
 LOAD_THROTTLE_START = max(0.0, env_float("METALFISH_LOAD_THROTTLE_START", 0.75))
 LOAD_THROTTLE_HIGH = max(
@@ -668,7 +685,7 @@ BASE_ENGINE_OPTIONS = {
 if SYZYGY_PATH:
     BASE_ENGINE_OPTIONS["SyzygyPath"] = SYZYGY_PATH
     BASE_ENGINE_OPTIONS["SyzygyProbeDepth"] = "2"
-    BASE_ENGINE_OPTIONS["SyzygyProbeLimit"] = "6"
+    BASE_ENGINE_OPTIONS["SyzygyProbeLimit"] = str(min(6, SYZYGY_MAX_PIECES))
 
 
 def build_engine_options(active_peer_engines: int = 0) -> tuple[dict[str, str], dict]:
@@ -918,7 +935,7 @@ def print_config_check(args) -> None:
     available_mb = int(profile.get("available_mb", 0))
     total_mb = int(profile.get("total_mb", 0))
     memory = f"{available_mb}/{total_mb} MB" if available_mb and total_mb else "unknown"
-    syzygy = SYZYGY_PATH if SYZYGY_PATH else "disabled"
+    syzygy = f"{SYZYGY_PATH} ({SYZYGY_MAX_PIECES}-piece)" if SYZYGY_PATH else "disabled"
 
     print("MetalFish Lichess Bot config check")
     print(f"  Engine path: {ENGINE}")
@@ -1038,6 +1055,7 @@ class UCIEngine:
         self._ponder_move: str | None = None
         self._active_search: str | None = None
         self._position_key: tuple[str, tuple[str, ...]] | None = None
+        self._last_search_info: dict[str, object] = {}
         self._uci_lock = threading.RLock()
         self._launch()
 
@@ -1093,6 +1111,7 @@ class UCIEngine:
             self._ponder_move: str | None = None
             self._active_search = None
             self._position_key = None
+            self._last_search_info = {}
         except Exception:
             if proc is not None and proc.poll() is None:
                 try:
@@ -1156,6 +1175,49 @@ class UCIEngine:
                 return
         self._debug(f"stdout: {line}")
 
+    def _record_search_info(self, line: str) -> None:
+        if not line.startswith("info "):
+            return
+        if not hasattr(self, "_last_search_info"):
+            self._last_search_info = {}
+        if line.startswith("info string HybridTrace:"):
+            self._last_search_info["hybrid_trace"] = line[len("info string ") :]
+            return
+        if line.startswith("info string Final:"):
+            self._last_search_info["component_summary"] = line[len("info string ") :]
+            return
+
+        parts = line.split()
+        for name in ("depth", "seldepth", "nodes", "time", "nps"):
+            try:
+                value = int(parts[parts.index(name) + 1])
+            except (ValueError, IndexError):
+                continue
+            self._last_search_info[name] = value
+        try:
+            score_index = parts.index("score")
+            score_type = parts[score_index + 1]
+            score_value = int(parts[score_index + 2])
+            if score_type in {"cp", "mate"}:
+                self._last_search_info[f"score_{score_type}"] = score_value
+                other_type = "mate" if score_type == "cp" else "cp"
+                self._last_search_info.pop(f"score_{other_type}", None)
+        except (ValueError, IndexError):
+            pass
+        if "pv" in parts:
+            pv_index = parts.index("pv") + 1
+            try:
+                string_index = parts.index("string", pv_index)
+            except ValueError:
+                string_index = len(parts)
+            self._last_search_info["pv"] = parts[pv_index:string_index][:32]
+
+    def _reset_search_info(self) -> None:
+        self._last_search_info = {}
+
+    def search_diagnostics(self) -> dict[str, object]:
+        return dict(getattr(self, "_last_search_info", {}))
+
     def _debug_ane_uci_support(self) -> None:
         if not getattr(self, "verbose", False):
             return
@@ -1194,6 +1256,8 @@ class UCIEngine:
             self.label = "engine"
         if not hasattr(self, "_uci_options_seen"):
             self._uci_options_seen = set()
+        if not hasattr(self, "_last_search_info"):
+            self._last_search_info = {}
 
     def _send(self, cmd: str, *, ignore_errors: bool = False):
         try:
@@ -1230,6 +1294,7 @@ class UCIEngine:
             if line is None:
                 raise RuntimeError(f"Engine closed stdout{self._diagnostic_tail()}")
             self._record_uci_option(line)
+            self._record_search_info(line)
             self._verbose_engine_line(line)
             if line.startswith(prefix):
                 return line
@@ -1244,6 +1309,7 @@ class UCIEngine:
             if line is None:
                 return
             self._record_uci_option(line)
+            self._record_search_info(line)
             self._verbose_engine_line(line)
 
     def _parse_bestmove(self, line: str) -> tuple[str, str | None]:
@@ -1359,6 +1425,7 @@ class UCIEngine:
             self._send("isready")
             self._wait_for("readyok")
             self._drain_available_output()
+            self._reset_search_info()
 
             self._send(
                 self._go_command(
@@ -1400,6 +1467,7 @@ class UCIEngine:
             all_moves = moves + [ponder_move]
             self.set_position(initial_fen, all_moves)
             self._drain_available_output()
+            self._reset_search_info()
             self._send(
                 self._go_command(
                     ponder=True,
@@ -1855,6 +1923,8 @@ class LichessBot:
         self._completed_game_order: list[str] = []
         self._seek_lock = threading.Lock()
         self._submitted_turns: dict[str, list[tuple[str, ...]]] = {}
+        self._submitted_moves: dict[str, dict[tuple[str, ...], str]] = {}
+        self._inflight_turns: dict[str, set[tuple[str, ...]]] = {}
         self._max_seen_ply: dict[str, int] = {}
         self._submitted_turns_lock = threading.Lock()
         self._ponder_disabled_games: set[str] = set()
@@ -2075,6 +2145,32 @@ class LichessBot:
         with self._submitted_turns_lock:
             return key in self._submitted_turns.get(game_id, [])
 
+    def _claim_turn_processing(self, game_id: str, moves: list[str]) -> bool:
+        key = tuple(moves)
+        with self._submitted_turns_lock:
+            if not hasattr(self, "_inflight_turns"):
+                self._inflight_turns = {}
+            inflight = self._inflight_turns.setdefault(game_id, set())
+            if key in inflight:
+                return False
+            inflight.add(key)
+            return True
+
+    def _release_turn_processing(self, game_id: str, moves: list[str]) -> None:
+        key = tuple(moves)
+        with self._submitted_turns_lock:
+            inflight = getattr(self, "_inflight_turns", {}).get(game_id)
+            if not inflight:
+                return
+            inflight.discard(key)
+            if not inflight:
+                self._inflight_turns.pop(game_id, None)
+
+    def _submitted_move_for_turn(self, game_id: str, moves: list[str]) -> str | None:
+        key = tuple(moves)
+        with self._submitted_turns_lock:
+            return getattr(self, "_submitted_moves", {}).get(game_id, {}).get(key)
+
     def _remember_stream_ply(self, game_id: str, moves: list[str]) -> bool:
         ply = len(moves)
         with self._submitted_turns_lock:
@@ -2086,16 +2182,26 @@ class LichessBot:
             self._max_seen_ply[game_id] = ply
             return True
 
-    def _record_submitted_turn(self, game_id: str, moves: list[str]) -> None:
+    def _record_submitted_turn(
+        self, game_id: str, moves: list[str], move: str | None = None
+    ) -> None:
         key = tuple(moves)
         with self._submitted_turns_lock:
             history = self._submitted_turns.setdefault(game_id, [])
-            if key in history:
-                return
-            history.append(key)
+            if key not in history:
+                history.append(key)
+            if move:
+                if not hasattr(self, "_submitted_moves"):
+                    self._submitted_moves = {}
+                submitted = self._submitted_moves.setdefault(game_id, {})
+                submitted[key] = move
             overflow = len(history) - SUBMITTED_TURN_HISTORY_LIMIT
             if overflow > 0:
+                expired = history[:overflow]
                 del history[:overflow]
+                submitted = getattr(self, "_submitted_moves", {}).get(game_id, {})
+                for expired_key in expired:
+                    submitted.pop(expired_key, None)
 
     def _move_failure_looks_stale(self) -> bool:
         detail = self._last_move_failure_detail.lower()
@@ -2123,7 +2229,7 @@ class LichessBot:
         draw_offer_reason: str | None = None,
     ) -> bool:
         if self.make_move(game_id, move, offering_draw=offering_draw):
-            self._record_submitted_turn(game_id, moves)
+            self._record_submitted_turn(game_id, moves, move)
             self._audit(
                 game_id,
                 "move_submit",
@@ -2192,11 +2298,11 @@ class LichessBot:
             with lock:
                 tablebase = getattr(self, "_python_tablebase", None)
                 if tablebase is None:
-                    import chess.syzygy
-
                     tablebase = chess.syzygy.open_tablebase(SYZYGY_PATH)
                     self._python_tablebase = tablebase
                 return int(tablebase.probe_wdl(board))
+        except chess.syzygy.MissingTableError:
+            return None
         except Exception:
             self._python_tablebase_failed = True
             return None
@@ -2221,7 +2327,7 @@ class LichessBot:
             }
 
         claim_available = self._draw_claim_available(board)
-        wdl = self._tablebase_wdl(board) if claim_available else None
+        wdl = self._tablebase_wdl(board)
         reason = "tb_draw_claim" if claim_available and wdl == 0 else ""
         return {
             "piece_count": len(board.piece_map()),
@@ -2821,6 +2927,21 @@ class LichessBot:
         self._close_warm_engine()
         if not self.active_games:
             self._shutdown.set()
+
+    def _handle_keyboard_interrupt(self) -> bool:
+        if self.active_games:
+            self._enter_drain_mode()
+            print("  Ctrl+C will not resign an active game; waiting for it to finish.")
+            return False
+
+        print("\n\nShutting down...")
+        if self._seek_timer:
+            self._seek_timer.cancel()
+            self._seek_timer = None
+        self._cancel_pending_challenge("shutdown")
+        self._close_warm_engine()
+        self._shutdown.set()
+        return True
 
     def _start_stdin_watcher(self):
         if not sys.stdin.isatty():
@@ -4033,6 +4154,8 @@ class LichessBot:
                 engine.quit()
             with self._submitted_turns_lock:
                 self._submitted_turns.pop(game_id, None)
+                getattr(self, "_submitted_moves", {}).pop(game_id, None)
+                getattr(self, "_inflight_turns", {}).pop(game_id, None)
                 self._max_seen_ply.pop(game_id, None)
             getattr(self, "_playing_status_cache", {}).pop(game_id, None)
             with self._ponder_disabled_lock:
@@ -4179,6 +4302,29 @@ class LichessBot:
         my_color: str,
         state: dict,
     ):
+        if not self._claim_turn_processing(game_id, moves):
+            self._audit(
+                game_id,
+                "turn_inflight_duplicate",
+                **self._audit_context(moves),
+            )
+            return
+        try:
+            return self._try_move_claimed(
+                game_id, engine, initial_fen, moves, my_color, state
+            )
+        finally:
+            self._release_turn_processing(game_id, moves)
+
+    def _try_move_claimed(
+        self,
+        game_id: str,
+        engine: UCIEngine,
+        initial_fen: str,
+        moves: list[str],
+        my_color: str,
+        state: dict,
+    ):
         is_white_turn = len(moves) % 2 == 0
         is_my_turn = (is_white_turn and my_color == "white") or (
             not is_white_turn and my_color == "black"
@@ -4192,6 +4338,33 @@ class LichessBot:
             print(f"  [{game_id}] Ignoring stale stream state at ply {len(moves)}")
             self._audit(game_id, "turn_stale", **self._audit_context(moves))
             return
+
+        if moves:
+            expected = self._submitted_move_for_turn(game_id, moves[:-1])
+            if expected and moves[-1] != expected:
+                print(
+                    f"  [{game_id}] Server move {moves[-1]} replaced submitted "
+                    f"move {expected}; discarding stale ponder state"
+                )
+                self._audit(
+                    game_id,
+                    "submitted_move_mismatch",
+                    expected=expected,
+                    actual=moves[-1],
+                    fen=board.fen(),
+                    **self._audit_context(moves),
+                )
+                try:
+                    engine.restart()
+                except Exception as exc:
+                    print(f"  [{game_id}] Stale ponder restart failed: {exc}")
+                    self._audit(
+                        game_id,
+                        "engine_restart_failed",
+                        reason="submitted_move_mismatch",
+                        error=str(exc),
+                        **self._audit_context(moves),
+                    )
 
         wtime, btime, winc, binc = self._clock_values(state)
         self._audit(
@@ -4270,6 +4443,7 @@ class LichessBot:
                         best=best,
                         ponder=ponder,
                         elapsed_ms=ponderhit_ms,
+                        engine_info=getattr(engine, "search_diagnostics", lambda: {})(),
                         **self._audit_context(moves),
                     )
                 except (TimeoutError, RuntimeError) as e:
@@ -4429,6 +4603,7 @@ class LichessBot:
                 best=best,
                 ponder=ponder,
                 elapsed_ms=search_ms,
+                engine_info=getattr(engine, "search_diagnostics", lambda: {})(),
                 **self._audit_context(moves),
             )
             if best == "0000" or best == "(none)":
@@ -5067,7 +5242,10 @@ class LichessBot:
             f"| Hash {header_options['Hash']} MB | Free {memory}"
         )
         print(f"  Reserve:  {RESOURCE_RESERVE_MB} MB | Network: BT4-1024x15x32h")
-        print(f"  Syzygy:   {SYZYGY_PATH if SYZYGY_PATH else 'disabled'}")
+        syzygy = (
+            f"{SYZYGY_PATH} ({SYZYGY_MAX_PIECES}-piece)" if SYZYGY_PATH else "disabled"
+        )
+        print(f"  Syzygy:   {syzygy}")
         print(f"  ANE:      {ane_status_label(self.args)}")
         print(
             f"  Audit:    {'enabled' if LICHESS_AUDIT_ENABLED else 'disabled'} "
@@ -5147,16 +5325,8 @@ class LichessBot:
                 if not self._shutdown.is_set():
                     time.sleep(EVENT_STREAM_RECONNECT_DELAY_S)
             except KeyboardInterrupt:
-                print("\n\nShutting down...")
-                if self._seek_timer:
-                    self._seek_timer.cancel()
-                    self._seek_timer = None
-                self._cancel_pending_challenge("shutdown")
-                self._close_warm_engine()
-                for gid in list(self.active_games.keys()):
-                    print(f"  Resigning {gid}...")
-                    self.resign(gid)
-                break
+                if self._handle_keyboard_interrupt():
+                    break
             except Exception as e:
                 if not self._shutdown.is_set():
                     print(f"  Event loop error: {e}")

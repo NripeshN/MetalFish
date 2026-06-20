@@ -233,6 +233,15 @@ void test_shared_state() {
 
 void test_hybrid_config() {
   {
+    TestCase tc("AB root history reuse requires matching position");
+    const std::string root = "8/8/1pk5/3p2p1/K2Pn1N1/4P3/8/8 b - - 17 73";
+
+    EXPECT(tc, HybridCanReuseABPositionHistory(root, root));
+    EXPECT(tc, !HybridCanReuseABPositionHistory("", root));
+    EXPECT(tc, !HybridCanReuseABPositionHistory(
+                   "8/8/1pk5/3p2p1/K2Pn1N1/4P3/8/8 w - - 17 73", root));
+  }
+  {
     TestCase tc("Config defaults");
     ParallelHybridConfig config;
 

@@ -300,10 +300,10 @@ public:
   Edge *Edges() { return edges_.get(); }
   const Edge *Edges() const { return edges_.get(); }
 
-  Node *Parent() const { return parent_; }
+  Node *Parent() const { return parent_.load(std::memory_order_relaxed); }
   int EdgeIndex() const { return static_cast<int>(index_); }
   void DetachFromParentForReuse() {
-    parent_ = nullptr;
+    parent_.store(nullptr, std::memory_order_relaxed);
     index_ = 0;
   }
 
@@ -403,7 +403,7 @@ private:
       Node *ch = edges_[i].child.load(std::memory_order_acquire);
       if (!ch)
         continue;
-      ch->parent_ = this;
+      ch->parent_.store(this, std::memory_order_relaxed);
       ch->index_ = static_cast<uint16_t>(i);
       ch->UpdateChildrenParents();
     }
@@ -411,7 +411,10 @@ private:
 
   std::atomic<double> wl_{0.0};
   std::unique_ptr<Edge[]> edges_;
-  Node *parent_ = nullptr;
+  // Atomic: read lock-free during Backpropagate's parent walk while MakeSolid
+  // may re-point it under tree_structure_mutex_. Relaxed is sufficient: the
+  // value is always a pointer to a live ancestor published via edges_.child.
+  std::atomic<Node *> parent_{nullptr};
   std::atomic<float> d_{0.0f};
   std::atomic<float> m_{0.0f};
   std::atomic<uint32_t> n_{0};

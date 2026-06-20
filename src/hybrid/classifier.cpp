@@ -336,7 +336,6 @@ bool PositionClassifier::is_endgame_position(const Position &pos) const {
 Bitboard PositionClassifier::get_king_zone(Square ksq) const {
   Bitboard zone = attacks_bb<KING>(ksq) | square_bb(ksq);
 
-  File f = file_of(ksq);
   Rank r = rank_of(ksq);
 
   if (r < RANK_7)

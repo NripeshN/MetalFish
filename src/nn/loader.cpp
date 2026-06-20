@@ -64,9 +64,11 @@ std::string DecompressGzip(const std::string &filename) {
     const int sz =
         gzread(file, &buffer[bytes_read], buffer.size() - bytes_read);
     if (sz < 0) {
-      int errnum;
+      int errnum = 0;
+      const char *gzmsg = gzerror(file, &errnum);
+      std::string detail = gzmsg ? gzmsg : "unknown gzip error";
       gzclose(file);
-      throw std::runtime_error("gzip error reading file");
+      throw std::runtime_error("gzip error reading file: " + detail);
     }
     if (sz == static_cast<int>(buffer.size()) - bytes_read) {
       bytes_read = buffer.size();
@@ -173,38 +175,7 @@ WeightsFile LoadWeightsFromFile(const std::string &filename) {
 }
 
 std::optional<WeightsFile> LoadWeights(std::string_view location) {
-  std::string loc(location);
-
-  if (loc == "<autodiscover>") {
-    auto discovered = DiscoverWeightsFile();
-    if (discovered.empty()) {
-      return std::nullopt;
-    }
-    loc = discovered;
-  }
-
-  return LoadWeightsFromFile(loc);
-}
-
-std::string DiscoverWeightsFile() {
-  const std::vector<std::string> locations = {
-      "networks/",
-      "./",
-      "../networks/",
-  };
-
-  const std::vector<std::string> extensions = {
-      ".pb.gz",
-      ".pb",
-  };
-
-  for (const auto &dir : locations) {
-    for (const auto &ext : extensions) {
-      std::string pattern = dir + "*" + ext;
-    }
-  }
-
-  return "";
+  return LoadWeightsFromFile(std::string(location));
 }
 
 FloatVector DecodeLayer(const MetalFishNN::Weights::Layer &layer) {
