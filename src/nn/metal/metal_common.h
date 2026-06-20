@@ -9,6 +9,7 @@
 #include "../network_tensor_plan.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <stdexcept>
 #include <vector>
 
@@ -17,6 +18,16 @@ namespace NN {
 namespace Metal {
 
 static int kInputPlanes = kPackedInputPlaneCount;
+
+// Opt-in FP16 compute for the MPSGraph transformer body (METALFISH_METAL_FP16).
+// Default is FP32. FP16 is ~14% faster per eval at batch 1 with near-identical
+// outputs, but can change move selection on borderline positions, so it stays
+// opt-in pending large-scale strength validation.
+inline bool HalfPrecisionEnabled() {
+  const char *e = std::getenv("METALFISH_METAL_FP16");
+  return e && (e[0] == '1' || e[0] == 't' || e[0] == 'T' || e[0] == 'y' ||
+               e[0] == 'Y');
+}
 
 struct InputsOutputs {
   InputsOutputs(int maxBatchSize, const NetworkTensorPlan &plan) {
