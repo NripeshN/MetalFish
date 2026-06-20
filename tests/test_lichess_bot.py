@@ -49,8 +49,7 @@ def test_live_defaults_avoid_crash_prone_resources() -> None:
         )
         expect(
             "syzygy probe limit matches installed coverage",
-            int(options["SyzygyProbeLimit"])
-            <= lichess_bot.SYZYGY_MAX_PIECES,
+            int(options["SyzygyProbeLimit"]) <= lichess_bot.SYZYGY_MAX_PIECES,
         )
     expect("resource reserve", lichess_bot.RESOURCE_RESERVE_MB >= 1024)
     expect("thread lower bound", int(options["Threads"]) >= 3)

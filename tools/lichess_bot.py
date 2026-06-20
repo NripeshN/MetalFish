@@ -935,11 +935,7 @@ def print_config_check(args) -> None:
     available_mb = int(profile.get("available_mb", 0))
     total_mb = int(profile.get("total_mb", 0))
     memory = f"{available_mb}/{total_mb} MB" if available_mb and total_mb else "unknown"
-    syzygy = (
-        f"{SYZYGY_PATH} ({SYZYGY_MAX_PIECES}-piece)"
-        if SYZYGY_PATH
-        else "disabled"
-    )
+    syzygy = f"{SYZYGY_PATH} ({SYZYGY_MAX_PIECES}-piece)" if SYZYGY_PATH else "disabled"
 
     print("MetalFish Lichess Bot config check")
     print(f"  Engine path: {ENGINE}")
@@ -5247,9 +5243,7 @@ class LichessBot:
         )
         print(f"  Reserve:  {RESOURCE_RESERVE_MB} MB | Network: BT4-1024x15x32h")
         syzygy = (
-            f"{SYZYGY_PATH} ({SYZYGY_MAX_PIECES}-piece)"
-            if SYZYGY_PATH
-            else "disabled"
+            f"{SYZYGY_PATH} ({SYZYGY_MAX_PIECES}-piece)" if SYZYGY_PATH else "disabled"
         )
         print(f"  Syzygy:   {syzygy}")
         print(f"  ANE:      {ane_status_label(self.args)}")
