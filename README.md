@@ -9,19 +9,24 @@ Current platform surface:
 
 | Platform | Backend | Status |
 | --- | --- | --- |
-| macOS Apple Silicon | Metal/MPSGraph + CPU NNUE | Primary v0.1.0-alpha release path |
+| macOS Apple Silicon | Metal/MPSGraph + CPU NNUE | Primary release path (v1.0.0) |
 | Linux x86-64 NVIDIA | CUDA + CPU NNUE | Parity-gated in CI/GCP runtime gates |
 | Windows x86-64 NVIDIA | CUDA + CPU NNUE | MSVC/NVCC compile gate plus L4 runtime gate |
 | Portable Linux/Windows CPU | CPU AB and transformer fallback | Correctness/fallback, not a strength target |
 
 ## Project Status
 
-MetalFish is experimental engine research, not a Stockfish replacement claim.
-The standalone alpha-beta search is Stockfish-family search engineering; the
-standalone MCTS path is an Lc0-compatible transformer search implementation.
-The main research contribution is the hybrid runtime: CPU NNUE alpha-beta and
-GPU transformer MCTS search the same position concurrently, exchange root-level
-signals, and use a coordinator to select the final move.
+MetalFish 1.0.0 is a working UCI engine, not a Stockfish replacement claim. Its
+playing strength comes from the CPU alpha-beta search with a Stockfish-family
+NNUE evaluation; the standalone MCTS path is an Lc0-compatible transformer
+search that loads BT4 weights.
+
+The project's research contribution is the hybrid runtime: CPU NNUE alpha-beta
+and GPU transformer MCTS search the same position concurrently, exchange
+root-level signals, and a coordinator selects the final move. In practice the
+coordinator defers to the alpha-beta move when the GPU MCTS is not clearly
+better, so the hybrid's strength tracks its alpha-beta component — the GPU side
+is a research/diagnostic path, not a strength multiplier.
 
 ## Engine Modes
 
@@ -95,20 +100,22 @@ python3 tools/lichess_puzzle_runner.py \
   --threads auto --hash-mb 4096 --movetime-ms 1000
 ```
 
-Latest local tactical run, M2 Max, 5 seconds per position, generated
-2026-05-20 with `--threads auto --hash auto`:
+The 24-position Bratko-Kopec suite is a small tactical smoke test, useful for
+regression tracking but far too small and noisy to rank engines or estimate
+Elo. On an M2 Max at 5s/position the MetalFish configurations and references all
+land in the low-20s out of 24 — at the resolution limit of a 24-position suite.
+Two points matter for an honest reading:
 
-| Engine | Score | Completed | Notes |
-| --- | ---: | ---: | --- |
-| MetalFish Hybrid | 24/24 | 24/24 | 1 MCTS worker + 7 AB workers, BT4 weights |
-| Stockfish reference | 21/24 | 24/24 | 8 workers, 4096 MB hash |
-| MetalFish AB | 20/24 | 24/24 | 8 workers, 4096 MB hash |
-| MetalFish MCTS | 20/24 | 24/24 | BT4 weights, one Apple MCTS worker, strength KLD profile |
-| Lc0 with BT4 weights | 17/24 | 24/24 | Metal backend, `Threads=8`, `Temperature=0` |
+- **The hybrid's tactical score tracks its alpha-beta + NNUE component.** On the
+  committed-config run the GPU transformer performed zero evaluations on every
+  solved position (`nn_evals=0` in `results/paper_tactical.json`), i.e. the
+  result came from the CPU search, not the GPU MCTS. Hybrid-vs-AB differences on
+  this suite are not GPU strength.
+- Per-position differences at this sample size are dominated by worker-count and
+  run-to-run variance, not engine strength.
 
-In this run, Hybrid solved BK.07, BK.09, BK.11, BK.17, and BK.22 where at
-least one standalone component or reference engine missed. This is a tactical
-suite result only; it is not an Elo estimate.
+For any actual strength claim, use a large cutechess tournament with the fair
+resource policy below — never this suite.
 
 A forced full-worker pure-MCTS stress run (`MCTSMaxThreads=8`) is not a
 strength profile for the current backend. It previously scored 12/24 and timed
@@ -116,8 +123,8 @@ out on BK.24, which is why pure MCTS now caps Apple workers unless
 `MCTSParallelSearch=true` is set.
 
 MetalFish's pure-MCTS strength profile intentionally uses a small
-`MCTSMinimumKLDGainPerNode=0.00005` tactical stopper and
-`PureMCTSSmartPruningFactor=0.0`. This keeps pure MCTS from freezing low-root
+`MCTSMinimumKLDGainPerNode=0.00005` tactical stopper and the default
+`PureMCTSSmartPruningFactor=0.5`. This keeps pure MCTS from freezing low-root
 alternatives too early while leaving Hybrid's MCTS worker on its separate
 hybrid profile. For an exact Lc0-style KLD-off diagnostic
 comparison, run:
@@ -205,6 +212,25 @@ curl -L -o networks/BT4-1024x15x32h-swa-6147500.pb.gz \
 gzip -dc networks/BT4-1024x15x32h-swa-6147500.pb.gz \
   > networks/BT4-1024x15x32h-swa-6147500.pb
 ```
+
+## Install (prebuilt macOS binary)
+
+Each tagged release publishes a macOS arm64 tarball
+(`metalfish-<tag>-macos-arm64.tar.gz`). It contains the engine binary but not
+the network files, which must be fetched separately:
+
+```bash
+tar -xzf metalfish-v1.0.0-macos-arm64.tar.gz
+python3 tools/download_engine_networks.py --dest networks
+./metalfish
+# then, over UCI:
+#   setoption name UseHybridSearch value true
+#   setoption name NNWeights value networks/BT4-1024x15x32h-swa-6147500.pb
+```
+
+The two Stockfish `nn-*.nnue` files must be discoverable from the working
+directory (the downloader places them in `networks/`; pass the directory via the
+`EvalFile`/`EvalFileSmall` UCI options if you run the binary from elsewhere).
 
 ## Build
 
@@ -380,6 +406,20 @@ src/uci/       UCI protocol
 tests/         Unit, UCI, ponder, and benchmark tests
 tools/         Lichess bot, puzzle runner, books, Syzygy, tournaments
 ```
+
+## Acknowledgements
+
+MetalFish builds on outstanding open-source work, all under GPL-3.0:
+
+- **Stockfish** (https://github.com/official-stockfish/Stockfish) — the
+  alpha-beta search, transposition table, and NNUE evaluation are derived from
+  Stockfish, and the default `nn-*.nnue` networks are Stockfish networks.
+- **Leela Chess Zero / Lc0** (https://github.com/LeelaChessZero/lc0) — the MCTS
+  and the BT4 transformer input/policy encoding are Lc0-compatible, and the
+  `BT4-1024x15x32h` network is an Lc0 network.
+
+These projects are GPL-3.0, the same license MetalFish uses; see their
+repositories for their respective copyright holders.
 
 ## License
 

@@ -93,7 +93,8 @@ jobs:
             cuda-release/packages/*
             cuda-release/cuda-release-artifacts-manifest.json
           draft: false
-          prerelease: true
+          # Stable for plain tags (v1.0.0); prerelease for suffixed tags (v1.0.0-rc1).
+          prerelease: ${{ contains(steps.release-inputs.outputs.tag_name, '-') }}
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

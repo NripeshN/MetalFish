@@ -556,7 +556,8 @@ jobs:
         with:
           files: metalfish-${{ github.ref_name }}-macos-arm64.tar.gz
           draft: false
-          prerelease: true
+          # Stable for plain tags (v1.0.0); prerelease for suffixed tags (v1.0.0-rc1).
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

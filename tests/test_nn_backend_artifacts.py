@@ -2117,9 +2117,9 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
         expect(
             "release package tag",
             cuda_release.release_package_name(
-                linux_package, tag_name="v0.1.0-alpha", platform="linux-x86_64-cuda"
+                linux_package, tag_name="v1.0.0", platform="linux-x86_64-cuda"
             )
-            == "metalfish-v0.1.0-alpha-linux-x86_64-cuda.tar.gz",
+            == "metalfish-v1.0.0-linux-x86_64-cuda.tar.gz",
         )
 
 
@@ -2259,7 +2259,7 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                     "--out-dir",
                     str(out_dir),
                     "--tag-name",
-                    "v0.1.0-alpha",
+                    "v1.0.0",
                 ]
             )
             == 0,
@@ -2283,9 +2283,7 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
         expect(
             "direct release package",
             (
-                out_dir
-                / "packages"
-                / "metalfish-v0.1.0-alpha-windows-x86_64-msvc-cuda.zip"
+                out_dir / "packages" / "metalfish-v1.0.0-windows-x86_64-msvc-cuda.zip"
             ).is_file(),
         )
 
@@ -2441,7 +2439,7 @@ def test_cuda_release_artifacts_reject_direct_runtime_commit_drift() -> None:
                     "--out-dir",
                     str(root / "release"),
                     "--tag-name",
-                    "v0.1.0-alpha",
+                    "v1.0.0",
                 ]
             )
         except ValueError as exc:
@@ -2474,7 +2472,7 @@ def test_cuda_release_dispatch_direct_root_uses_manifest_sha_default() -> None:
                         "--out-dir",
                         str(out_dir),
                         "--tag-name",
-                        "v0.1.0-alpha",
+                        "v1.0.0",
                     ]
                 )
                 == 0,
