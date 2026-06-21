@@ -106,11 +106,15 @@ public:
       int16x8_t words0 = vcombine_s16(r0, r1);
       int16x8_t words1 = vcombine_s16(r2, r3);
 
-      // Pack int16 -> uint8 (saturate)
-      uint8x8_t bytes0 = vqmovun_s16(words0);
-      uint8x8_t bytes1 = vqmovun_s16(words1);
-      vst1q_u8(reinterpret_cast<uint8_t *>(&out[i]),
-               vcombine_u8(bytes0, bytes1));
+      // Pack int16 -> int8 with SIGNED saturation so activations clamp at 127,
+      // matching the scalar min(127, ...) path below and the SSE2
+      // _mm_packs_epi16 path above. The squared values are non-negative, so
+      // signed saturation yields [0, 127] and the int8/uint8 bit patterns are
+      // identical. (vqmovun_s16 saturates to [0, 255], which over-saturates any
+      // activation >= 127 and corrupts the NNUE eval on aarch64.)
+      int8x8_t bytes0 = vqmovn_s16(words0);
+      int8x8_t bytes1 = vqmovn_s16(words1);
+      out[i] = vcombine_s8(bytes0, bytes1);
     }
     constexpr IndexType Start = NumChunks * 16;
 
