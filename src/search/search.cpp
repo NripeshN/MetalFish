@@ -233,7 +233,9 @@ void Search::Worker::start_searching() {
   // until the GUI sends one of those commands.
   while (!threads.stop && (main_manager()->ponder || limits.infinite)) {
 #ifdef __aarch64__
-    __builtin_arm_yield();
+    // Portable spin hint. The __builtin_arm_yield builtin is Clang-only and
+    // does not exist on GCC/aarch64; the inline-asm "yield" works on both.
+    __asm__ __volatile__("yield" ::: "memory");
 #endif
   }
 
