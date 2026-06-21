@@ -1,0 +1,217 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v1.0.0)"
+        required: true
+        type: string
+      draft:
+        description: "Publish as a draft first (verify before releasing)"
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: metalfish-release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  BUILD_TYPE: Release
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: Build macOS arm64 (Metal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install dependencies
+        run: brew install protobuf zlib abseil
+      - name: Download NNUE networks
+        run: python3 tools/download_engine_networks.py --nnue-only
+      - name: Build
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_METAL=ON \
+            -DBUILD_TESTS=OFF
+          cmake --build build --target metalfish -j"$(sysctl -n hw.ncpu)"
+      - name: Package
+        run: |
+          mkdir -p dist/metalfish
+          cp build/metalfish dist/metalfish/
+          cp README.md CHANGELOG.md LICENSE CONTRIBUTING.md dist/metalfish/
+          cp tools/download_engine_networks.py dist/metalfish/
+          tar -czf metalfish-macos-arm64.tar.gz -C dist metalfish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: metalfish-macos-arm64
+          path: metalfish-macos-arm64.tar.gz
+          if-no-files-found: error
+
+  linux:
+    name: Build Linux ${{ matrix.arch }} (CPU)
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04, experimental: false }
+          - { arch: arm64, runner: ubuntu-24.04-arm, experimental: true }
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkg-config \
+            protobuf-compiler libprotobuf-dev zlib1g-dev libabsl-dev python3-pip
+      - name: Download NNUE networks
+        run: python3 tools/download_engine_networks.py --nnue-only
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_METAL=OFF \
+            -DBUILD_TESTS=OFF \
+            -DMETALFISH_ENABLE_IPO=OFF
+          cmake --build build --target metalfish
+      - name: Package
+        run: |
+          mkdir -p dist/metalfish
+          cp build/metalfish dist/metalfish/
+          cp README.md CHANGELOG.md LICENSE CONTRIBUTING.md dist/metalfish/
+          cp tools/download_engine_networks.py dist/metalfish/
+          tar -czf metalfish-linux-${{ matrix.arch }}.tar.gz -C dist metalfish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: metalfish-linux-${{ matrix.arch }}
+          path: metalfish-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: Build Windows x86_64 (CPU)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            base-devel
+            zip
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-protobuf
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-abseil-cpp
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pip
+      - name: Download NNUE networks
+        run: python tools/download_engine_networks.py --nnue-only
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_METAL=OFF \
+            -DBUILD_TESTS=OFF \
+            -DMETALFISH_ENABLE_IPO=OFF
+          cmake --build build --target metalfish
+      - name: Package
+        run: |
+          mkdir -p dist/metalfish
+          cp build/metalfish.exe dist/metalfish/
+          cp README.md CHANGELOG.md LICENSE CONTRIBUTING.md dist/metalfish/
+          cp tools/download_engine_networks.py dist/metalfish/
+          (cd dist && zip -r ../metalfish-windows-x86_64.zip metalfish)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: metalfish-windows-x86_64
+          path: metalfish-windows-x86_64.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: [macos, linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ github.event.inputs.tag }}"
+            draft="${{ github.event.inputs.draft }}"
+          else
+            tag="${{ github.ref_name }}"
+            draft="false"
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "draft=${draft}" >> "$GITHUB_OUTPUT"
+          case "${tag}" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Generate SHA-256 checksums
+        run: |
+          cd artifacts
+          sha256sum metalfish-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: MetalFish ${{ steps.meta.outputs.tag }}
+          files: artifacts/*
+          draft: ${{ steps.meta.outputs.draft }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            MetalFish ${{ steps.meta.outputs.tag }} — a UCI hybrid chess engine
+            (CPU alpha-beta + NNUE with concurrent GPU transformer MCTS).
+
+            ## Downloads
+
+            | Platform | Asset | Transformer backend |
+            | --- | --- | --- |
+            | macOS (Apple Silicon) | `metalfish-macos-arm64.tar.gz` | Metal/MPSGraph |
+            | Linux x86-64 | `metalfish-linux-x86_64.tar.gz` | CPU |
+            | Linux arm64 | `metalfish-linux-arm64.tar.gz` | CPU |
+            | Windows x86-64 | `metalfish-windows-x86_64.zip` | CPU |
+
+            The Stockfish NNUE is embedded in the binary, so alpha-beta play
+            works out of the box. For the hybrid/MCTS transformer modes, fetch
+            the BT4 network with the bundled helper (Python 3, no dependencies):
+
+            ```bash
+            python3 download_engine_networks.py --dest networks
+            ./metalfish   # then over UCI:
+            #   setoption name UseHybridSearch value true
+            #   setoption name NNWeights value networks/BT4-1024x15x32h-swa-6147500.pb
+            ```
+
+            NVIDIA CUDA builds (Linux/Windows) are produced from source with
+            `-DUSE_CUDA=ON`; see the README and `docs/cross_platform_backend_plan.md`.
+            Verify downloads against `SHA256SUMS.txt`.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

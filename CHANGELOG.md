@@ -15,6 +15,10 @@ First stable release.
   a research/diagnostic path, not a strength multiplier), corrected option
   defaults, prebuilt-binary install instructions, and explicit Stockfish/Lc0
   acknowledgements.
+- Cross-platform release binaries: tagged releases now publish prebuilt binaries
+  for macOS (Apple Silicon), Linux (x86-64 and arm64), and Windows (x86-64), each
+  with the NNUE embedded and the BT4 network downloader bundled, plus
+  `SHA256SUMS.txt`. (Alpha shipped macOS arm64 only.)
 - Release packaging: tagged GitHub releases are marked stable for plain version
   tags and prerelease only for suffixed tags (e.g. `-rc1`).
 

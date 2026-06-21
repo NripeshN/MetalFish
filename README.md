@@ -5,14 +5,17 @@ with NNUE plus GPU MCTS with an Lc0-compatible transformer. The mature path is
 Apple Silicon with Metal/MPSGraph, and the CUDA branch brings the same shared
 NN/search contracts to NVIDIA Linux and Windows hosts.
 
-Current platform surface:
+The CPU alpha-beta + NNUE search (the engine's strength) runs on every platform,
+and the prebuilt binaries embed the NNUE. The transformer backend differs by
+platform:
 
-| Platform | Backend | Status |
+| Platform | Prebuilt binary | Transformer backend |
 | --- | --- | --- |
-| macOS Apple Silicon | Metal/MPSGraph + CPU NNUE | Primary release path (v1.0.0) |
-| Linux x86-64 NVIDIA | CUDA + CPU NNUE | Parity-gated in CI/GCP runtime gates |
-| Windows x86-64 NVIDIA | CUDA + CPU NNUE | MSVC/NVCC compile gate plus L4 runtime gate |
-| Portable Linux/Windows CPU | CPU AB and transformer fallback | Correctness/fallback, not a strength target |
+| macOS Apple Silicon (arm64) | yes | Metal/MPSGraph |
+| Linux x86-64 | yes | CPU (CUDA from source) |
+| Linux arm64 | yes | CPU |
+| Windows x86-64 | yes | CPU (CUDA from source) |
+| Linux/Windows x86-64 + NVIDIA | from source (`-DUSE_CUDA=ON`) | CUDA, parity-gated in CI/GCP |
 
 ## Project Status
 
@@ -213,24 +216,34 @@ gzip -dc networks/BT4-1024x15x32h-swa-6147500.pb.gz \
   > networks/BT4-1024x15x32h-swa-6147500.pb
 ```
 
-## Install (prebuilt macOS binary)
+## Install (prebuilt binary)
 
-Each tagged release publishes a macOS arm64 tarball
-(`metalfish-<tag>-macos-arm64.tar.gz`). It contains the engine binary but not
-the network files, which must be fetched separately:
+Each tagged release publishes binaries for macOS, Linux, and Windows. The
+Stockfish NNUE is **embedded in the binary**, so alpha-beta play works with no
+downloads. Only the hybrid/MCTS transformer modes need the BT4 network.
+
+| Platform | Asset |
+| --- | --- |
+| macOS Apple Silicon | `metalfish-macos-arm64.tar.gz` |
+| Linux x86-64 | `metalfish-linux-x86_64.tar.gz` |
+| Linux arm64 | `metalfish-linux-arm64.tar.gz` |
+| Windows x86-64 | `metalfish-windows-x86_64.zip` |
 
 ```bash
-tar -xzf metalfish-v1.0.0-macos-arm64.tar.gz
-python3 tools/download_engine_networks.py --dest networks
-./metalfish
-# then, over UCI:
+# macOS / Linux: extract, then run
+tar -xzf metalfish-<platform>.tar.gz && cd metalfish
+./metalfish                 # alpha-beta works immediately (NNUE embedded)
+
+# For hybrid/MCTS, fetch the BT4 transformer (bundled helper, Python 3, no deps):
+python3 download_engine_networks.py --dest networks
+# then over UCI:
 #   setoption name UseHybridSearch value true
 #   setoption name NNWeights value networks/BT4-1024x15x32h-swa-6147500.pb
 ```
 
-The two Stockfish `nn-*.nnue` files must be discoverable from the working
-directory (the downloader places them in `networks/`; pass the directory via the
-`EvalFile`/`EvalFileSmall` UCI options if you run the binary from elsewhere).
+On Windows, extract the `.zip` and run `metalfish.exe` the same way. Verify
+downloads against the release `SHA256SUMS.txt`. NVIDIA CUDA builds are produced
+from source with `-DUSE_CUDA=ON` (see Build, below).
 
 ## Build
 
