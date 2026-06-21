@@ -123,9 +123,26 @@ Option &Option::operator=(const std::string &v) {
   assert(!type.empty());
 
   if ((type != "button" && type != "string" && v.empty()) ||
-      (type == "check" && v != "true" && v != "false") ||
-      (type == "spin" && (std::stoi(v) < min || std::stoi(v) > max)))
+      (type == "check" && v != "true" && v != "false"))
     return *this;
+
+  // Validate spin range without throwing. Values can arrive from the console,
+  // not just a GUI, so a non-numeric or oversized token (e.g. "Threads value
+  // abc") must be rejected rather than letting std::stoi throw out of the UCI
+  // command loop and terminate the engine.
+  if (type == "spin") {
+    int parsed = 0;
+    try {
+      std::size_t consumed = 0;
+      parsed = std::stoi(v, &consumed);
+      if (consumed != v.size())
+        return *this;
+    } catch (...) {
+      return *this;
+    }
+    if (parsed < min || parsed > max)
+      return *this;
+  }
 
   if (type == "combo") {
     OptionsMap comboMap; // To have case insensitive compare

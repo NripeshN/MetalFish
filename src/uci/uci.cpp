@@ -1757,8 +1757,13 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   std::istringstream option_args(args);
   while (option_args >> token) {
     if (token.find("threads=") == 0) {
-      num_threads = std::stoi(token.substr(8));
-      explicit_threads_arg = true;
+      try {
+        num_threads = std::stoi(token.substr(8));
+        explicit_threads_arg = true;
+      } catch (...) {
+        // Ignore a malformed threads= argument and keep the option default
+        // rather than throwing out of the command loop.
+      }
     }
   }
 
