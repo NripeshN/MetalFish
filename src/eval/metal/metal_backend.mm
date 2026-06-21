@@ -323,18 +323,6 @@ public:
     return std::max(32, std::min(512, batch));
   }
 
-  id<MTLCommandBuffer> acquire_command_buffer() {
-    std::lock_guard<std::mutex> lock(pool_mutex_);
-    if (!command_buffer_pool_.empty()) {
-      id<MTLCommandBuffer> buffer = command_buffer_pool_.back();
-      command_buffer_pool_.pop_back();
-      return buffer;
-    }
-    return [queue_ commandBuffer];
-  }
-
-  void release_command_buffer(id<MTLCommandBuffer> buffer) { (void)buffer; }
-
   std::unique_ptr<Buffer> create_buffer(size_t size, MemoryMode mode,
                                         BufferUsage usage) override {
     if (!device_ || size == 0)
@@ -665,9 +653,7 @@ private:
   std::vector<id<MTLCommandQueue>> parallel_queues_;
   std::atomic<size_t> queue_index_{0};
   std::mutex library_mutex_;
-  std::mutex pool_mutex_;
   std::unordered_map<std::string, id<MTLLibrary>> libraries_;
-  std::vector<id<MTLCommandBuffer>> command_buffer_pool_;
   std::atomic<size_t> allocated_memory_{0};
   std::atomic<size_t> peak_memory_{0};
 };
