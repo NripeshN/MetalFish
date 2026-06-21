@@ -1296,10 +1296,14 @@ static const NSInteger kMinSubBatchSize = 20;
                            length:outputSize * channelSize * sizeof(float)
                      freeWhenDone:NO];
 
+  // weightData holds FP32 bytes on disk; pass MPSDataTypeFloat32 so
+  // weightVariableWithData performs the FP32->FP16 conversion in FP16 mode
+  // (like every other weight site). Passing parent.dataType (FP16) here would
+  // reinterpret the FP32 bytes as half, corrupting the promotion-policy logits.
   MPSGraphTensor *weightTensor = [self
       weightVariableWithData:weightData
                        shape:@[ @(outputSize), @(channelSize) ]
-                    dataType:parent.dataType
+                    dataType:MPSDataTypeFloat32
                         name:[NSString stringWithFormat:@"%@/weights", label]];
 
   keys =
