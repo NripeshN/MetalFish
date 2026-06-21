@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.0
+
+First stable release.
+
+- NNUE evaluation correctness fix on Apple Silicon: the NEON
+  squared-clipped-ReLU now clamps activations at 127, matching the scalar and
+  SSE2 paths. This fixes an unsigned-saturation bug that diverged the CPU eval
+  from the reference for large activations.
+- Hardened UCI option parsing: malformed spin values (e.g. a non-numeric
+  `Threads`) are rejected instead of throwing out of the command loop.
+- Documentation accuracy pass: honest strength characterization (playing
+  strength comes from the alpha-beta + NNUE search; the GPU transformer MCTS is
+  a research/diagnostic path, not a strength multiplier), corrected option
+  defaults, prebuilt-binary install instructions, and explicit Stockfish/Lc0
+  acknowledgements.
+- Release packaging: tagged GitHub releases are marked stable for plain version
+  tags and prerelease only for suffixed tags (e.g. `-rc1`).
+
 ## v0.1.0-alpha
 
 First public alpha release.

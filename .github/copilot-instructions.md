@@ -1,6 +1,6 @@
 # MetalFish Copilot Instructions
 
-MetalFish v0.1.0-alpha is a hybrid UCI chess engine. Treat the Hybrid engine
+MetalFish v1.0.0 is a hybrid UCI chess engine. Treat the Hybrid engine
 as the primary product surface.
 
 ## Platform Surface

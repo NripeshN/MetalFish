@@ -171,7 +171,7 @@ python3 tools/dispatch_cuda_release_artifacts.py \
   --ref main \
   --gate-ref main \
   --expected-sha <commit-sha> \
-  --tag-name v0.1.0-alpha \
+  --tag-name v1.0.0 \
   --attach-to-release
 ```
 
@@ -181,7 +181,7 @@ runtime root instead of GitHub run IDs:
 ```bash
 python3 tools/dispatch_cuda_release_artifacts.py \
   --direct-runtime-root results/cuda_runtime_direct/<sha> \
-  --tag-name v0.1.0-alpha \
+  --tag-name v1.0.0 \
   --out-dir results/cuda_release_artifacts/<sha>
 ```
 
