@@ -888,7 +888,6 @@ def main() -> int:
             "METALFISH_NETWORK_CACHE_DIR",
             "Cache engine networks",
             "engine-networks-bt4-6147500-legacy42850-nnue-v2",
-            "engine-networks-bt4-nnue-v2",
             "python3 tools/download_engine_networks.py",
             "test_nn_comparison",
             "metalfish_nn_probe",
@@ -966,6 +965,21 @@ def main() -> int:
             "--hybrid-ane-root-probe",
             "--hybrid-ane-compute-units cpu-ne",
             "--hybrid-ane-min-budget-ms 500",
+        ],
+    )
+    assert_file_contains(
+        PROJ / ".github/workflows/release.yml",
+        [
+            "metalfish-macos-arm64.tar.gz",
+            "metalfish-linux-x86_64.tar.gz",
+            "metalfish-linux-arm64.tar.gz",
+            "metalfish-windows-x86_64.zip",
+            "ubuntu-24.04-arm",
+            "softprops/action-gh-release",
+            "SHA256SUMS.txt",
+            "download_engine_networks.py",
+            "USE_METAL=ON",
+            "USE_METAL=OFF",
         ],
     )
     assert_file_contains(
