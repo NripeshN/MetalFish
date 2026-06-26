@@ -327,6 +327,34 @@ def test_load_adjusted_workers_preserves_floor() -> None:
     )
 
 
+def test_forced_performance_core_workers_bypass_dynamic_throttle() -> None:
+    args = types.SimpleNamespace(all_performance_cores=True, threads=0)
+    forced = lichess_bot.forced_search_workers_from_args(args)
+    options, profile = lichess_bot.build_engine_options(forced_workers=forced)
+
+    expect("all performance cores requested", forced == lichess_bot.MAX_SEARCH_WORKERS)
+    expect("fixed worker mode recorded", profile["worker_mode"] == "fixed")
+    expect("fixed threads applied", int(options["Threads"]) == forced)
+
+
+def test_forced_threads_clamp_to_performance_cores() -> None:
+    args = types.SimpleNamespace(all_performance_cores=False, threads=999)
+    forced = lichess_bot.forced_search_workers_from_args(args)
+
+    expect("forced threads clamp", forced == lichess_bot.MAX_SEARCH_WORKERS)
+
+
+def test_zero_increment_low_time_keeps_search_floor() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    timeout = bot._search_timeout_seconds("white", 9_000, 9_000, 0, 0)
+
+    expect(
+        "zero increment low clock search floor",
+        timeout >= lichess_bot.ZERO_INCREMENT_LOW_TIME_FLOOR_S,
+    )
+    expect("zero increment low clock still bounded", timeout < 1.0)
+
+
 def test_pre_game_resource_prep_runs_cleanup_before_allocation() -> None:
     old_resource_prep = lichess_bot.PRE_GAME_RESOURCE_PREP
     old_available = lichess_bot.available_memory_mb
@@ -755,6 +783,24 @@ def test_seek_candidates_filter_time_control_cooldown_by_speed_only() -> None:
     expect("target returns for different speed", candidates[0] == "targetbot")
 
 
+def test_include_classic_adds_classical_rotation_tcs() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = types.SimpleNamespace(
+        include_zero_increment=False,
+        include_bullet=False,
+        include_classic=True,
+    )
+
+    tcs = bot._rotation_tcs()
+
+    expect("classic rotation includes 30+20", (1800, 20) in tcs)
+    expect("classic rotation includes 25+10", (1500, 10) in tcs)
+    expect(
+        "classic rotation maps to classical speed",
+        all(bot._tc_to_speed(limit, inc) == "classical" for limit, inc in tcs[-2:]),
+    )
+
+
 def _seek_test_args(**overrides):
     defaults = {
         "seek": True,
@@ -770,6 +816,7 @@ def _seek_test_args(**overrides):
         "min_rated_opponent_elo": 0,
         "include_zero_increment": False,
         "include_bullet": False,
+        "include_classic": False,
         "avoid_repeat_format": False,
     }
     defaults.update(overrides)
@@ -895,27 +942,98 @@ def test_seek_no_candidate_retry_uses_reason_aware_delay() -> None:
     )
 
 
-def test_played_format_no_candidate_rotates_to_next_speed() -> None:
+def test_played_format_cycle_resets_to_top_when_pool_exhausted() -> None:
     bot, scheduled, audit = _seek_test_bot(
         _seek_test_args(tc=None, rotate=True, avoid_repeat_format=True),
         [_targetbot_speed_perfs()],
     )
-    bot._played_by_speed = {"rapid": {"targetbot": 1.0}}
+    bot._played_by_speed = {
+        "rapid": {"targetbot": 1.0},
+        "blitz": {"targetbot": 1.0},
+    }
+
+    class Response:
+        status_code = 200
+        text = '{"challenge":{"id":"challenge-id"}}'
+
+        def json(self):
+            return {"challenge": {"id": "challenge-id"}}
+
+    posted: list[str] = []
+    challenge_timers: list[bool] = []
+    bot.api_post = lambda path, **kwargs: posted.append(path) or Response()
+    bot._schedule_challenge_timeout = lambda: challenge_timers.append(True)
 
     with redirect_stdout(io.StringIO()):
         bot._seek_game_once()
 
     limit, inc = bot._next_tc()
-    expect("played-format no-candidate schedules retry", len(scheduled) == 1)
     expect(
-        "played-format retry is immediate enough",
-        scheduled[0] == max(1.0, lichess_bot.CHALLENGE_CANCEL_GRACE_S),
+        "played-format exhausted pool posts challenge",
+        posted == ["/challenge/targetbot"],
     )
-    expect("played-format skips to next speed", bot._tc_to_speed(limit, inc) == "blitz")
-    expect("played-format skips same-speed tc", bot._rotation_idx == 2)
+    expect("played-format challenge timeout scheduled", challenge_timers == [True])
+    expect("played-format retry not scheduled", scheduled == [])
     expect(
-        "played-format rotation audited",
-        audit and audit[0][0] == "seek_no_candidates" and audit[0][1]["rotated"],
+        "played-format keeps current speed",
+        bot._tc_to_speed(limit, inc) == "rapid",
+    )
+    expect("played-format keeps rotation index", bot._rotation_idx == 0)
+    expect(
+        "played-format resets current speed history",
+        "rapid" not in bot._played_by_speed,
+    )
+    expect(
+        "played-format preserves other speeds",
+        "targetbot" in bot._played_by_speed.get("blitz", {}),
+    )
+    expect(
+        "played-format reset audited",
+        any(event == "repeat_format_cycle_reset" for event, _ in audit),
+    )
+
+
+def test_avoid_repeat_format_resets_only_current_high_rated_pool() -> None:
+    class Args:
+        elo_seek = False
+        seek_highest_rated = True
+        avoid_repeat_format = True
+        min_rated_opponent_elo = 2900
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._played_by_speed = {
+        "bullet": {
+            "topbot": 1.0,
+            "secondbot": 1.0,
+            "belowfloor": 1.0,
+        },
+        "blitz": {"topbot": 1.0},
+    }
+    bot._persist_played_format_history = False
+    bots = [
+        {"id": "secondbot", "perfs": {"bullet": {"games": 20, "rating": 3000}}},
+        {"id": "belowfloor", "perfs": {"bullet": {"games": 20, "rating": 2800}}},
+        {"id": "topbot", "perfs": {"bullet": {"games": 20, "rating": 3300}}},
+    ]
+
+    candidates, reason = bot._seek_candidates(bots, "bullet", rated=True)
+
+    expect("repeat-cycle reset returns candidates", reason is None)
+    expect("repeat-cycle restarts from top", candidates == ["topbot", "secondbot"])
+    expect(
+        "repeat-cycle preserves below-floor history",
+        "belowfloor" in bot._played_by_speed.get("bullet", {}),
+    )
+    expect(
+        "repeat-cycle clears current pool",
+        "topbot" not in bot._played_by_speed.get("bullet", {}),
+    )
+    expect(
+        "repeat-cycle preserves other speed history",
+        "topbot" in bot._played_by_speed.get("blitz", {}),
     )
 
 
@@ -2456,22 +2574,99 @@ def test_make_move_can_offer_draw_on_same_request() -> None:
     )
 
 
-def test_draw_offer_reason_requires_claim_and_tablebase_draw() -> None:
+def test_respond_draw_offer_uses_bot_draw_endpoint() -> None:
+    class Response:
+        status_code = 200
+        text = ""
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    calls: list[str] = []
+    bot.api_post = lambda path, **kwargs: calls.append(path) or Response()
+
+    expect("draw accept succeeds", bot.respond_draw_offer("game", True))
+    expect("draw decline succeeds", bot.respond_draw_offer("game", False))
+    expect(
+        "draw endpoint paths",
+        calls == ["/bot/game/game/draw/yes", "/bot/game/game/draw/no"],
+    )
+
+
+def test_draw_offer_reason_uses_tablebase_draw() -> None:
     bot = object.__new__(lichess_bot.LichessBot)
     board = lichess_bot.chess.Board()
 
     bot._draw_claim_available = lambda candidate: True
     bot._tablebase_wdl = lambda candidate: 0
-    expect(
-        "tb draw claim offers draw", bot._draw_offer_reason(board) == "tb_draw_claim"
-    )
+    expect("tb draw offers draw", bot._draw_offer_reason(board) == "tb_draw")
 
     bot._tablebase_wdl = lambda candidate: 2
     expect("tb win does not offer draw", bot._draw_offer_reason(board) is None)
 
     bot._draw_claim_available = lambda candidate: False
     bot._tablebase_wdl = lambda candidate: 0
-    expect("no claim does not offer draw", bot._draw_offer_reason(board) is None)
+    expect("tb draw offers even without claim", bot._draw_offer_reason(board) == "tb_draw")
+
+
+def test_engine_equal_low_material_can_offer_draw_late() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    board = lichess_bot.chess.Board("8/8/8/8/8/4k3/8/4K2R w - - 0 80")
+    moves = ["0000"] * lichess_bot.DRAW_OFFER_ENGINE_MIN_PLY
+    bot._draw_claim_available = lambda candidate: False
+    bot._tablebase_wdl = lambda candidate: None
+
+    expect(
+        "late engine equal offers draw",
+        bot._draw_offer_reason(board, {"score_cp": 0}, moves)
+        == "engine_equal_low_material",
+    )
+    expect(
+        "engine advantage does not offer draw",
+        bot._draw_offer_reason(board, {"score_cp": 100}, moves) is None,
+    )
+
+
+def test_draw_accept_reason_uses_tablebase_and_engine_score() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    board = lichess_bot.chess.Board()
+    moves = ["0000"] * lichess_bot.DRAW_ACCEPT_ENGINE_MIN_PLY
+
+    bot._tablebase_wdl = lambda candidate: -2
+    expect(
+        "accept losing tablebase draw offer",
+        bot._draw_accept_reason(board) == "tb_losing",
+    )
+
+    bot._tablebase_wdl = lambda candidate: 2
+    expect("reject winning tablebase draw offer", bot._draw_accept_reason(board) is None)
+
+    board.turn = lichess_bot.chess.BLACK
+    bot._tablebase_wdl = lambda candidate: 2
+    expect(
+        "accept tablebase loss when opponent is to move",
+        bot._draw_accept_reason(board, my_color="white") == "tb_losing",
+    )
+    bot._tablebase_wdl = lambda candidate: -2
+    expect(
+        "reject tablebase win when opponent is to move",
+        bot._draw_accept_reason(board, my_color="white") is None,
+    )
+    board.turn = lichess_bot.chess.WHITE
+
+    bot._tablebase_wdl = lambda candidate: None
+    expect(
+        "accept clearly worse engine draw offer",
+        bot._draw_accept_reason(board, engine_info={"score_cp": -300}, moves=[])
+        == "engine_losing",
+    )
+    expect(
+        "accept late equal engine draw offer",
+        bot._draw_accept_reason(board, engine_info={"score_cp": 10}, moves=moves)
+        == "engine_not_better",
+    )
+    expect(
+        "reject early equal engine draw offer",
+        bot._draw_accept_reason(board, engine_info={"score_cp": 10}, moves=[]) is None,
+    )
 
 
 def test_draw_state_records_winning_tablebase_without_draw_claim() -> None:
@@ -2579,6 +2774,70 @@ def test_draw_offer_caps_search_and_marks_move_request() -> None:
             and record.get("draw_offer_eligible") is True
             for record in records
         ),
+    )
+
+
+def test_incoming_draw_offer_accepts_after_engine_says_worse() -> None:
+    class Engine:
+        ponder_move = None
+
+        def alive(self) -> bool:
+            return True
+
+        def stop_pondering(self, timeout: float) -> bool:
+            return True
+
+        def set_position(self, initial_fen: str, moves: list[str]) -> None:
+            return None
+
+        def go(self, **kwargs):
+            return "e2e4", None
+
+        def search_diagnostics(self) -> dict:
+            return {"score_cp": -300}
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._submitted_moves = {}
+    bot._inflight_turns = {}
+    bot._max_seen_ply = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._completed_game_ids = set()
+    bot._completed_game_order = []
+    bot._draw_offer_responses = set()
+    bot._draw_offers_sent = {}
+    records: list[dict] = []
+    draw_calls: list[tuple[str, bool]] = []
+    submitted: list[str] = []
+
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+    bot._should_query_book = lambda board, my_color, wtime, btime: False
+    bot._tablebase_wdl = lambda board: None
+    bot._pre_submit_active_check_needed = lambda board: False
+    bot.respond_draw_offer = lambda game_id, accept: draw_calls.append(
+        (game_id, accept)
+    ) or True
+    bot.make_move = lambda game_id, move, **kwargs: submitted.append(move) or True
+
+    state = {
+        "wtime": 600000,
+        "btime": 600000,
+        "winc": 10000,
+        "binc": 10000,
+        "bdraw": True,
+    }
+
+    with redirect_stdout(io.StringIO()):
+        bot._try_move("game", Engine(), "startpos", [], "white", state)
+
+    expect("draw accepted", draw_calls == [("game", True)])
+    expect("move not submitted after draw accept", submitted == [])
+    expect("game marked completed", bot._game_was_completed("game"))
+    expect(
+        "draw acceptance audited",
+        any(record["event"] == "draw_offer_accepted" for record in records),
     )
 
 
@@ -2719,6 +2978,40 @@ def test_should_accept_handles_sparse_challenge_users() -> None:
 
     challenge["challenge"]["challenger"] = "metalfish"
     expect("self string challenger rejected", not bot.should_accept(challenge))
+
+
+def test_should_accept_classical_requires_include_classic() -> None:
+    class Args:
+        accept_rated = False
+        accept_casual = True
+        include_bullet = False
+        include_classic = False
+        include_zero_increment = False
+        max_games = 1
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.bot_id = "metalfish"
+    bot._draining = threading.Event()
+    bot.active_games = {}
+    bot._pending_challenge_id = None
+    bot._accepted_challenge_reservations = {}
+    bot._outgoing_cancel_reservations = {}
+    bot._resources_allow_new_game = lambda: True
+
+    challenge = {
+        "challenge": {
+            "challenger": {"id": "otherbot"},
+            "variant": {"key": "standard"},
+            "rated": False,
+            "speed": "classical",
+            "timeControl": {"type": "clock", "limit": 1800, "increment": 20},
+        }
+    }
+
+    expect("classical disabled by default", not bot.should_accept(challenge))
+    bot.args.include_classic = True
+    expect("classical enabled by flag", bot.should_accept(challenge))
 
 
 def test_should_accept_respects_resource_gate() -> None:
@@ -4570,6 +4863,9 @@ def main() -> int:
     test_ane_runtime_values_are_clamped_to_uci_bounds()
     test_ane_config_validation_requires_existing_files()
     test_load_adjusted_workers_preserves_floor()
+    test_forced_performance_core_workers_bypass_dynamic_throttle()
+    test_forced_threads_clamp_to_performance_cores()
+    test_zero_increment_low_time_keeps_search_floor()
     test_pre_game_resource_prep_runs_cleanup_before_allocation()
     test_bot_instance_lock_blocks_second_holder()
     test_seek_rating_requires_rated_only_mode()
@@ -4585,10 +4881,12 @@ def main() -> int:
     test_seek_candidates_do_not_fallback_to_inactive_speed_bots()
     test_seek_candidates_filter_cached_cooldowns_case_insensitively()
     test_seek_candidates_filter_time_control_cooldown_by_speed_only()
+    test_include_classic_adds_classical_rotation_tcs()
     test_seek_candidates_reports_specific_cooldown_reason()
     test_seek_cooldown_retry_delay_tracks_nearest_relevant_cooldown()
     test_seek_no_candidate_retry_uses_reason_aware_delay()
-    test_played_format_no_candidate_rotates_to_next_speed()
+    test_played_format_cycle_resets_to_top_when_pool_exhausted()
+    test_avoid_repeat_format_resets_only_current_high_rated_pool()
     test_speed_cooldown_no_candidate_rotates_to_next_speed()
     test_inactive_speed_no_candidate_rotates_to_next_speed()
     test_elo_seek_inactive_speed_rotates_before_widening_range()
@@ -4641,6 +4939,7 @@ def main() -> int:
     test_rated_seek_rating_floor()
     test_rated_challenge_rating_floor_uses_direct_rating()
     test_should_accept_handles_sparse_challenge_users()
+    test_should_accept_classical_requires_include_classic()
     test_should_accept_respects_resource_gate()
     test_should_accept_checks_max_games_before_resources()
     test_rated_challenge_respects_elo_seek_range()
@@ -4655,10 +4954,14 @@ def main() -> int:
     test_ponder_game_circuit_breaker()
     test_submit_skips_locally_completed_game_without_api_call()
     test_make_move_can_offer_draw_on_same_request()
-    test_draw_offer_reason_requires_claim_and_tablebase_draw()
+    test_respond_draw_offer_uses_bot_draw_endpoint()
+    test_draw_offer_reason_uses_tablebase_draw()
+    test_engine_equal_low_material_can_offer_draw_late()
+    test_draw_accept_reason_uses_tablebase_and_engine_score()
     test_draw_state_records_winning_tablebase_without_draw_claim()
     test_missing_syzygy_table_does_not_disable_later_probes()
     test_draw_offer_caps_search_and_marks_move_request()
+    test_incoming_draw_offer_accepts_after_engine_says_worse()
     test_stale_challenge_event_preserves_current_pending()
     test_challenge_resolution_waits_for_seek_lock_before_clearing_pending()
     test_matching_challenge_event_clears_pending()

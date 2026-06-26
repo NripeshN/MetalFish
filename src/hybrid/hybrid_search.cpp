@@ -801,7 +801,7 @@ bool HybridMCTSVerifiedHintSupportOverride(
     return false;
 
   if (mcts_root_visits < 120 || mcts_root_visits > 320 ||
-      mcts_best_visits < 70 || mcts_best_visits > 220 || visit_share < 0.55f ||
+      mcts_best_visits < 70 || mcts_best_visits > 220 || visit_share < 0.48f ||
       visit_share > 0.72f || root_q_gap < 0.16f || mcts_cp < 200 ||
       eval_delta < 45) {
     return false;
@@ -810,8 +810,17 @@ bool HybridMCTSVerifiedHintSupportOverride(
   if (ab_average_score - mcts_average_score > 70)
     return false;
 
+  const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
+  const bool no_bound_short_root =
+      !mcts_in_ab_upperbound && mcts_root_visits >= 120 &&
+      mcts_root_visits <= 180 && mcts_best_visits >= 65 &&
+      mcts_best_visits <= 110 && visit_share >= 0.48f &&
+      visit_share <= 0.53f && mcts_in_ab_effort >= 100000 &&
+      mcts_in_ab_effort <= 1000000 && q_gap_to_ab >= 0.24f;
+
   if (mcts_in_ab_rank != 2 || mcts_in_ab_score != -VALUE_INFINITE ||
-      mcts_in_ab_lowerbound || !mcts_in_ab_upperbound ||
+      mcts_in_ab_lowerbound ||
+      (!mcts_in_ab_upperbound && !no_bound_short_root) ||
       mcts_in_ab_effort > 2500000) {
     return false;
   }
@@ -821,7 +830,7 @@ bool HybridMCTSVerifiedHintSupportOverride(
     return false;
   }
 
-  return mcts_q - ab_in_mcts_q >= 0.20f;
+  return q_gap_to_ab >= 0.20f;
 }
 
 bool HybridMCTSABLowerBoundConfirmedOverride(
@@ -1251,9 +1260,38 @@ bool HybridMCTSRootRejectQuietMinorMajorAttackOverride(
     bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
     uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
   if (!fixed_budget || !visit_evidence_sane || !ab_has_clear_preference ||
-      !ab_root_rejects_mcts || !mcts_quiet_minor_major_attack) {
+      !mcts_quiet_minor_major_attack) {
     return false;
   }
+
+  const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
+  const bool short_root_confirmed =
+      mcts_root_visits >= 120 && mcts_root_visits <= 220 &&
+      mcts_best_visits >= 65 && mcts_best_visits <= 125 &&
+      visit_share >= 0.45f && visit_share <= 0.60f &&
+      root_q_gap >= 0.17f && mcts_cp >= 220 && eval_delta >= 60 &&
+      mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 8 &&
+      mcts_in_ab_score == -VALUE_INFINITE && !mcts_in_ab_lowerbound &&
+      mcts_in_ab_effort <= 1000000 && ab_in_mcts_rank == 2 &&
+      ab_in_mcts_current_visits >= 20 && ab_in_mcts_current_visits <= 40 &&
+      q_gap_to_ab >= 0.24f;
+  if (short_root_confirmed)
+    return true;
+
+  const bool medium_root_confirmed =
+      mcts_root_visits >= 220 && mcts_root_visits <= 450 &&
+      mcts_best_visits >= 170 && mcts_best_visits <= 320 &&
+      visit_share >= 0.55f && root_q_gap >= 0.08f && mcts_cp >= 170 &&
+      eval_delta >= 30 && mcts_in_ab_rank == 2 &&
+      mcts_in_ab_score == -VALUE_INFINITE && !mcts_in_ab_lowerbound &&
+      mcts_in_ab_effort <= 2500000 && ab_in_mcts_rank == 2 &&
+      ab_in_mcts_current_visits >= 20 && ab_in_mcts_current_visits <= 48 &&
+      q_gap_to_ab >= 0.18f;
+  if (medium_root_confirmed)
+    return true;
+
+  if (!ab_root_rejects_mcts)
+    return false;
 
   if (mcts_root_visits < 55 || mcts_root_visits > 90 || mcts_best_visits < 30 ||
       visit_share < 0.50f || root_q_gap < 0.19f || mcts_cp < 180 ||
@@ -1267,7 +1305,6 @@ bool HybridMCTSRootRejectQuietMinorMajorAttackOverride(
     return false;
   }
 
-  const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
   const bool outranks_ab = ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 3 &&
                            ab_in_mcts_current_visits <= 24 &&
                            q_gap_to_ab >= 0.19f;
@@ -1277,6 +1314,44 @@ bool HybridMCTSRootRejectQuietMinorMajorAttackOverride(
           12 * std::max<uint32_t>(1, ab_in_mcts_current_visits) &&
       q_gap_to_ab >= 0.45f;
   return outranks_ab || lightly_sampled_ab;
+}
+
+bool HybridMCTSVerifiedQuietMinorMajorAttackOverride(
+    bool fixed_budget, bool visit_evidence_sane,
+    bool verified_hint_supports_mcts, bool ab_has_clear_preference,
+    bool mcts_quiet_minor_major_attack, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int ab_average_score, int mcts_average_score,
+    int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || !verified_hint_supports_mcts ||
+      !ab_has_clear_preference || !mcts_quiet_minor_major_attack) {
+    return false;
+  }
+
+  if (mcts_root_visits < 120 || mcts_root_visits > 180 ||
+      mcts_best_visits < 50 || mcts_best_visits > 110 ||
+      visit_share < 0.42f || visit_share > 0.56f || root_q_gap < 0.18f ||
+      mcts_cp < 240 || eval_delta < 80) {
+    return false;
+  }
+
+  if (ab_average_score - mcts_average_score > 70)
+    return false;
+
+  if (mcts_in_ab_rank != 2 || mcts_in_ab_score != -VALUE_INFINITE ||
+      mcts_in_ab_lowerbound || mcts_in_ab_effort < 100000 ||
+      mcts_in_ab_effort > 700000) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank < 2 || ab_in_mcts_rank > 4 ||
+      ab_in_mcts_current_visits > 32) {
+    return false;
+  }
+
+  return mcts_q - ab_in_mcts_q >= 0.18f;
 }
 
 bool HybridMCTSMidRootTacticalQGapOverride(
@@ -1989,6 +2064,10 @@ bool HybridRootPawnLeverAgreementTieBreak(bool fixed_budget,
                                           float root_q_gap) {
   return fixed_budget && visit_evidence_sane && agreement_visit_share < 0.55f &&
          root_q_gap < 0.08f;
+}
+
+bool HybridRootPawnLeverScoreAllows(int selected_average_score) {
+  return selected_average_score >= -1000 && selected_average_score <= 1100;
 }
 
 bool HybridRootPawnLeverCandidate(
@@ -2755,7 +2834,7 @@ bool ParallelHybridSearch::should_stop() const {
 
 void ParallelHybridSearch::mcts_thread_main() {
 #ifdef __APPLE__
-  set_thread_qos(QOS_CLASS_UTILITY);
+  set_thread_qos(QOS_CLASS_USER_INITIATED);
 #endif
 
   struct ThreadGuard {
@@ -3855,7 +3934,7 @@ void ParallelHybridSearch::publish_ab_state(Move best, int score, int depth,
 
 void ParallelHybridSearch::coordinator_thread_main() {
 #ifdef __APPLE__
-  set_thread_qos(QOS_CLASS_UTILITY);
+  set_thread_qos(QOS_CLASS_USER_INITIATED);
 #endif
 
   struct ThreadGuard {
@@ -4491,7 +4570,7 @@ Move ParallelHybridSearch::make_final_decision() {
     const ABRootLookup selected_ab = find_ab_root_move(selected);
     if (selected_ab.rank <= 0)
       return Move::none();
-    if (std::abs(selected_ab.average_score) > 1000)
+    if (!HybridRootPawnLeverScoreAllows(selected_ab.average_score))
       return Move::none();
     const MCTSRootLookup selected_mcts = find_mcts_root_move(selected);
     const MCTSRootLookup best_mcts = find_mcts_root_move(mcts_best);
@@ -4990,6 +5069,15 @@ Move ParallelHybridSearch::make_final_decision() {
           mcts_in_ab.rank, mcts_in_ab.score, mcts_in_ab.score_lowerbound,
           mcts_in_ab.score_upperbound, mcts_in_ab.effort, ab_in_mcts.rank,
           ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool mcts_verified_quiet_minor_major_attack =
+      HybridMCTSVerifiedQuietMinorMajorAttackOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane,
+          ab_verified_hint_supports_mcts, ab_has_clear_preference,
+          mcts_quiet_minor_major_attack, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+          ab_in_ab.average_score, mcts_in_ab.average_score, mcts_in_ab.rank,
+          mcts_in_ab.score, mcts_in_ab.score_lowerbound, mcts_in_ab.effort,
+          ab_in_mcts.rank, ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
   const bool mcts_mid_root_tactical_q_gap =
       HybridMCTSMidRootTacticalQGapOverride(
           mcts_decision_budget, mcts_visit_evidence_sane, ab_root_rejects_mcts,
@@ -5140,6 +5228,7 @@ Move ParallelHybridSearch::make_final_decision() {
       mcts_root_reject_kingside_pawn_push || mcts_rook_endgame_quiet_rook ||
       mcts_root_reject_quiet_queen_move ||
       mcts_root_reject_quiet_minor_major_attack ||
+      mcts_verified_quiet_minor_major_attack ||
       mcts_mid_root_tactical_q_gap || mcts_bishop_endgame_retreat ||
       mcts_root_reject_q_gap || mcts_clock_root_reject_q_gap ||
       mcts_discovered_pawn_push_override || mcts_reused_root_current ||
@@ -5161,6 +5250,7 @@ Move ParallelHybridSearch::make_final_decision() {
          mcts_root_reject_rook_pawn_push || mcts_rook_endgame_quiet_rook ||
          mcts_root_reject_quiet_queen_move ||
          mcts_root_reject_quiet_minor_major_attack ||
+         mcts_verified_quiet_minor_major_attack ||
          mcts_mid_root_tactical_q_gap || mcts_bishop_endgame_retreat ||
          mcts_root_reject_q_gap || mcts_clock_root_reject_q_gap ||
          mcts_verified_hint_support ||
@@ -5187,6 +5277,8 @@ Move ParallelHybridSearch::make_final_decision() {
               ? "mcts_root_reject_quiet_queen_move"
           : mcts_root_reject_quiet_minor_major_attack
               ? "mcts_root_reject_quiet_minor_major_attack"
+          : mcts_verified_quiet_minor_major_attack
+              ? "mcts_verified_quiet_minor_major_attack"
           : mcts_mid_root_tactical_q_gap ? "mcts_mid_root_tactical_q_gap"
           : mcts_bishop_endgame_retreat  ? "mcts_bishop_endgame_retreat"
           : mcts_root_reject_q_gap       ? "mcts_root_reject_q_gap"
@@ -5270,6 +5362,9 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_root_reject_quiet_minor_major_attack) {
       choose_mcts = true;
       reason = "mcts_root_reject_quiet_minor_major_attack";
+    } else if (mcts_verified_quiet_minor_major_attack) {
+      choose_mcts = true;
+      reason = "mcts_verified_quiet_minor_major_attack";
     } else if (mcts_mid_root_tactical_q_gap) {
       choose_mcts = true;
       reason = "mcts_mid_root_tactical_q_gap";
@@ -5375,6 +5470,8 @@ Move ParallelHybridSearch::make_final_decision() {
        << (mcts_root_reject_quiet_queen_move ? 1 : 0)
        << " MCTSRootRejectQuietMinorMajorAttack="
        << (mcts_root_reject_quiet_minor_major_attack ? 1 : 0)
+       << " MCTSVerifiedQuietMinorMajorAttack="
+       << (mcts_verified_quiet_minor_major_attack ? 1 : 0)
        << " MCTSMidRootTacticalQGap=" << (mcts_mid_root_tactical_q_gap ? 1 : 0)
        << " MCTSBishopEndgameRetreat=" << (mcts_bishop_endgame_retreat ? 1 : 0)
        << " MCTSRootRejectQGap=" << (mcts_root_reject_q_gap ? 1 : 0)

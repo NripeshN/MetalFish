@@ -9,6 +9,10 @@
 #include <iostream>
 #include <memory>
 
+#ifdef __APPLE__
+#include <pthread/qos.h>
+#endif
+
 #include "core/bitboard.h"
 #include "core/misc.h"
 #include "core/position.h"
@@ -40,6 +44,9 @@ static void cleanup_gpu_resources() {
 int main(int argc, char *argv[]) {
   // NOTE: Don't print anything before UCI loop starts.
   // The UCI protocol requires engines to wait for 'uci' before responding.
+#ifdef __APPLE__
+  pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
+#endif
 
   Bitboards::init();
   Position::init();

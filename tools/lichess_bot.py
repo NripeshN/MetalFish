@@ -305,6 +305,27 @@ DRAW_OFFER_TABLEBASE = env_bool_string("METALFISH_DRAW_OFFER_TABLEBASE", True) =
 DRAW_OFFER_SEARCH_CAP_MS = max(
     0, min(30_000, env_int("METALFISH_DRAW_OFFER_SEARCH_CAP_MS", 1500))
 )
+DRAW_ACCEPT_ENGINE_MAX_CP = max(
+    0, min(300, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MAX_CP", 25))
+)
+DRAW_ACCEPT_ENGINE_LOSING_CP = -max(
+    50, min(1000, env_int("METALFISH_DRAW_ACCEPT_ENGINE_LOSING_CP", 150))
+)
+DRAW_ACCEPT_ENGINE_MIN_PLY = max(
+    0, min(200, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MIN_PLY", 60))
+)
+DRAW_OFFER_ENGINE_MAX_CP = max(
+    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_CP", 12))
+)
+DRAW_OFFER_ENGINE_MIN_PLY = max(
+    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MIN_PLY", 80))
+)
+DRAW_OFFER_ENGINE_MAX_PIECES = max(
+    2, min(32, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_PIECES", 12))
+)
+DRAW_OFFER_COOLDOWN_PLIES = max(
+    0, min(100, env_int("METALFISH_DRAW_OFFER_COOLDOWN_PLIES", 12))
+)
 
 
 def syzygy_path_is_safe(path: pathlib.Path) -> bool:
@@ -399,6 +420,17 @@ ENGINE_STOP_GRACE_S = 3.0
 PONDER_STOP_TIMEOUT_S = 4.0
 PONDER_HIT_TIMEOUT_S = 6.0
 MIN_SEARCH_TIMEOUT_S = 0.2
+ZERO_INCREMENT_LOW_TIME_FLOOR_S = max(
+    MIN_SEARCH_TIMEOUT_S,
+    min(2.0, env_float("METALFISH_ZERO_INC_LOW_TIME_FLOOR_S", 0.55)),
+)
+ZERO_INCREMENT_LOW_TIME_FLOOR_MIN_CLOCK_MS = max(
+    2500,
+    min(
+        30000,
+        env_int("METALFISH_ZERO_INC_LOW_TIME_FLOOR_MIN_CLOCK_MS", 3500),
+    ),
+)
 MAX_SEARCH_TIMEOUT_S = 30.0
 GAME_STREAM_TIMEOUT_S = max(
     30.0, min(1800.0, env_float("METALFISH_GAME_STREAM_TIMEOUT_S", 180.0))
@@ -567,7 +599,24 @@ def load_adjusted_workers(workers: int, load_ratio: float) -> int:
     return max(3, workers)
 
 
-def dynamic_search_workers(active_peer_engines: int = 0) -> int:
+def normalize_search_workers(workers: int) -> int:
+    return max(1, min(MAX_SEARCH_WORKERS, workers))
+
+
+def forced_search_workers_from_args(args) -> int:
+    if getattr(args, "all_performance_cores", False):
+        return MAX_SEARCH_WORKERS
+    requested = int(getattr(args, "threads", 0) or 0)
+    if requested <= 0:
+        return 0
+    return normalize_search_workers(requested)
+
+
+def dynamic_search_workers(
+    active_peer_engines: int = 0, forced_workers: int = 0
+) -> int:
+    if forced_workers > 0:
+        return normalize_search_workers(forced_workers)
     if REQUESTED_SEARCH_WORKERS > 0:
         return REQUESTED_SEARCH_WORKERS
 
@@ -636,13 +685,17 @@ def local_hash_mb(active_peer_engines: int = 0) -> int:
     return max(512, (target // 256) * 256)
 
 
-def live_resource_profile(active_peer_engines: int = 0) -> dict[str, float | int]:
+def live_resource_profile(
+    active_peer_engines: int = 0, forced_workers: int = 0
+) -> dict[str, float | int | str]:
+    forced_workers = normalize_search_workers(forced_workers) if forced_workers > 0 else 0
     return {
-        "threads": dynamic_search_workers(active_peer_engines),
+        "threads": dynamic_search_workers(active_peer_engines, forced_workers),
         "hash_mb": local_hash_mb(active_peer_engines),
         "available_mb": available_memory_mb(),
         "total_mb": machine_memory_mb(),
         "load_ratio": system_load_ratio(),
+        "worker_mode": "fixed" if forced_workers > 0 else "dynamic",
     }
 
 
@@ -688,8 +741,10 @@ if SYZYGY_PATH:
     BASE_ENGINE_OPTIONS["SyzygyProbeLimit"] = str(min(6, SYZYGY_MAX_PIECES))
 
 
-def build_engine_options(active_peer_engines: int = 0) -> tuple[dict[str, str], dict]:
-    profile = live_resource_profile(active_peer_engines)
+def build_engine_options(
+    active_peer_engines: int = 0, forced_workers: int = 0
+) -> tuple[dict[str, str], dict]:
+    profile = live_resource_profile(active_peer_engines, forced_workers)
     threads = int(profile["threads"])
     options = dict(BASE_ENGINE_OPTIONS)
     options["Threads"] = str(threads)
@@ -856,6 +911,11 @@ BULLET_ROTATION_TCS = [
     (120, 1),  # 2+1 bullet
 ]
 
+CLASSIC_ROTATION_TCS = [
+    (1800, 20),  # 30+20 classical
+    (1500, 10),  # 25+10 classical
+]
+
 ACCEPTED_SPEEDS = {"bullet", "blitz", "rapid", "classical", "correspondence"}
 CHALLENGE_TIMEOUT = max(20.0, env_float("METALFISH_CHALLENGE_TIMEOUT_S", 21.0))
 CHALLENGE_CANCEL_GRACE_S = max(
@@ -902,6 +962,9 @@ def validate_bot_config(args) -> list[str]:
     if floor < 0:
         errors.append("--min-rated-opponent-elo must be >= 0.")
 
+    if getattr(args, "threads", 0) < 0:
+        errors.append("--threads must be >= 0.")
+
     if getattr(args, "elo_seek", False) and getattr(args, "elo_range", 0) <= 0:
         errors.append("--elo-range must be > 0 when --elo-seek is enabled.")
 
@@ -929,7 +992,9 @@ def print_config_check(args) -> None:
     checker = object.__new__(LichessBot)
     checker.args = args
     checker._elo_widen_steps = 0
-    options, profile = build_engine_options()
+    options, profile = build_engine_options(
+        forced_workers=forced_search_workers_from_args(args)
+    )
     options = apply_runtime_engine_options(options, args)
 
     available_mb = int(profile.get("available_mb", 0))
@@ -950,8 +1015,9 @@ def print_config_check(args) -> None:
         "  Repeat seek: "
         f"{'avoid same bot/speed' if getattr(args, 'avoid_repeat_format', False) else 'allowed'}"
     )
+    worker_mode = str(profile.get("worker_mode", "dynamic"))
     print(
-        f"  Resources: {int(profile['threads'])} search threads, "
+        f"  Resources: {worker_mode} {int(profile['threads'])} search threads, "
         f"Hash {int(profile['hash_mb'])} MB, Free {memory}, "
         f"load {float(profile['load_ratio']):.2f}"
     )
@@ -1916,6 +1982,7 @@ class LichessBot:
         self._played_by_speed: dict[str, dict[str, float]] = (
             self._load_played_format_history()
         )
+        self._last_repeat_cycle_reset: dict[str, object] | None = None
         self._rate_limit_count = 0
         self._tc_failures = 0
         self._completed_games = 0
@@ -1929,6 +1996,8 @@ class LichessBot:
         self._submitted_turns_lock = threading.Lock()
         self._ponder_disabled_games: set[str] = set()
         self._ponder_disabled_lock = threading.Lock()
+        self._draw_offer_responses: set[tuple[str, int]] = set()
+        self._draw_offers_sent: dict[str, int] = {}
         self._last_resource_profile: dict[str, float | int] | None = None
         self._last_move_failure_detail = ""
         self._online_bots_cache: tuple[float, list[dict]] | None = None
@@ -2054,6 +2123,16 @@ class LichessBot:
 
     def decline_challenge(self, challenge_id: str, reason: str = "generic"):
         self.api_post(f"/challenge/{challenge_id}/decline", json={"reason": reason})
+
+    def respond_draw_offer(self, game_id: str, accept: bool) -> bool:
+        action = "yes" if accept else "no"
+        r = self.api_post(f"/bot/game/{game_id}/draw/{action}")
+        if r.status_code != 200:
+            detail = r.text.strip().replace("\n", " ")[:200]
+            suffix = f": {detail}" if detail else ""
+            print(f"  [{game_id}] Draw {action} failed: {r.status_code}{suffix}")
+            return False
+        return True
 
     def make_move(
         self, game_id: str, move: str, *, offering_draw: bool = False
@@ -2230,6 +2309,8 @@ class LichessBot:
     ) -> bool:
         if self.make_move(game_id, move, offering_draw=offering_draw):
             self._record_submitted_turn(game_id, moves, move)
+            if offering_draw:
+                self._remember_draw_offer_sent(game_id, moves)
             self._audit(
                 game_id,
                 "move_submit",
@@ -2307,12 +2388,158 @@ class LichessBot:
             self._python_tablebase_failed = True
             return None
 
-    def _draw_offer_reason(self, board: chess.Board) -> str | None:
-        if not self._draw_claim_available(board):
+    def _engine_score_cp(self, engine_info: dict | None) -> int | None:
+        if not isinstance(engine_info, dict):
             return None
-        if self._tablebase_wdl(board) == 0:
-            return "tb_draw_claim"
+        if engine_info.get("score_mate") is not None:
+            return None
+        try:
+            return int(engine_info["score_cp"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def _engine_score_mate(self, engine_info: dict | None) -> int | None:
+        if not isinstance(engine_info, dict):
+            return None
+        try:
+            return int(engine_info["score_mate"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def _draw_offer_reason(
+        self,
+        board: chess.Board,
+        engine_info: dict | None = None,
+        moves: list[str] | None = None,
+    ) -> str | None:
+        wdl = self._tablebase_wdl(board)
+        if wdl == 0:
+            return "tb_draw"
+        if wdl is not None:
+            return None
+
+        if moves is None or len(moves) < DRAW_OFFER_ENGINE_MIN_PLY:
+            return None
+        if len(board.piece_map()) > DRAW_OFFER_ENGINE_MAX_PIECES:
+            return None
+
+        score_cp = self._engine_score_cp(engine_info)
+        if score_cp is None:
+            return None
+        if abs(score_cp) <= DRAW_OFFER_ENGINE_MAX_CP:
+            return "engine_equal_low_material"
         return None
+
+    def _draw_accept_reason(
+        self,
+        board: chess.Board,
+        *,
+        engine_info: dict | None = None,
+        moves: list[str] | None = None,
+        my_color: str | None = None,
+    ) -> str | None:
+        try:
+            if board.is_insufficient_material():
+                return "insufficient_material"
+            if board.is_seventyfive_moves() or board.is_fivefold_repetition():
+                return "forced_draw_rule"
+        except Exception:
+            return None
+
+        wdl = self._tablebase_wdl(board)
+        if wdl is not None and my_color in {"white", "black"}:
+            us = chess.WHITE if my_color == "white" else chess.BLACK
+            if board.turn != us:
+                wdl = -wdl
+        if wdl == 0:
+            return "tb_draw"
+        if wdl is not None:
+            return "tb_losing" if wdl < 0 else None
+
+        mate = self._engine_score_mate(engine_info)
+        if mate is not None:
+            return "engine_mated" if mate < 0 else None
+
+        score_cp = self._engine_score_cp(engine_info)
+        if score_cp is None:
+            return None
+        if score_cp <= DRAW_ACCEPT_ENGINE_LOSING_CP:
+            return "engine_losing"
+        if moves is not None and len(moves) >= DRAW_ACCEPT_ENGINE_MIN_PLY:
+            if score_cp <= DRAW_ACCEPT_ENGINE_MAX_CP:
+                return "engine_not_better"
+        return None
+
+    def _opponent_draw_offer(self, state: dict, my_color: str) -> bool:
+        if not isinstance(state, dict):
+            return False
+        key = "bdraw" if my_color == "white" else "wdraw"
+        return bool(state.get(key))
+
+    def _draw_response_key(self, game_id: str, moves: list[str]) -> tuple[str, int]:
+        return (str(game_id), len(moves))
+
+    def _accept_draw_offer_if_good(
+        self,
+        game_id: str,
+        board: chess.Board,
+        moves: list[str],
+        *,
+        engine_info: dict | None = None,
+        my_color: str | None = None,
+    ) -> bool:
+        key = self._draw_response_key(game_id, moves)
+        if not hasattr(self, "_draw_offer_responses"):
+            self._draw_offer_responses = set()
+        if key in self._draw_offer_responses:
+            return False
+        reason = self._draw_accept_reason(
+            board,
+            engine_info=engine_info,
+            moves=moves,
+            my_color=my_color,
+        )
+        self._audit(
+            game_id,
+            "draw_offer_received",
+            accepted=bool(reason),
+            reason=reason or "",
+            fen=board.fen(),
+            engine_info=engine_info or {},
+            **self._audit_context(moves),
+        )
+        if not reason:
+            return False
+        if self.respond_draw_offer(game_id, True):
+            self._draw_offer_responses.add(key)
+            self._mark_game_completed(game_id)
+            print(f"  [{game_id}] Accepted draw offer ({reason})")
+            self._audit(
+                game_id,
+                "draw_offer_accepted",
+                reason=reason,
+                **self._audit_context(moves),
+            )
+            return True
+        self._draw_offer_responses.add(key)
+        self._audit(
+            game_id,
+            "draw_offer_accept_failed",
+            reason=reason,
+            **self._audit_context(moves),
+        )
+        return False
+
+    def _draw_offer_cooldown_active(self, game_id: str, moves: list[str]) -> bool:
+        if DRAW_OFFER_COOLDOWN_PLIES <= 0:
+            return False
+        last_ply = getattr(self, "_draw_offers_sent", {}).get(game_id)
+        return last_ply is not None and len(moves) - last_ply < DRAW_OFFER_COOLDOWN_PLIES
+
+    def _remember_draw_offer_sent(self, game_id: str, moves: list[str]) -> None:
+        if not hasattr(self, "_draw_offers_sent"):
+            self._draw_offers_sent = {}
+        self._draw_offers_sent[game_id] = len(moves)
 
     def _draw_state_fields(self, board: chess.Board) -> dict:
         try:
@@ -2328,7 +2555,7 @@ class LichessBot:
 
         claim_available = self._draw_claim_available(board)
         wdl = self._tablebase_wdl(board)
-        reason = "tb_draw_claim" if claim_available and wdl == 0 else ""
+        reason = self._draw_offer_reason(board) or ""
         return {
             "piece_count": len(board.piece_map()),
             "insufficient_material": insufficient,
@@ -2442,7 +2669,10 @@ class LichessBot:
         return max(0, len(self.active_games) - 1)
 
     def _live_engine_options(self) -> tuple[dict[str, str], dict]:
-        options, profile = build_engine_options(self._active_peer_engines())
+        options, profile = build_engine_options(
+            self._active_peer_engines(),
+            forced_workers=forced_search_workers_from_args(self.args),
+        )
         options = apply_runtime_engine_options(options, self.args)
         return options, profile
 
@@ -2455,7 +2685,8 @@ class LichessBot:
             f"{available_mb}/{total_mb} MB" if available_mb and total_mb else "unknown"
         )
         print(
-            f"{prefix}Resources: {int(profile['threads'])} search threads, "
+            f"{prefix}Resources: {str(profile.get('worker_mode', 'dynamic'))} "
+            f"{int(profile['threads'])} search threads, "
             f"Hash {int(profile['hash_mb'])} MB, "
             f"memory available {memory}, reserve {RESOURCE_RESERVE_MB} MB, "
             f"load {load_ratio:.2f}"
@@ -3176,6 +3407,46 @@ class LichessBot:
         self._played_by_speed.setdefault(str(speed), {})[key] = time.time()
         self._save_played_format_history()
 
+    def _reset_played_format_cycle(
+        self, speed: str, candidate_ids: list[str]
+    ) -> int:
+        if speed not in ACCEPTED_SPEEDS:
+            return 0
+        history = getattr(self, "_played_by_speed", {})
+        if not isinstance(history, dict):
+            return 0
+        entries = history.get(speed, {})
+        if not isinstance(entries, dict):
+            return 0
+
+        candidate_keys = {
+            key
+            for key in (self._cooldown_key(bot_id) for bot_id in candidate_ids)
+            if key
+        }
+        if not candidate_keys:
+            return 0
+
+        before = len(entries)
+        for key in candidate_keys:
+            entries.pop(key, None)
+        removed = before - len(entries)
+        if removed <= 0:
+            return 0
+
+        if entries:
+            history[speed] = entries
+        else:
+            history.pop(speed, None)
+        self._played_by_speed = history
+        self._last_repeat_cycle_reset = {
+            "speed": speed,
+            "count": removed,
+            "candidates": len(candidate_ids),
+        }
+        self._save_played_format_history()
+        return removed
+
     def _online_bots_from_ndjson(self, text: str) -> list[dict]:
         bots: list[dict] = []
         for line in text.strip().split("\n"):
@@ -3212,8 +3483,14 @@ class LichessBot:
         return bots, None
 
     def _seek_candidates(
-        self, bots: list[dict], speed: str, rated: bool
+        self,
+        bots: list[dict],
+        speed: str,
+        rated: bool,
+        *,
+        allow_repeat_cycle_reset: bool = True,
     ) -> tuple[list[str], str | None]:
+        self._last_repeat_cycle_reset = None
         if not bots:
             return [], "No eligible bots online"
 
@@ -3236,17 +3513,6 @@ class LichessBot:
         if not bots:
             return [], f"All eligible bots are cooling down for {speed}"
 
-        if getattr(self.args, "avoid_repeat_format", False):
-            bots = [
-                b
-                for b in bots
-                if not self._bot_played_in_speed(
-                    str(b.get("id") or b.get("name") or ""), speed
-                )
-            ]
-            if not bots:
-                return [], f"All eligible bots were already played in {speed}"
-
         bots = [b for b in bots if self._bot_plays_speed(b, speed)]
         if not bots:
             return [], f"No eligible bots active in {speed}"
@@ -3262,8 +3528,23 @@ class LichessBot:
                 return [], "No opponents inside Elo seek range"
             return [], f"No eligible bots active in {speed}"
 
-        if not candidates:
-            return [], "No eligible bots online"
+        if getattr(self.args, "avoid_repeat_format", False):
+            fresh_candidates = [
+                bot_id
+                for bot_id in candidates
+                if not self._bot_played_in_speed(bot_id, speed)
+            ]
+            if fresh_candidates:
+                return fresh_candidates, None
+
+            if not allow_repeat_cycle_reset:
+                return [], f"All eligible bots were already played in {speed}"
+
+            removed = self._reset_played_format_cycle(speed, candidates)
+            if removed > 0:
+                return candidates, None
+            return [], f"All eligible bots were already played in {speed}"
+
         return candidates, None
 
     def _next_cooldown_retry_delay(
@@ -3355,7 +3636,9 @@ class LichessBot:
             print(f"Seek dry-run: /bot/online failed with {status_code}")
             return False
 
-        candidates, reason = self._seek_candidates(bots, speed, rated)
+        candidates, reason = self._seek_candidates(
+            bots, speed, rated, allow_repeat_cycle_reset=False
+        )
         if reason:
             print(f"Seek dry-run: {reason}")
             return False
@@ -3448,6 +3731,19 @@ class LichessBot:
                 return
 
             target = candidates[0]
+            repeat_reset = getattr(self, "_last_repeat_cycle_reset", None)
+            if repeat_reset:
+                print(
+                    "  Repeat history exhausted for "
+                    f"{repeat_reset.get('speed', speed)}; restarting that cycle."
+                )
+                self._audit_seek(
+                    "repeat_format_cycle_reset",
+                    speed=repeat_reset.get("speed", speed),
+                    removed=repeat_reset.get("count", 0),
+                    candidates=repeat_reset.get("candidates", len(candidates)),
+                )
+                self._last_repeat_cycle_reset = None
             r = self.api_post(
                 f"/challenge/{target}",
                 json={
@@ -3775,10 +4071,12 @@ class LichessBot:
 
     def _rotation_tcs(self) -> list[tuple[int, int]]:
         rotation_tcs = list(ROTATION_TCS)
-        if self.args.include_zero_increment:
+        if getattr(self.args, "include_zero_increment", False):
             rotation_tcs.extend(ZERO_INCREMENT_ROTATION_TCS)
-        if self.args.include_bullet:
+        if getattr(self.args, "include_bullet", False):
             rotation_tcs.extend(BULLET_ROTATION_TCS)
+        if getattr(self.args, "include_classic", False):
+            rotation_tcs.extend(CLASSIC_ROTATION_TCS)
         return rotation_tcs
 
     def _advance_rotation(self):
@@ -3997,9 +4295,13 @@ class LichessBot:
                 increment = int(tc.get("increment", 0) or 0)
             except (TypeError, ValueError):
                 increment = 0
-            if speed == "bullet" and not self.args.include_bullet:
+            if speed == "bullet" and not getattr(self.args, "include_bullet", False):
                 return "bullet disabled"
-            if increment == 0 and not self.args.include_zero_increment:
+            if speed == "classical" and not getattr(self.args, "include_classic", False):
+                return "classical disabled"
+            if increment == 0 and not getattr(
+                self.args, "include_zero_increment", False
+            ):
                 return "zero increment disabled"
         return None
 
@@ -4157,6 +4459,12 @@ class LichessBot:
                 getattr(self, "_submitted_moves", {}).pop(game_id, None)
                 getattr(self, "_inflight_turns", {}).pop(game_id, None)
                 self._max_seen_ply.pop(game_id, None)
+            self._draw_offer_responses = {
+                key
+                for key in getattr(self, "_draw_offer_responses", set())
+                if key[0] != game_id
+            }
+            getattr(self, "_draw_offers_sent", {}).pop(game_id, None)
             getattr(self, "_playing_status_cache", {}).pop(game_id, None)
             with self._ponder_disabled_lock:
                 self._ponder_disabled_games.discard(game_id)
@@ -4380,6 +4688,15 @@ class LichessBot:
             **self._audit_context(moves),
         )
 
+        opponent_draw_offer = self._opponent_draw_offer(state, my_color)
+        if opponent_draw_offer and self._accept_draw_offer_if_good(
+            game_id,
+            board,
+            moves,
+            my_color=my_color,
+        ):
+            return
+
         if not is_my_turn:
             return
 
@@ -4597,15 +4914,44 @@ class LichessBot:
                 timeout=search_timeout,
             )
             search_ms = int((time.time() - search_start) * 1000)
+            engine_info = getattr(engine, "search_diagnostics", lambda: {})()
             self._audit(
                 game_id,
                 "engine_search_result",
                 best=best,
                 ponder=ponder,
                 elapsed_ms=search_ms,
-                engine_info=getattr(engine, "search_diagnostics", lambda: {})(),
+                engine_info=engine_info,
                 **self._audit_context(moves),
             )
+            if opponent_draw_offer and self._accept_draw_offer_if_good(
+                game_id,
+                board,
+                moves,
+                engine_info=engine_info,
+                my_color=my_color,
+            ):
+                return
+            if (
+                not opponent_draw_offer
+                and draw_offer_reason is None
+                and not self._draw_offer_cooldown_active(game_id, moves)
+            ):
+                engine_draw_offer_reason = self._draw_offer_reason(
+                    board, engine_info=engine_info, moves=moves
+                )
+                if engine_draw_offer_reason:
+                    draw_offer_reason = engine_draw_offer_reason
+                    offering_draw = True
+                    self._audit(
+                        game_id,
+                        "draw_offer_candidate",
+                        reason=draw_offer_reason,
+                        search_timeout=round(search_timeout, 3),
+                        fen=board.fen(),
+                        engine_info=engine_info,
+                        **self._audit_context(moves),
+                    )
             if best == "0000" or best == "(none)":
                 fallback = self._fallback_move(board)
                 if not fallback:
@@ -4869,6 +5215,10 @@ class LichessBot:
             budget = min(budget, our_time * 0.25)
         else:
             budget = min(budget, our_time * 0.14)
+
+        if our_inc <= 0 and our_time >= ZERO_INCREMENT_LOW_TIME_FLOOR_MIN_CLOCK_MS:
+            low_time_floor = ZERO_INCREMENT_LOW_TIME_FLOOR_S * 1000
+            budget = max(budget, min(spendable, low_time_floor))
 
         budget = min(budget, spendable, MAX_SEARCH_TIMEOUT_S * 1000)
         return max(MIN_SEARCH_TIMEOUT_S, budget / 1000.0)
@@ -5233,10 +5583,12 @@ class LichessBot:
             print(
                 f"  Debug:    HybridTrace={header_options.get('HybridTrace', 'false')}"
             )
-        print(
-            f"  Workers:  dynamic up to {MAX_SEARCH_WORKERS} search + 1 coordinator "
-            f"| CPU: {LOGICAL_CORES} logical"
-        )
+        worker_mode = str(header_profile.get("worker_mode", "dynamic"))
+        if worker_mode == "fixed":
+            worker_label = f"fixed {int(header_profile['threads'])} search"
+        else:
+            worker_label = f"dynamic up to {MAX_SEARCH_WORKERS} search"
+        print(f"  Workers:  {worker_label} + 1 coordinator | CPU: {LOGICAL_CORES} logical")
         print(
             f"  Initial:  {int(header_profile['threads'])} search threads "
             f"| Hash {header_options['Hash']} MB | Free {memory}"
@@ -5689,6 +6041,27 @@ def main():
         action="store_true",
         default=False,
         help="Also rotate into 2+1 bullet (weakest clock profile)",
+    )
+    parser.add_argument(
+        "--include-classic",
+        action="store_true",
+        default=False,
+        help="Also rotate into 30+20 and 25+10 classical games",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=0,
+        help=(
+            "Force search thread count for live games. Values above the detected "
+            "performance-core count are clamped."
+        ),
+    )
+    parser.add_argument(
+        "--all-performance-cores",
+        action="store_true",
+        default=False,
+        help="Force live games to use all detected Apple performance-core workers.",
     )
     parser.add_argument(
         "--no-prewarm",
