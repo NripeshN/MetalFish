@@ -805,11 +805,11 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, false, 210, 53,
                                         0.142f, 0.020f, 0.680f, 32));
     EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, false, 198, 21,
-                                        0.126f, 0.007f, 0.808f, 31));
+                                        0.106f, 0.007f, 0.808f, 31));
     EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, false, 198, 21,
-                                        0.137f, 0.007f, 0.649f, 31));
+                                        0.137f, 0.007f, 0.599f, 31));
     EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, false, 198, 21,
-                                        0.137f, 0.007f, 0.808f, 24));
+                                        0.137f, 0.007f, 0.808f, 9));
   }
   {
     TestCase tc("MCTS root-reject Q-gap override predicate");

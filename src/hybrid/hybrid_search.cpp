@@ -1883,8 +1883,8 @@ bool HybridMCTSRootRejectsAB(bool fixed_budget, bool visit_evidence_sane,
   const bool no_clear_ab_reject =
       fixed_budget && mcts_strong && !ab_has_clear_preference &&
       top_visits >= 180 && top_visits >= 4 * std::max<uint32_t>(1, ab_visits) &&
-      ab_visits <= 64 && visit_share >= 0.65f && root_q_gap >= 0.12f &&
-      eval_delta >= 25;
+      ab_visits <= 64 && visit_share >= 0.60f && root_q_gap >= 0.10f &&
+      eval_delta >= 10;
   return hard_reject || no_clear_ab_reject;
 }
 
@@ -4869,7 +4869,7 @@ Move ParallelHybridSearch::make_final_decision() {
                              mcts_confidence_visits >= min_visits &&
                              visit_share >= 0.20f;
   const bool mcts_strong =
-      mcts_reliable && (mcts_confidence_visits >= 320 || visit_share >= 0.48f);
+      mcts_reliable && (mcts_confidence_visits >= 250 || visit_share >= 0.45f);
   const bool mcts_overwhelming = mcts_confidence_total_nodes >= 1500 &&
                                  mcts_confidence_visits >= 250 &&
                                  visit_share >= 0.30f;
