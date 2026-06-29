@@ -139,6 +139,7 @@ Engine::Engine(std::optional<std::string> path)
               Option("", [](const Option &) { return std::nullopt; }));
   options.add("NNBackend", Option("auto"));
   options.add("NNBackendRequireAccelerator", Option(false));
+  options.add("NNMetalFP16", Option(true));
   options.add("NNCoreMLModelPath", Option(""));
   options.add("NNCoreMLComputeUnits", Option("cpu-ne"));
   options.add("NNCudaDevice", Option(-1, -1, 255));
@@ -183,17 +184,17 @@ Engine::Engine(std::optional<std::string> path)
   // Optional parity preset and exposed MCTS tuning controls
   options.add("MCTSParityPreset", Option(false));
   options.add("MCTSCPuct", Option("1.745"));
-  options.add("MCTSCPuctAtRoot", Option("1.745"));
+  options.add("MCTSCPuctAtRoot", Option("1.90"));
   options.add("MCTSCPuctBase", Option("38739"));
   options.add("MCTSCPuctFactor", Option("3.894"));
   options.add("MCTSCPuctBaseAtRoot", Option("38739"));
-  options.add("MCTSCPuctFactorAtRoot", Option("3.894"));
+  options.add("MCTSCPuctFactorAtRoot", Option("4.10"));
   options.add("MCTSFpuAbsolute", Option(false));
   options.add("MCTSFpuAbsoluteAtRoot", Option(false));
   options.add("MCTSFpuValue", Option("0.33"));
   options.add("MCTSFpuValueAtRoot", Option("0.33"));
   options.add("MCTSFpuReduction", Option("0.33"));
-  options.add("MCTSFpuReductionAtRoot", Option("0.33"));
+  options.add("MCTSFpuReductionAtRoot", Option("0.25"));
   options.add("MCTSPolicySoftmaxTemp", Option("1.359"));
   options.add("MCTSPolicyTemperature", Option("1.359"));
   options.add("MCTSRootPolicySoftmaxTemp", Option("1.6"));
@@ -208,12 +209,12 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSMovesLeftQuadraticFactor", Option("-0.6521"));
   options.add("MCTSTemperature", Option("0.0"));
   options.add("MCTSTempValueCutoff", Option("100.0"));
-  options.add("MCTSSmartPruningFactor", Option("1.33"));
+  options.add("MCTSSmartPruningFactor", Option("1.52"));
   options.add("PureMCTSSmartPruningFactor", Option("0.5"));
   options.add("PureMCTSCPuctAtRoot", Option("2.4"));
   options.add("MCTSSmartPruningMinimumBatches", Option(0, 0, 10000));
-  options.add("MCTSMinimumKLDGainPerNode", Option("0.00005"));
-  options.add("MCTSKLDGainAverageInterval", Option(100, 1, 10000000));
+  options.add("MCTSMinimumKLDGainPerNode", Option("0.00003"));
+  options.add("MCTSKLDGainAverageInterval", Option(150, 1, 10000000));
   options.add("MCTSTimeManager", Option("smooth"));
   options.add("MCTSCacheHistoryLength", Option(0, 0, 7));
   options.add("MCTSNNCacheSize", Option(2000000, 1, 100000000));

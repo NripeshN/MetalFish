@@ -19,21 +19,22 @@ namespace MetalFish {
 namespace MCTS {
 
 struct SearchParams {
-  // PUCT exploration (Lc0 defaults)
+  // PUCT exploration (slightly higher at root for tactical diversity)
   float cpuct = 1.745f;
-  float cpuct_at_root = 1.745f;
+  float cpuct_at_root = 1.90f;
   float cpuct_base = 38739.0f;
   float cpuct_factor = 3.894f;
   float cpuct_base_at_root = 38739.0f;
-  float cpuct_factor_at_root = 3.894f;
+  float cpuct_factor_at_root = 4.10f;
 
-  // First Play Urgency (Lc0 defaults: reduction strategy, same at root)
+  // First Play Urgency (reduction strategy; root uses lower reduction for wider
+  // tactical exploration)
   bool fpu_absolute = false;
   float fpu_value = 0.33f;
   bool fpu_absolute_at_root = false;
   float fpu_value_at_root = 0.33f;
   float fpu_reduction = 0.33f;
-  float fpu_reduction_at_root = 0.33f;
+  float fpu_reduction_at_root = 0.25f;
 
   // Policy softmax temperature
   float policy_softmax_temp = 1.359f;
@@ -55,7 +56,7 @@ struct SearchParams {
   // Search control
   int max_concurrent_searchers = 1;
   int thread_idling_threshold = 1;
-  float smart_pruning_factor = 1.33f;
+  float smart_pruning_factor = 1.52f;
   int smart_pruning_minimum_batches = 0;
   int solid_tree_threshold = 100;
   bool two_fold_draws = true;
@@ -101,10 +102,11 @@ struct SearchParams {
   float max_collision_visits_scaling_power = 1.25f;
   bool out_of_order_eval = true;
 
-  // KLD gain stopper. Lc0 keeps this disabled by default, but MetalFish's
-  // Apple Silicon tactical profile benefits from a small early-stop threshold.
-  float kld_gain_min = 0.00005f;
-  int kld_gain_average_interval = 100;
+  // KLD gain stopper. A conservative threshold avoids premature termination
+  // in tactical positions where the tree appears converged but deeper lines
+  // remain unresolved.
+  float kld_gain_min = 0.00003f;
+  int kld_gain_average_interval = 150;
 
   // NNCache. Lc0 classic defaults to current-position cache keys.
   int cache_history_length = 0;
