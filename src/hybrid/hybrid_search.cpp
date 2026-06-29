@@ -186,7 +186,8 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
     }
   }
 
-  shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
+  shared_tt_reader_ = std::make_unique<SharedTTReader>(
+      &engine_->get_tt(), config_.shared_tt_cp_scale);
   mcts_search_->SetSharedTT(config_.use_shared_tt ? shared_tt_reader_.get()
                                                   : nullptr);
 
@@ -443,7 +444,8 @@ void ParallelHybridSearch::new_game() {
   if (mcts_search_) {
     mcts_search_->NewGame();
     if (engine_) {
-      shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
+      shared_tt_reader_ = std::make_unique<SharedTTReader>(
+          &engine_->get_tt(), config_.shared_tt_cp_scale);
       mcts_search_->SetSharedTT(config_.use_shared_tt ? shared_tt_reader_.get()
                                                       : nullptr);
     } else {
@@ -483,7 +485,7 @@ int ParallelHybridSearch::calculate_time_budget() const {
   const int inc_bonus = std::max(0, increment) * 4 / 5;
   const int budget = base + inc_bonus;
   const int hard_cap = std::max(500, time_left / 3);
-  const int reserve_cap = std::max(1, time_left - 200);
+  const int reserve_cap = std::max(1, time_left - 100);
   return std::max(200, std::min({budget, hard_cap, reserve_cap}));
 }
 
@@ -4010,9 +4012,9 @@ void ParallelHybridSearch::coordinator_thread_main() {
         const int ab_score =
             ab_state_.best_score.load(std::memory_order_relaxed);
         const bool is_winning = (ab_score > 150 || ab_score < -150);
-        const int required_agreements = is_winning ? 6 : 4;
+        const int required_agreements = is_winning ? 3 : 4;
         const int winning_min_time =
-            is_winning ? ((time_budget_ms > 0) ? time_budget_ms / 2 : 750)
+            is_winning ? ((time_budget_ms > 0) ? time_budget_ms / 4 : 300)
                        : min_time;
 
         if (allow_agreement_stop && agreement_count >= required_agreements &&

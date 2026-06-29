@@ -208,6 +208,7 @@ struct ParallelHybridConfig {
   bool ab_root_reject_mcts = true;
   bool mcts_root_reject = true;
   bool use_shared_tt = false;
+  float shared_tt_cp_scale = 230.0f;
   bool mcts_ab_root_hints = true;
   int mcts_ab_root_hint_delay_ms = 0;
   int mcts_ab_root_hint_count = 8;
