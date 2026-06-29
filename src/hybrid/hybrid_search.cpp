@@ -478,13 +478,13 @@ int ParallelHybridSearch::calculate_time_budget() const {
   if (time_left < 500)
     return std::max(50, std::min(time_left / 4, increment));
 
-  const int moves_to_go = limits_.movestogo > 0 ? limits_.movestogo : 30;
+  const int moves_to_go = limits_.movestogo > 0 ? limits_.movestogo : 25;
   const int base = time_left / std::max(1, moves_to_go);
-  const int inc_bonus = std::max(0, increment) * 3 / 4;
+  const int inc_bonus = std::max(0, increment) * 4 / 5;
   const int budget = base + inc_bonus;
-  const int hard_cap = std::max(500, time_left / 4);
-  const int reserve_cap = std::max(1, time_left - 100);
-  return std::max(250, std::min({budget, hard_cap, reserve_cap}));
+  const int hard_cap = std::max(500, time_left / 3);
+  const int reserve_cap = std::max(1, time_left - 200);
+  return std::max(200, std::min({budget, hard_cap, reserve_cap}));
 }
 
 bool HybridShouldContinueMCTSAfterAB(
@@ -607,14 +607,14 @@ bool HybridMCTSDecisiveFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
                                            uint32_t mcts_visits,
                                            float visit_share, int eval_delta) {
   return fixed_budget && mcts_strong && mcts_total_nodes >= 200 &&
-         mcts_visits >= 140 && visit_share >= 0.52f && eval_delta >= 60;
+         mcts_visits >= 140 && visit_share >= 0.52f && eval_delta >= 40;
 }
 
 bool HybridMCTSNoClearFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
                                           uint32_t mcts_visits,
                                           float visit_share, int eval_delta) {
   return fixed_budget && mcts_strong && mcts_visits >= 150 &&
-         visit_share >= 0.50f && eval_delta >= 20;
+         visit_share >= 0.50f && eval_delta >= 0;
 }
 
 bool HybridMCTSRootDominantFixedBudgetOverride(
@@ -622,7 +622,7 @@ bool HybridMCTSRootDominantFixedBudgetOverride(
     uint32_t mcts_visits, float visit_share, int mcts_cp, int eval_delta) {
   return fixed_budget && mcts_strong && mcts_total_nodes >= 180 &&
          mcts_visits >= 130 && visit_share >= 0.65f && mcts_cp >= 100 &&
-         eval_delta >= 55;
+         eval_delta >= 35;
 }
 
 bool HybridMCTSTacticalGapFixedBudgetOverride(
@@ -630,7 +630,7 @@ bool HybridMCTSTacticalGapFixedBudgetOverride(
     float visit_share, float root_q_gap, int mcts_cp, int eval_delta) {
   return fixed_budget && mcts_total_nodes >= 150 && mcts_visits >= 40 &&
          visit_share >= 0.12f && root_q_gap >= 0.09f && mcts_cp >= 200 &&
-         eval_delta >= 150;
+         eval_delta >= 100;
 }
 
 bool HybridMCTSRootConfidenceFixedBudgetOverride(
@@ -643,14 +643,14 @@ bool HybridMCTSRootConfidenceFixedBudgetOverride(
   }
 
   const bool value_gap_confident =
-      visit_share >= 0.55f && root_q_gap >= 0.09f && eval_delta >= 75;
+      visit_share >= 0.55f && root_q_gap >= 0.09f && eval_delta >= 50;
   const bool compact_root_confident =
-      visit_share >= 0.65f && root_q_gap >= 0.05f && eval_delta >= 50;
+      visit_share >= 0.65f && root_q_gap >= 0.05f && eval_delta >= 30;
   const bool clear_root_q_confident =
       mcts_total_nodes >= 200 && mcts_visits >= 160 && visit_share >= 0.55f &&
-      root_q_gap >= 0.09f && mcts_cp >= 150 && eval_delta >= 40;
+      root_q_gap >= 0.09f && mcts_cp >= 150 && eval_delta >= 20;
   const bool high_q_gap_override =
-      root_q_gap >= 0.20f && visit_share >= 0.45f && eval_delta >= 30;
+      root_q_gap >= 0.20f && visit_share >= 0.45f && eval_delta >= 10;
   return value_gap_confident || compact_root_confident ||
          clear_root_q_confident || high_q_gap_override;
 }
@@ -1817,14 +1817,14 @@ bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
 
   const int average_gap = ab_average_score - mcts_average_score;
 
-  if (average_gap >= 50 && ab_effort >= 25000)
+  if (average_gap >= 60 && ab_effort >= 50000)
     return true;
 
-  if (average_gap >= 35 && ab_effort >= 500000)
+  if (average_gap >= 55 && ab_effort >= 800000)
     return true;
 
-  return mcts_score <= -30000 && ab_effort >= 25000 &&
-         ab_effort >= 15 * std::max<uint64_t>(1, mcts_effort);
+  return mcts_score <= -30000 && ab_effort >= 50000 &&
+         ab_effort >= 20 * std::max<uint64_t>(1, mcts_effort);
 }
 
 bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
@@ -1883,8 +1883,8 @@ bool HybridMCTSRootRejectsAB(bool fixed_budget, bool visit_evidence_sane,
   const bool no_clear_ab_reject =
       fixed_budget && mcts_strong && !ab_has_clear_preference &&
       top_visits >= 180 && top_visits >= 4 * std::max<uint32_t>(1, ab_visits) &&
-      ab_visits <= 64 && visit_share >= 0.65f && root_q_gap >= 0.12f &&
-      eval_delta >= 25;
+      ab_visits <= 64 && visit_share >= 0.60f && root_q_gap >= 0.10f &&
+      eval_delta >= 10;
   return hard_reject || no_clear_ab_reject;
 }
 
@@ -3995,20 +3995,29 @@ void ParallelHybridSearch::coordinator_thread_main() {
             HybridCanStopEarlyOnAgreement(limits_);
         const int time_budget_ms =
             time_budget_ms_.load(std::memory_order_acquire);
-        const int min_time = (time_budget_ms > 0) ? time_budget_ms / 4 : 500;
+        const int min_time = (time_budget_ms > 0) ? time_budget_ms / 3 : 500;
         const uint64_t mcts_nodes =
             mcts_search_ ? mcts_search_->Stats().total_nodes.load(
                                std::memory_order_relaxed)
                          : 0;
         const uint64_t min_mcts_nodes = static_cast<uint64_t>(
-            std::max(100, current_strategy_.min_mcts_nodes));
+            std::max(250, current_strategy_.min_mcts_nodes));
         const int ab_depth =
             ab_state_.completed_depth.load(std::memory_order_relaxed);
         const int min_ab_depth =
             std::max(config_.ab_min_depth, current_strategy_.ab_verify_depth);
 
-        if (allow_agreement_stop && agreement_count >= 3 && ms > min_time &&
-            mcts_nodes >= min_mcts_nodes && ab_depth >= min_ab_depth) {
+        const int ab_score =
+            ab_state_.best_score.load(std::memory_order_relaxed);
+        const bool is_winning = (ab_score > 150 || ab_score < -150);
+        const int required_agreements = is_winning ? 6 : 4;
+        const int winning_min_time =
+            is_winning ? ((time_budget_ms > 0) ? time_budget_ms / 2 : 750)
+                       : min_time;
+
+        if (allow_agreement_stop && agreement_count >= required_agreements &&
+            ms > winning_min_time && mcts_nodes >= min_mcts_nodes &&
+            ab_depth >= min_ab_depth) {
           send_info_string("Hybrid: engines agree, stopping early at " +
                            std::to_string(ms) + "ms");
           break;
@@ -4860,10 +4869,10 @@ Move ParallelHybridSearch::make_final_decision() {
                              mcts_confidence_visits >= min_visits &&
                              visit_share >= 0.20f;
   const bool mcts_strong =
-      mcts_reliable && (mcts_confidence_visits >= 320 || visit_share >= 0.48f);
-  const bool mcts_overwhelming = mcts_confidence_total_nodes >= 3000 &&
-                                 mcts_confidence_visits >= 350 &&
-                                 visit_share >= 0.28f;
+      mcts_reliable && (mcts_confidence_visits >= 250 || visit_share >= 0.45f);
+  const bool mcts_overwhelming = mcts_confidence_total_nodes >= 1500 &&
+                                 mcts_confidence_visits >= 250 &&
+                                 visit_share >= 0.30f;
   const bool ab_verified =
       ab_depth >=
       std::max(config_.ab_min_depth, current_strategy_.ab_verify_depth);
@@ -5187,7 +5196,7 @@ Move ParallelHybridSearch::make_final_decision() {
                       MCTSSharedState::MAX_TOP_MOVES);
     if (config_.mcts_root_reject && top_count > 0 && mcts_reliable &&
         mcts_confidence_visits >= 160 && visit_share >= 0.35f &&
-        ab_score >= -120 && ab_score <= 40) {
+        ab_score >= -120 && ab_score <= 200) {
       Move top_move(
           mcts_state_.top_moves[0].move_raw.load(std::memory_order_relaxed));
       if (top_move == mcts_best) {
@@ -5235,7 +5244,7 @@ Move ParallelHybridSearch::make_final_decision() {
       mcts_bishop_endgame_retreat || mcts_root_reject_q_gap ||
       mcts_clock_root_reject_q_gap || mcts_discovered_pawn_push_override ||
       mcts_reused_root_current || mcts_root_rejects_ab ||
-      (mcts_overwhelming && eval_delta >= 150);
+      (mcts_overwhelming && eval_delta >= 60);
 
   bool choose_mcts = false;
   const char *reason = "ab_default";
@@ -5257,7 +5266,7 @@ Move ParallelHybridSearch::make_final_decision() {
          mcts_mid_root_tactical_q_gap || mcts_bishop_endgame_retreat ||
          mcts_root_reject_q_gap || mcts_clock_root_reject_q_gap ||
          mcts_verified_hint_support ||
-         (mcts_reliable && (!ab_has_clear_preference || eval_delta >= 180)));
+         (mcts_reliable && (!ab_has_clear_preference || eval_delta >= 120)));
     if (choose_mcts)
       reason =
           low_node_mcts_primary_ready     ? "low_node_mcts_primary"
@@ -5291,7 +5300,7 @@ Move ParallelHybridSearch::make_final_decision() {
     break;
   case ParallelHybridConfig::DecisionMode::AB_PRIMARY:
     choose_mcts =
-        mcts_override_allowed && mcts_overwhelming && eval_delta >= 250;
+        mcts_override_allowed && mcts_overwhelming && eval_delta >= 150;
     if (choose_mcts)
       reason = "ab_primary_mcts_overwhelming";
     break;
@@ -5314,7 +5323,7 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (ane_q_supported_root_override) {
       reason = "ane_q_supported_root";
     } else if (mcts_visit_evidence_sane && mcts_overwhelming &&
-               eval_delta >= 120) {
+               eval_delta >= 60) {
       choose_mcts = true;
       reason = "mcts_overwhelming_delta";
     } else if (mcts_decisive_fixed_budget) {
@@ -5408,6 +5417,11 @@ Move ParallelHybridSearch::make_final_decision() {
                eval_delta >= -80) {
       choose_mcts = true;
       reason = "mcts_reliable_ab_unverified";
+    } else if (mcts_visit_evidence_sane && mcts_strong &&
+               !ab_has_clear_preference && visit_share >= 0.55f &&
+               eval_delta >= -30) {
+      choose_mcts = true;
+      reason = "mcts_strong_no_ab_preference";
     }
     break;
   }

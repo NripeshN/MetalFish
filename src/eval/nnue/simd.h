@@ -341,7 +341,7 @@ typename VecWrapper::type fused(const typename VecWrapper::type &in,
 
 #if defined(USE_NEON_DOTPROD)
 
-[[maybe_unused]] static void
+[[maybe_unused]] __attribute__((target("dotprod"))) static void
 dotprod_m128_add_dpbusd_epi32(int32x4_t &acc, int8x16_t a, int8x16_t b) {
 
   acc = vdotq_s32(acc, a, b);

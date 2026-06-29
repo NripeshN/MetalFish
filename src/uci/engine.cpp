@@ -178,13 +178,13 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridANERootHintWaitMs", Option(0, 0, 1000));
   options.add("HybridANEMinBudgetMs", Option(0, 0, 30000));
   options.add("HybridTrace", Option(false));
-  options.add("TransformerLowTimeFallbackMs", Option(3000, 0, 30000));
+  options.add("TransformerLowTimeFallbackMs", Option(1500, 0, 30000));
   options.add("TransformerMinMoveBudgetMs", Option(400, 0, 5000));
 
   // Optional parity preset and exposed MCTS tuning controls
   options.add("MCTSParityPreset", Option(false));
   options.add("MCTSCPuct", Option("1.745"));
-  options.add("MCTSCPuctAtRoot", Option("1.90"));
+  options.add("MCTSCPuctAtRoot", Option("1.80"));
   options.add("MCTSCPuctBase", Option("38739"));
   options.add("MCTSCPuctFactor", Option("3.894"));
   options.add("MCTSCPuctBaseAtRoot", Option("38739"));
@@ -197,7 +197,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSFpuReductionAtRoot", Option("0.25"));
   options.add("MCTSPolicySoftmaxTemp", Option("1.359"));
   options.add("MCTSPolicyTemperature", Option("1.359"));
-  options.add("MCTSRootPolicySoftmaxTemp", Option("1.6"));
+  options.add("MCTSRootPolicySoftmaxTemp", Option("1.45"));
   options.add("MCTSHighPolicyRootLever", Option(true));
   options.add("MCTSLowPolicyRootLever", Option(true));
   options.add("MCTSRootTacticalCaptureProbe", Option(true));
@@ -209,7 +209,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSMovesLeftQuadraticFactor", Option("-0.6521"));
   options.add("MCTSTemperature", Option("0.0"));
   options.add("MCTSTempValueCutoff", Option("100.0"));
-  options.add("MCTSSmartPruningFactor", Option("1.52"));
+  options.add("MCTSSmartPruningFactor", Option("1.60"));
   options.add("PureMCTSSmartPruningFactor", Option("0.5"));
   options.add("PureMCTSCPuctAtRoot", Option("2.4"));
   options.add("MCTSSmartPruningMinimumBatches", Option(0, 0, 10000));

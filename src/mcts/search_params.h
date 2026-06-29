@@ -19,13 +19,14 @@ namespace MetalFish {
 namespace MCTS {
 
 struct SearchParams {
-  // PUCT exploration (slightly higher at root for tactical diversity)
+  // PUCT exploration (root broadened via policy softmax temp, not cpuct
+  // premium)
   float cpuct = 1.745f;
-  float cpuct_at_root = 1.90f;
+  float cpuct_at_root = 1.745f;
   float cpuct_base = 38739.0f;
   float cpuct_factor = 3.894f;
   float cpuct_base_at_root = 38739.0f;
-  float cpuct_factor_at_root = 4.10f;
+  float cpuct_factor_at_root = 3.894f;
 
   // First Play Urgency (reduction strategy; root uses lower reduction for wider
   // tactical exploration)
@@ -34,11 +35,11 @@ struct SearchParams {
   bool fpu_absolute_at_root = false;
   float fpu_value_at_root = 0.33f;
   float fpu_reduction = 0.33f;
-  float fpu_reduction_at_root = 0.25f;
+  float fpu_reduction_at_root = 0.0f;
 
   // Policy softmax temperature
   float policy_softmax_temp = 1.359f;
-  float root_policy_softmax_temp = 1.6f;
+  float root_policy_softmax_temp = 1.38f;
 
   // Dirichlet exploration noise (disabled for competitive play)
   bool add_dirichlet_noise = false;
@@ -77,8 +78,10 @@ struct SearchParams {
   bool capture_leader_quiet_major_probe = false;
   int fixed_movetime_q_override_cap = 0;
 
-  // Contempt (positive = avoid draws, negative = prefer draws)
-  float contempt = 0.0f;
+  // Contempt (positive = avoid draws, negative = prefer draws).
+  // Converted to draw_score via -contempt/10000. A value of 500 gives
+  // draw_score=-0.05 which penalizes draw nodes in MCTS.
+  float contempt = 500.0f;
 
   // Threading
   int num_threads = 2;
@@ -89,7 +92,7 @@ struct SearchParams {
   // Time management (Lc0 defaults)
   std::string time_manager = "smooth";
   float slowmover = 2.2f;
-  float move_overhead_ms = 10.0f;
+  float move_overhead_ms = 100.0f;
   float alphazero_time_pct = 12.0f;
 
   // Minibatch gathering (Lc0 defaults)
@@ -110,7 +113,7 @@ struct SearchParams {
 
   // NNCache. Lc0 classic defaults to current-position cache keys.
   int cache_history_length = 0;
-  int nn_cache_size = 2000000;
+  int nn_cache_size = 500000;
 
   // Backend
   std::string nn_weights_path;

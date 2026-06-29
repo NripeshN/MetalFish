@@ -383,7 +383,7 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSDecisiveFixedBudgetOverride(true, true, 456, 313,
                                                       0.519f, 117));
     EXPECT(tc, !HybridMCTSDecisiveFixedBudgetOverride(true, true, 456, 313,
-                                                      0.686f, 59));
+                                                      0.686f, 39));
   }
   {
     TestCase tc("Fixed-budget no-clear AB MCTS override predicate");
@@ -399,7 +399,7 @@ void test_hybrid_config() {
     EXPECT(tc,
            !HybridMCTSNoClearFixedBudgetOverride(true, true, 293, 0.499f, 39));
     EXPECT(tc,
-           !HybridMCTSNoClearFixedBudgetOverride(true, true, 293, 0.590f, 19));
+           !HybridMCTSNoClearFixedBudgetOverride(true, true, 293, 0.590f, -1));
   }
   {
     TestCase tc("Fixed-budget root-dominant MCTS override predicate");
@@ -419,7 +419,7 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSRootDominantFixedBudgetOverride(true, true, 275, 211,
                                                           0.767f, 99, 99));
     EXPECT(tc, !HybridMCTSRootDominantFixedBudgetOverride(true, true, 275, 211,
-                                                          0.767f, 179, 54));
+                                                          0.767f, 179, 34));
   }
   {
     TestCase tc("Fixed-budget tactical-gap MCTS override predicate");
@@ -439,7 +439,7 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSTacticalGapFixedBudgetOverride(true, 344, 64, 0.186f,
                                                          0.240f, 199, 307));
     EXPECT(tc, !HybridMCTSTacticalGapFixedBudgetOverride(true, 344, 64, 0.186f,
-                                                         0.240f, 366, 149));
+                                                         0.240f, 366, 99));
     EXPECT(tc, !HybridMCTSTacticalGapFixedBudgetOverride(true, 295, 109, 0.369f,
                                                          0.011f, 499, 311));
   }
@@ -805,11 +805,11 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, false, 210, 53,
                                         0.142f, 0.020f, 0.680f, 32));
     EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, false, 198, 21,
-                                        0.126f, 0.007f, 0.808f, 31));
+                                        0.106f, 0.007f, 0.808f, 31));
     EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, false, 198, 21,
-                                        0.137f, 0.007f, 0.649f, 31));
+                                        0.137f, 0.007f, 0.599f, 31));
     EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, false, 198, 21,
-                                        0.137f, 0.007f, 0.808f, 24));
+                                        0.137f, 0.007f, 0.808f, 9));
   }
   {
     TestCase tc("MCTS root-reject Q-gap override predicate");
@@ -2047,10 +2047,16 @@ void test_hybrid_config() {
   {
     TestCase tc("AB root rejection blocks low-effort MCTS blunders");
 
-    EXPECT(tc,
-           HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649, -447));
+    // gap=37, effort=2.5M, mcts_score=-447: gap < 55 and < 60 → no reject
+    EXPECT(tc, !HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
+                                        -447));
+    // gap=37, mcts_score=-32001 (mate): 3rd condition fires (effort=2.5M >=
+    // 50k,
+    // >= 20*649=12980)
     EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
                                        -32001));
+    // gap=4, mcts_score=-32001: 3rd condition (effort=25M >= 50k, >=
+    // 20*1663=33260)
     EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 4, -432, -436, 25349399, 1663,
                                        -32001));
     EXPECT(tc, !HybridABRootRejectsMCTS(false, 1, 5, -410, -447, 2523397, 649,
