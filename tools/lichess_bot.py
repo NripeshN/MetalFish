@@ -719,6 +719,7 @@ BASE_ENGINE_OPTIONS = {
     "HybridABRootRejectMCTS": HYBRID_AB_ROOT_REJECT_MCTS,
     "HybridMCTSRootReject": HYBRID_MCTS_ROOT_REJECT,
     "HybridMCTSUseSharedTT": HYBRID_MCTS_SHARED_TT,
+    "HybridMCTSSharedTTCpScale": "230",
     "HybridMCTSABRootHints": HYBRID_MCTS_AB_ROOT_HINTS,
     "HybridMCTSABRootHintDelayMs": str(HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS),
     "HybridMCTSABRootHintCount": str(HYBRID_MCTS_AB_ROOT_HINT_COUNT),
