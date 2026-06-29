@@ -483,7 +483,7 @@ int ParallelHybridSearch::calculate_time_budget() const {
   const int inc_bonus = std::max(0, increment) * 4 / 5;
   const int budget = base + inc_bonus;
   const int hard_cap = std::max(500, time_left / 3);
-  const int reserve_cap = std::max(1, time_left - 80);
+  const int reserve_cap = std::max(1, time_left - 200);
   return std::max(200, std::min({budget, hard_cap, reserve_cap}));
 }
 

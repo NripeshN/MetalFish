@@ -78,9 +78,9 @@ struct SearchParams {
   int fixed_movetime_q_override_cap = 0;
 
   // Contempt (positive = avoid draws, negative = prefer draws).
-  // Converted to draw_score via -contempt/10000. A value of 200 gives
-  // draw_score=-0.02 which meaningfully penalizes draw nodes in MCTS.
-  float contempt = 200.0f;
+  // Converted to draw_score via -contempt/10000. A value of 300 gives
+  // draw_score=-0.03 which penalizes draw nodes in MCTS.
+  float contempt = 300.0f;
 
   // Threading
   int num_threads = 2;
