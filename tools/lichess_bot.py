@@ -727,7 +727,7 @@ BASE_ENGINE_OPTIONS = {
     "HybridABPolicyWeight": str(HYBRID_AB_POLICY_WEIGHT),
     "HybridRootPawnLeverTieBreak": HYBRID_ROOT_PAWN_LEVER_TIEBREAK,
     "HybridTrace": HYBRID_TRACE,
-    "Move Overhead": "100",
+    "Move Overhead": "200",
     "MCTSMinibatchSize": str(HYBRID_MCTS_MINIBATCH),
     "MCTSMinimumKLDGainPerNode": "0.00003",
     "MCTSPolicySoftmaxTemp": "1.359",
