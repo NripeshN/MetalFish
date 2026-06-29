@@ -688,7 +688,9 @@ def local_hash_mb(active_peer_engines: int = 0) -> int:
 def live_resource_profile(
     active_peer_engines: int = 0, forced_workers: int = 0
 ) -> dict[str, float | int | str]:
-    forced_workers = normalize_search_workers(forced_workers) if forced_workers > 0 else 0
+    forced_workers = (
+        normalize_search_workers(forced_workers) if forced_workers > 0 else 0
+    )
     return {
         "threads": dynamic_search_workers(active_peer_engines, forced_workers),
         "hash_mb": local_hash_mb(active_peer_engines),
@@ -2534,7 +2536,9 @@ class LichessBot:
         if DRAW_OFFER_COOLDOWN_PLIES <= 0:
             return False
         last_ply = getattr(self, "_draw_offers_sent", {}).get(game_id)
-        return last_ply is not None and len(moves) - last_ply < DRAW_OFFER_COOLDOWN_PLIES
+        return (
+            last_ply is not None and len(moves) - last_ply < DRAW_OFFER_COOLDOWN_PLIES
+        )
 
     def _remember_draw_offer_sent(self, game_id: str, moves: list[str]) -> None:
         if not hasattr(self, "_draw_offers_sent"):
@@ -3407,9 +3411,7 @@ class LichessBot:
         self._played_by_speed.setdefault(str(speed), {})[key] = time.time()
         self._save_played_format_history()
 
-    def _reset_played_format_cycle(
-        self, speed: str, candidate_ids: list[str]
-    ) -> int:
+    def _reset_played_format_cycle(self, speed: str, candidate_ids: list[str]) -> int:
         if speed not in ACCEPTED_SPEEDS:
             return 0
         history = getattr(self, "_played_by_speed", {})
@@ -4297,7 +4299,9 @@ class LichessBot:
                 increment = 0
             if speed == "bullet" and not getattr(self.args, "include_bullet", False):
                 return "bullet disabled"
-            if speed == "classical" and not getattr(self.args, "include_classic", False):
+            if speed == "classical" and not getattr(
+                self.args, "include_classic", False
+            ):
                 return "classical disabled"
             if increment == 0 and not getattr(
                 self.args, "include_zero_increment", False
@@ -5588,7 +5592,9 @@ class LichessBot:
             worker_label = f"fixed {int(header_profile['threads'])} search"
         else:
             worker_label = f"dynamic up to {MAX_SEARCH_WORKERS} search"
-        print(f"  Workers:  {worker_label} + 1 coordinator | CPU: {LOGICAL_CORES} logical")
+        print(
+            f"  Workers:  {worker_label} + 1 coordinator | CPU: {LOGICAL_CORES} logical"
+        )
         print(
             f"  Initial:  {int(header_profile['threads'])} search threads "
             f"| Hash {header_options['Hash']} MB | Free {memory}"

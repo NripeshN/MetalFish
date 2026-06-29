@@ -2604,7 +2604,9 @@ def test_draw_offer_reason_uses_tablebase_draw() -> None:
 
     bot._draw_claim_available = lambda candidate: False
     bot._tablebase_wdl = lambda candidate: 0
-    expect("tb draw offers even without claim", bot._draw_offer_reason(board) == "tb_draw")
+    expect(
+        "tb draw offers even without claim", bot._draw_offer_reason(board) == "tb_draw"
+    )
 
 
 def test_engine_equal_low_material_can_offer_draw_late() -> None:
@@ -2637,7 +2639,9 @@ def test_draw_accept_reason_uses_tablebase_and_engine_score() -> None:
     )
 
     bot._tablebase_wdl = lambda candidate: 2
-    expect("reject winning tablebase draw offer", bot._draw_accept_reason(board) is None)
+    expect(
+        "reject winning tablebase draw offer", bot._draw_accept_reason(board) is None
+    )
 
     board.turn = lichess_bot.chess.BLACK
     bot._tablebase_wdl = lambda candidate: 2
@@ -2816,9 +2820,9 @@ def test_incoming_draw_offer_accepts_after_engine_says_worse() -> None:
     bot._should_query_book = lambda board, my_color, wtime, btime: False
     bot._tablebase_wdl = lambda board: None
     bot._pre_submit_active_check_needed = lambda board: False
-    bot.respond_draw_offer = lambda game_id, accept: draw_calls.append(
-        (game_id, accept)
-    ) or True
+    bot.respond_draw_offer = (
+        lambda game_id, accept: draw_calls.append((game_id, accept)) or True
+    )
     bot.make_move = lambda game_id, move, **kwargs: submitted.append(move) or True
 
     state = {
