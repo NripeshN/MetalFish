@@ -606,51 +606,53 @@ bool HybridMCTSDecisiveFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
                                            uint64_t mcts_total_nodes,
                                            uint32_t mcts_visits,
                                            float visit_share, int eval_delta) {
-  return fixed_budget && mcts_strong && mcts_total_nodes >= 300 &&
-         mcts_visits >= 210 && visit_share >= 0.60f && eval_delta >= 90;
+  return fixed_budget && mcts_strong && mcts_total_nodes >= 200 &&
+         mcts_visits >= 140 && visit_share >= 0.52f && eval_delta >= 60;
 }
 
 bool HybridMCTSNoClearFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
                                           uint32_t mcts_visits,
                                           float visit_share, int eval_delta) {
-  return fixed_budget && mcts_strong && mcts_visits >= 225 &&
-         visit_share >= 0.58f && eval_delta >= 30;
+  return fixed_budget && mcts_strong && mcts_visits >= 150 &&
+         visit_share >= 0.50f && eval_delta >= 20;
 }
 
 bool HybridMCTSRootDominantFixedBudgetOverride(
     bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
     uint32_t mcts_visits, float visit_share, int mcts_cp, int eval_delta) {
-  return fixed_budget && mcts_strong && mcts_total_nodes >= 250 &&
-         mcts_visits >= 200 && visit_share >= 0.74f && mcts_cp >= 150 &&
-         eval_delta >= 80;
+  return fixed_budget && mcts_strong && mcts_total_nodes >= 180 &&
+         mcts_visits >= 130 && visit_share >= 0.65f && mcts_cp >= 100 &&
+         eval_delta >= 55;
 }
 
 bool HybridMCTSTacticalGapFixedBudgetOverride(
     bool fixed_budget, uint64_t mcts_total_nodes, uint32_t mcts_visits,
     float visit_share, float root_q_gap, int mcts_cp, int eval_delta) {
-  return fixed_budget && mcts_total_nodes >= 250 && mcts_visits >= 55 &&
-         visit_share >= 0.16f && root_q_gap >= 0.12f && mcts_cp >= 300 &&
-         eval_delta >= 250;
+  return fixed_budget && mcts_total_nodes >= 150 && mcts_visits >= 40 &&
+         visit_share >= 0.12f && root_q_gap >= 0.09f && mcts_cp >= 200 &&
+         eval_delta >= 150;
 }
 
 bool HybridMCTSRootConfidenceFixedBudgetOverride(
     bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
     uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
     int eval_delta) {
-  if (!fixed_budget || !mcts_strong || mcts_total_nodes < 230 ||
-      mcts_visits < 180 || mcts_cp < 170) {
+  if (!fixed_budget || !mcts_strong || mcts_total_nodes < 150 ||
+      mcts_visits < 100 || mcts_cp < 120) {
     return false;
   }
 
   const bool value_gap_confident =
-      visit_share >= 0.65f && root_q_gap >= 0.12f && eval_delta >= 110;
+      visit_share >= 0.55f && root_q_gap >= 0.09f && eval_delta >= 75;
   const bool compact_root_confident =
-      visit_share >= 0.74f && root_q_gap >= 0.06f && eval_delta >= 70;
+      visit_share >= 0.65f && root_q_gap >= 0.05f && eval_delta >= 50;
   const bool clear_root_q_confident =
-      mcts_total_nodes >= 300 && mcts_visits >= 240 && visit_share >= 0.64f &&
-      root_q_gap >= 0.12f && mcts_cp >= 200 && eval_delta >= 55;
+      mcts_total_nodes >= 200 && mcts_visits >= 160 && visit_share >= 0.55f &&
+      root_q_gap >= 0.09f && mcts_cp >= 150 && eval_delta >= 40;
+  const bool high_q_gap_override =
+      root_q_gap >= 0.20f && visit_share >= 0.45f && eval_delta >= 30;
   return value_gap_confident || compact_root_confident ||
-         clear_root_q_confident;
+         clear_root_q_confident || high_q_gap_override;
 }
 
 bool HybridMCTSLowNodeRootConfidenceOverride(
@@ -739,51 +741,49 @@ bool HybridMCTSShortRootTacticalOverride(
   if (!fixed_budget || !visit_evidence_sane)
     return false;
 
-  if (root_q_gap < 0.16f || mcts_cp < 200 || eval_delta < 45)
+  if (root_q_gap < 0.12f || mcts_cp < 150 || eval_delta < 30)
     return false;
 
-  const int max_average_gap = ab_root_rejects_mcts ? 70 : 25;
+  const int max_average_gap = ab_root_rejects_mcts ? 90 : 40;
   if (ab_average_score - mcts_average_score > max_average_gap)
     return false;
 
-  if (mcts_root_visits >= 150 && mcts_root_visits < 230 &&
-      mcts_best_visits >= 95 && visit_share >= 0.58f) {
-    if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 3 ||
-        mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
-        mcts_in_ab_effort < 200000 || mcts_in_ab_effort > 1500000) {
+  if (mcts_root_visits >= 80 && mcts_root_visits < 350 &&
+      mcts_best_visits >= 50 && visit_share >= 0.45f) {
+    if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 4)
       return false;
+
+    if (ab_in_mcts_rank >= 2 && ab_in_mcts_current_visits <= 30 &&
+        mcts_q - ab_in_mcts_q >= 0.18f) {
+      return true;
     }
 
-    if (ab_in_mcts_rank < 4 || ab_in_mcts_current_visits > 16)
-      return false;
-
-    return mcts_q - ab_in_mcts_q >= 0.24f;
+    if (mcts_in_ab_score == -VALUE_INFINITE && !mcts_in_ab_lowerbound &&
+        mcts_in_ab_effort >= 100000 && ab_in_mcts_rank < 5 &&
+        ab_in_mcts_current_visits <= 40) {
+      return mcts_q - ab_in_mcts_q >= 0.20f;
+    }
   }
 
   if (!ab_root_rejects_mcts)
     return false;
 
-  if (mcts_root_visits < 240 || mcts_root_visits > 360 ||
-      mcts_best_visits < 150 || mcts_best_visits > 260 || visit_share < 0.58f ||
-      visit_share > 0.72f || eval_delta < 50) {
+  if (mcts_root_visits < 120 || mcts_root_visits > 500 ||
+      mcts_best_visits < 80 || visit_share < 0.45f || eval_delta < 35) {
     return false;
   }
 
-  if (ab_average_score - mcts_average_score > 60)
+  if (ab_average_score - mcts_average_score > 80)
     return false;
 
-  if (mcts_in_ab_rank != 2 || mcts_in_ab_score != -VALUE_INFINITE ||
-      mcts_in_ab_lowerbound || mcts_in_ab_effort < 1000000 ||
-      mcts_in_ab_effort > 3000000) {
-    return false;
+  if (mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 4 &&
+      mcts_in_ab_effort >= 500000) {
+    if (ab_in_mcts_rank >= 2 && ab_in_mcts_current_visits <= 80) {
+      return mcts_q - ab_in_mcts_q >= 0.16f;
+    }
   }
 
-  if (ab_in_mcts_rank != 2 || ab_in_mcts_current_visits < 20 ||
-      ab_in_mcts_current_visits > 64) {
-    return false;
-  }
-
-  return mcts_q - ab_in_mcts_q >= 0.20f;
+  return false;
 }
 
 bool HybridMCTSVerifiedHintSupportOverride(
@@ -814,9 +814,9 @@ bool HybridMCTSVerifiedHintSupportOverride(
   const bool no_bound_short_root =
       !mcts_in_ab_upperbound && mcts_root_visits >= 120 &&
       mcts_root_visits <= 180 && mcts_best_visits >= 65 &&
-      mcts_best_visits <= 110 && visit_share >= 0.48f &&
-      visit_share <= 0.53f && mcts_in_ab_effort >= 100000 &&
-      mcts_in_ab_effort <= 1000000 && q_gap_to_ab >= 0.24f;
+      mcts_best_visits <= 110 && visit_share >= 0.48f && visit_share <= 0.53f &&
+      mcts_in_ab_effort >= 100000 && mcts_in_ab_effort <= 1000000 &&
+      q_gap_to_ab >= 0.24f;
 
   if (mcts_in_ab_rank != 2 || mcts_in_ab_score != -VALUE_INFINITE ||
       mcts_in_ab_lowerbound ||
@@ -1268,13 +1268,12 @@ bool HybridMCTSRootRejectQuietMinorMajorAttackOverride(
   const bool short_root_confirmed =
       mcts_root_visits >= 120 && mcts_root_visits <= 220 &&
       mcts_best_visits >= 65 && mcts_best_visits <= 125 &&
-      visit_share >= 0.45f && visit_share <= 0.60f &&
-      root_q_gap >= 0.17f && mcts_cp >= 220 && eval_delta >= 60 &&
-      mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 8 &&
-      mcts_in_ab_score == -VALUE_INFINITE && !mcts_in_ab_lowerbound &&
-      mcts_in_ab_effort <= 1000000 && ab_in_mcts_rank == 2 &&
-      ab_in_mcts_current_visits >= 20 && ab_in_mcts_current_visits <= 40 &&
-      q_gap_to_ab >= 0.24f;
+      visit_share >= 0.45f && visit_share <= 0.60f && root_q_gap >= 0.17f &&
+      mcts_cp >= 220 && eval_delta >= 60 && mcts_in_ab_rank >= 2 &&
+      mcts_in_ab_rank <= 8 && mcts_in_ab_score == -VALUE_INFINITE &&
+      !mcts_in_ab_lowerbound && mcts_in_ab_effort <= 1000000 &&
+      ab_in_mcts_rank == 2 && ab_in_mcts_current_visits >= 20 &&
+      ab_in_mcts_current_visits <= 40 && q_gap_to_ab >= 0.24f;
   if (short_root_confirmed)
     return true;
 
@@ -1331,9 +1330,9 @@ bool HybridMCTSVerifiedQuietMinorMajorAttackOverride(
   }
 
   if (mcts_root_visits < 120 || mcts_root_visits > 180 ||
-      mcts_best_visits < 50 || mcts_best_visits > 110 ||
-      visit_share < 0.42f || visit_share > 0.56f || root_q_gap < 0.18f ||
-      mcts_cp < 240 || eval_delta < 80) {
+      mcts_best_visits < 50 || mcts_best_visits > 110 || visit_share < 0.42f ||
+      visit_share > 0.56f || root_q_gap < 0.18f || mcts_cp < 240 ||
+      eval_delta < 80) {
     return false;
   }
 
@@ -1817,11 +1816,15 @@ bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
     return false;
 
   const int average_gap = ab_average_score - mcts_average_score;
-  if (average_gap >= 30 && ab_effort >= 10000)
+
+  if (average_gap >= 50 && ab_effort >= 25000)
     return true;
 
-  return mcts_score <= -30000 && ab_effort >= 10000 &&
-         ab_effort >= 10 * std::max<uint64_t>(1, mcts_effort);
+  if (average_gap >= 35 && ab_effort >= 500000)
+    return true;
+
+  return mcts_score <= -30000 && ab_effort >= 25000 &&
+         ab_effort >= 15 * std::max<uint64_t>(1, mcts_effort);
 }
 
 bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
@@ -4846,21 +4849,21 @@ Move ParallelHybridSearch::make_final_decision() {
                 static_cast<float>(mcts_confidence_total_nodes)
           : 0.0f;
   const uint64_t min_nodes = mcts_decision_budget
-                                 ? 180u
+                                 ? 120u
                                  : static_cast<uint64_t>(std::max(
-                                       100, current_strategy_.min_mcts_nodes));
+                                       80, current_strategy_.min_mcts_nodes));
   const uint32_t min_visits =
-      mcts_decision_budget ? 72u
+      mcts_decision_budget ? 48u
                            : static_cast<uint32_t>(std::max(
-                                 48, current_strategy_.min_mcts_nodes / 2));
+                                 32, current_strategy_.min_mcts_nodes / 2));
   const bool mcts_reliable = mcts_confidence_total_nodes >= min_nodes &&
                              mcts_confidence_visits >= min_visits &&
-                             visit_share >= 0.24f;
+                             visit_share >= 0.20f;
   const bool mcts_strong =
-      mcts_reliable && (mcts_confidence_visits >= 512 || visit_share >= 0.55f);
-  const bool mcts_overwhelming = mcts_confidence_total_nodes >= 5000 &&
-                                 mcts_confidence_visits >= 512 &&
-                                 visit_share >= 0.30f;
+      mcts_reliable && (mcts_confidence_visits >= 320 || visit_share >= 0.48f);
+  const bool mcts_overwhelming = mcts_confidence_total_nodes >= 3000 &&
+                                 mcts_confidence_visits >= 350 &&
+                                 visit_share >= 0.28f;
   const bool ab_verified =
       ab_depth >=
       std::max(config_.ab_min_depth, current_strategy_.ab_verify_depth);
@@ -5228,11 +5231,11 @@ Move ParallelHybridSearch::make_final_decision() {
       mcts_root_reject_kingside_pawn_push || mcts_rook_endgame_quiet_rook ||
       mcts_root_reject_quiet_queen_move ||
       mcts_root_reject_quiet_minor_major_attack ||
-      mcts_verified_quiet_minor_major_attack ||
-      mcts_mid_root_tactical_q_gap || mcts_bishop_endgame_retreat ||
-      mcts_root_reject_q_gap || mcts_clock_root_reject_q_gap ||
-      mcts_discovered_pawn_push_override || mcts_reused_root_current ||
-      mcts_root_rejects_ab || (mcts_overwhelming && eval_delta >= 250);
+      mcts_verified_quiet_minor_major_attack || mcts_mid_root_tactical_q_gap ||
+      mcts_bishop_endgame_retreat || mcts_root_reject_q_gap ||
+      mcts_clock_root_reject_q_gap || mcts_discovered_pawn_push_override ||
+      mcts_reused_root_current || mcts_root_rejects_ab ||
+      (mcts_overwhelming && eval_delta >= 150);
 
   bool choose_mcts = false;
   const char *reason = "ab_default";
@@ -5311,7 +5314,7 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (ane_q_supported_root_override) {
       reason = "ane_q_supported_root";
     } else if (mcts_visit_evidence_sane && mcts_overwhelming &&
-               eval_delta >= 180) {
+               eval_delta >= 120) {
       choose_mcts = true;
       reason = "mcts_overwhelming_delta";
     } else if (mcts_decisive_fixed_budget) {

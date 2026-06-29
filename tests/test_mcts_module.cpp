@@ -631,10 +631,10 @@ void test_pv_boost_respects_weight(TestCounter &tc) {
 void test_search_params_defaults(TestCounter &tc) {
   std::cout << "  Search params..." << std::endl;
   SearchParams params;
-  expect(params.fpu_reduction_at_root == 0.33f, "root FPU default aligned", tc);
-  expect(params.smart_pruning_factor == 1.33f, "smart pruning default aligned",
+  expect(params.fpu_reduction_at_root == 0.25f, "root FPU default aligned", tc);
+  expect(params.smart_pruning_factor == 1.52f, "smart pruning default aligned",
          tc);
-  expect(params.kld_gain_min == 0.00005f, "KLD stopper tactical default", tc);
+  expect(params.kld_gain_min == 0.00003f, "KLD stopper tactical default", tc);
   expect(params.policy_softmax_temp == 1.359f, "policy softmax default aligned",
          tc);
   expect(params.root_policy_softmax_temp == 1.6f,

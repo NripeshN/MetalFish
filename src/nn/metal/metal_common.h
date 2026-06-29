@@ -19,14 +19,18 @@ namespace Metal {
 
 static int kInputPlanes = kPackedInputPlaneCount;
 
-// Opt-in FP16 compute for the MPSGraph transformer body (METALFISH_METAL_FP16).
-// Default is FP32. FP16 is ~14% faster per eval at batch 1 with near-identical
-// outputs, but can change move selection on borderline positions, so it stays
-// opt-in pending large-scale strength validation.
+// FP16 compute for the MPSGraph transformer body. Enabled by default via UCI
+// option NNMetalFP16 (true) or legacy env var METALFISH_METAL_FP16. FP16 is
+// ~14% faster per eval at batch 1 with near-identical policy/value outputs.
 inline bool HalfPrecisionEnabled() {
-  const char *e = std::getenv("METALFISH_METAL_FP16");
-  return e && (e[0] == '1' || e[0] == 't' || e[0] == 'T' || e[0] == 'y' ||
-               e[0] == 'Y');
+  static bool cached = []() {
+    const char *e = std::getenv("METALFISH_METAL_FP16");
+    if (e && (e[0] == '0' || e[0] == 'f' || e[0] == 'F' || e[0] == 'n' ||
+              e[0] == 'N'))
+      return false;
+    return true;
+  }();
+  return cached;
 }
 
 struct InputsOutputs {

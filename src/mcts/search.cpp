@@ -1453,7 +1453,7 @@ void Search::ConfigureStopper() {
     }
     if (!node_only_limit && params_.kld_gain_min > 0.0f) {
       const int64_t kld_min_elapsed_ms =
-          time_budget_ms > 0 ? std::min<int64_t>(500, (time_budget_ms * 2) / 3)
+          time_budget_ms > 0 ? std::min<int64_t>(750, (time_budget_ms * 3) / 4)
                              : 0;
       stopper->Add(std::make_unique<KLDGainStopper>(
           params_.kld_gain_min, params_.kld_gain_average_interval,
