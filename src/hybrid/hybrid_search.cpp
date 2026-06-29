@@ -1820,7 +1820,7 @@ bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
   if (average_gap >= 60 && ab_effort >= 50000)
     return true;
 
-  if (average_gap >= 45 && ab_effort >= 800000)
+  if (average_gap >= 55 && ab_effort >= 800000)
     return true;
 
   return mcts_score <= -30000 && ab_effort >= 50000 &&
@@ -4001,7 +4001,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
                                std::memory_order_relaxed)
                          : 0;
         const uint64_t min_mcts_nodes = static_cast<uint64_t>(
-            std::max(150, current_strategy_.min_mcts_nodes));
+            std::max(250, current_strategy_.min_mcts_nodes));
         const int ab_depth =
             ab_state_.completed_depth.load(std::memory_order_relaxed);
         const int min_ab_depth =

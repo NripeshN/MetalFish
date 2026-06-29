@@ -732,7 +732,7 @@ BASE_ENGINE_OPTIONS = {
     "MCTSMinimumKLDGainPerNode": "0.00003",
     "MCTSPolicySoftmaxTemp": "1.359",
     "MCTSRootPolicySoftmaxTemp": "1.45",
-    "MCTSSmartPruningFactor": "1.60",
+    "MCTSSmartPruningFactor": "1.52",
     "MCTSCacheHistoryLength": "0",
     "MCTSSolidTreeThreshold": "100",
 }
