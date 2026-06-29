@@ -21,7 +21,7 @@ namespace MCTS {
 struct SearchParams {
   // PUCT exploration (slightly higher at root for tactical diversity)
   float cpuct = 1.745f;
-  float cpuct_at_root = 1.90f;
+  float cpuct_at_root = 1.80f;
   float cpuct_base = 38739.0f;
   float cpuct_factor = 3.894f;
   float cpuct_base_at_root = 38739.0f;
@@ -38,7 +38,7 @@ struct SearchParams {
 
   // Policy softmax temperature
   float policy_softmax_temp = 1.359f;
-  float root_policy_softmax_temp = 1.6f;
+  float root_policy_softmax_temp = 1.45f;
 
   // Dirichlet exploration noise (disabled for competitive play)
   bool add_dirichlet_noise = false;
@@ -56,7 +56,7 @@ struct SearchParams {
   // Search control
   int max_concurrent_searchers = 1;
   int thread_idling_threshold = 1;
-  float smart_pruning_factor = 1.52f;
+  float smart_pruning_factor = 1.60f;
   int smart_pruning_minimum_batches = 0;
   int solid_tree_threshold = 100;
   bool two_fold_draws = true;

@@ -632,12 +632,12 @@ void test_search_params_defaults(TestCounter &tc) {
   std::cout << "  Search params..." << std::endl;
   SearchParams params;
   expect(params.fpu_reduction_at_root == 0.25f, "root FPU default aligned", tc);
-  expect(params.smart_pruning_factor == 1.52f, "smart pruning default aligned",
+  expect(params.smart_pruning_factor == 1.60f, "smart pruning default aligned",
          tc);
   expect(params.kld_gain_min == 0.00003f, "KLD stopper tactical default", tc);
   expect(params.policy_softmax_temp == 1.359f, "policy softmax default aligned",
          tc);
-  expect(params.root_policy_softmax_temp == 1.6f,
+  expect(params.root_policy_softmax_temp == 1.45f,
          "root policy softmax default aligned", tc);
   expect(params.cache_history_length == 0,
          "classic cache history default uses current position", tc);
