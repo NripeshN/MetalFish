@@ -2663,8 +2663,13 @@ def test_draw_accept_reason_uses_tablebase_and_engine_score() -> None:
         == "engine_losing",
     )
     expect(
-        "accept late equal engine draw offer",
+        "reject late slightly better engine draw offer",
         bot._draw_accept_reason(board, engine_info={"score_cp": 10}, moves=moves)
+        is None,
+    )
+    expect(
+        "accept late dead-even engine draw offer",
+        bot._draw_accept_reason(board, engine_info={"score_cp": 0}, moves=moves)
         == "engine_not_better",
     )
     expect(
