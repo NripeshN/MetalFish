@@ -1577,7 +1577,7 @@ int64_t Search::CalculateTimeBudget() {
             : 1.0f;
     tmgr_.tree_reuse =
         ExponentialDecay(tmgr_.tree_reuse, this_reuse, 3.39f, update_rate);
-    tmgr_.tree_reuse = std::min(tmgr_.tree_reuse, 0.73f);
+    tmgr_.tree_reuse = std::min(tmgr_.tree_reuse, 0.80f);
   }
 
   float remaining_moves = EstimateMovesToGo(ply);

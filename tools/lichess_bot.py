@@ -731,7 +731,7 @@ BASE_ENGINE_OPTIONS = {
     "MCTSMinibatchSize": str(HYBRID_MCTS_MINIBATCH),
     "MCTSMinimumKLDGainPerNode": "0.00003",
     "MCTSPolicySoftmaxTemp": "1.359",
-    "MCTSRootPolicySoftmaxTemp": "1.45",
+    "MCTSRootPolicySoftmaxTemp": "1.38",
     "MCTSSmartPruningFactor": "1.52",
     "MCTSCacheHistoryLength": "0",
     "MCTSSolidTreeThreshold": "100",

@@ -727,7 +727,7 @@ def main() -> int:
             '"HybridRootPawnLeverTieBreak": HYBRID_ROOT_PAWN_LEVER_TIEBREAK',
             '"HybridTrace": HYBRID_TRACE',
             '"MCTSMinibatchSize": str(HYBRID_MCTS_MINIBATCH)',
-            '"MCTSRootPolicySoftmaxTemp": "1.45"',
+            '"MCTSRootPolicySoftmaxTemp": "1.38"',
             "if SYZYGY_PATH:",
             "dynamic up to {MAX_SEARCH_WORKERS}",
             "Syzygy:   {syzygy}",
