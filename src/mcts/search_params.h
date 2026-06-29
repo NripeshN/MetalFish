@@ -34,7 +34,7 @@ struct SearchParams {
   bool fpu_absolute_at_root = false;
   float fpu_value_at_root = 0.33f;
   float fpu_reduction = 0.33f;
-  float fpu_reduction_at_root = 0.25f;
+  float fpu_reduction_at_root = 0.0f;
 
   // Policy softmax temperature
   float policy_softmax_temp = 1.359f;
@@ -56,7 +56,7 @@ struct SearchParams {
   // Search control
   int max_concurrent_searchers = 1;
   int thread_idling_threshold = 1;
-  float smart_pruning_factor = 1.60f;
+  float smart_pruning_factor = 1.52f;
   int smart_pruning_minimum_batches = 0;
   int solid_tree_threshold = 100;
   bool two_fold_draws = true;
@@ -112,7 +112,7 @@ struct SearchParams {
 
   // NNCache. Lc0 classic defaults to current-position cache keys.
   int cache_history_length = 0;
-  int nn_cache_size = 2000000;
+  int nn_cache_size = 500000;
 
   // Backend
   std::string nn_weights_path;

@@ -631,8 +631,8 @@ void test_pv_boost_respects_weight(TestCounter &tc) {
 void test_search_params_defaults(TestCounter &tc) {
   std::cout << "  Search params..." << std::endl;
   SearchParams params;
-  expect(params.fpu_reduction_at_root == 0.25f, "root FPU default aligned", tc);
-  expect(params.smart_pruning_factor == 1.60f, "smart pruning default aligned",
+  expect(params.fpu_reduction_at_root == 0.0f, "root FPU default aligned", tc);
+  expect(params.smart_pruning_factor == 1.52f, "smart pruning default aligned",
          tc);
   expect(params.kld_gain_min == 0.00003f, "KLD stopper tactical default", tc);
   expect(params.policy_softmax_temp == 1.359f, "policy softmax default aligned",
@@ -641,7 +641,7 @@ void test_search_params_defaults(TestCounter &tc) {
          "root policy softmax default aligned", tc);
   expect(params.cache_history_length == 0,
          "classic cache history default uses current position", tc);
-  expect(params.nn_cache_size == 2000000, "NN cache default aligned", tc);
+  expect(params.nn_cache_size == 500000, "NN cache default aligned", tc);
   expect(params.moves_left_max_effect == 0.0345f,
          "moves-left max effect default aligned", tc);
   expect(params.moves_left_scaled_factor == 1.6521f,

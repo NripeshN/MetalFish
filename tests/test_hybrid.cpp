@@ -2047,7 +2047,7 @@ void test_hybrid_config() {
   {
     TestCase tc("AB root rejection blocks low-effort MCTS blunders");
 
-    // gap=37, effort=2.5M, mcts_score=-447: gap < 45 and < 60 → no reject
+    // gap=37, effort=2.5M, mcts_score=-447: gap < 55 and < 60 → no reject
     EXPECT(tc, !HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
                                         -447));
     // gap=37, mcts_score=-32001 (mate): 3rd condition fires (effort=2.5M >=
