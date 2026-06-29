@@ -637,7 +637,7 @@ void test_search_params_defaults(TestCounter &tc) {
   expect(params.kld_gain_min == 0.00003f, "KLD stopper tactical default", tc);
   expect(params.policy_softmax_temp == 1.359f, "policy softmax default aligned",
          tc);
-  expect(params.root_policy_softmax_temp == 1.45f,
+  expect(params.root_policy_softmax_temp == 1.38f,
          "root policy softmax default aligned", tc);
   expect(params.cache_history_length == 0,
          "classic cache history default uses current position", tc);
