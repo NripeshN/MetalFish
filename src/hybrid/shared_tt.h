@@ -34,14 +34,14 @@ public:
 
     int cp = std::clamp(static_cast<int>(data.value), -10000, 10000);
 
-    // For UPPER bounds (fail-low), the true value is at most this — only
-    // useful if it indicates the position is bad. For LOWER bounds
-    // (fail-high), the true value is at least this — only useful if it
-    // indicates the position is good. Skip entries where the bound
-    // direction contradicts a strong signal.
-    if (data.bound == BOUND_UPPER && cp > 200)
+    // UPPER bound (fail-low): true value ≤ stored cp. Using it as a
+    // point estimate is only safe when it indicates a bad position.
+    // LOWER bound (fail-high): true value ≥ stored cp. Only safe when
+    // it indicates a good position. Skip non-EXACT entries where the
+    // bound direction makes the point-estimate interpretation unreliable.
+    if (data.bound == BOUND_UPPER && cp > 500)
       return result;
-    if (data.bound == BOUND_LOWER && cp < -200)
+    if (data.bound == BOUND_LOWER && cp < -500)
       return result;
 
     // Fast logistic using natural log: 1/(1+exp(-cp/scale))

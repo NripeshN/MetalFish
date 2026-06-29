@@ -4011,10 +4011,11 @@ void ParallelHybridSearch::coordinator_thread_main() {
 
         const int ab_score =
             ab_state_.best_score.load(std::memory_order_relaxed);
-        const bool is_winning = (ab_score > 150 || ab_score < -150);
+        const bool is_winning =
+            (ab_score > 150 || ab_score < -150) && ab_depth >= 12;
         const int required_agreements = is_winning ? 3 : 4;
         const int winning_min_time =
-            is_winning ? ((time_budget_ms > 0) ? time_budget_ms / 4 : 300)
+            is_winning ? ((time_budget_ms > 0) ? time_budget_ms / 3 : 400)
                        : min_time;
 
         if (allow_agreement_stop && agreement_count >= required_agreements &&
