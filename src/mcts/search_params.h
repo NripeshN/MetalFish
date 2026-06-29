@@ -19,13 +19,14 @@ namespace MetalFish {
 namespace MCTS {
 
 struct SearchParams {
-  // PUCT exploration (slightly higher at root for tactical diversity)
+  // PUCT exploration (root broadened via policy softmax temp, not cpuct
+  // premium)
   float cpuct = 1.745f;
-  float cpuct_at_root = 1.80f;
+  float cpuct_at_root = 1.745f;
   float cpuct_base = 38739.0f;
   float cpuct_factor = 3.894f;
   float cpuct_base_at_root = 38739.0f;
-  float cpuct_factor_at_root = 4.10f;
+  float cpuct_factor_at_root = 3.894f;
 
   // First Play Urgency (reduction strategy; root uses lower reduction for wider
   // tactical exploration)
@@ -78,9 +79,9 @@ struct SearchParams {
   int fixed_movetime_q_override_cap = 0;
 
   // Contempt (positive = avoid draws, negative = prefer draws).
-  // Converted to draw_score via -contempt/10000. A value of 300 gives
-  // draw_score=-0.03 which penalizes draw nodes in MCTS.
-  float contempt = 300.0f;
+  // Converted to draw_score via -contempt/10000. A value of 500 gives
+  // draw_score=-0.05 which penalizes draw nodes in MCTS.
+  float contempt = 500.0f;
 
   // Threading
   int num_threads = 2;
