@@ -95,6 +95,13 @@ jobs:
           mkdir -p ../baseline/networks
           rsync -a networks/ ../baseline/networks/
 
+      - name: Patch baseline for Apple Clang 21+ dotprod compatibility
+        run: |
+          if ! grep -q 'target("dotprod")' baseline/src/eval/nnue/simd.h; then
+            cp candidate/src/eval/nnue/simd.h baseline/src/eval/nnue/simd.h
+            echo "Copied candidate simd.h to baseline for Apple Clang 21+ dotprod compat"
+          fi
+
       - name: Configure baseline
         run: |
           cmake -S baseline -B baseline/build \
