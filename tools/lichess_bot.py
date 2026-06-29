@@ -306,25 +306,25 @@ DRAW_OFFER_SEARCH_CAP_MS = max(
     0, min(30_000, env_int("METALFISH_DRAW_OFFER_SEARCH_CAP_MS", 1500))
 )
 DRAW_ACCEPT_ENGINE_MAX_CP = max(
-    0, min(300, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MAX_CP", 25))
+    0, min(300, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MAX_CP", 10))
 )
 DRAW_ACCEPT_ENGINE_LOSING_CP = -max(
-    50, min(1000, env_int("METALFISH_DRAW_ACCEPT_ENGINE_LOSING_CP", 150))
+    50, min(1000, env_int("METALFISH_DRAW_ACCEPT_ENGINE_LOSING_CP", 200))
 )
 DRAW_ACCEPT_ENGINE_MIN_PLY = max(
-    0, min(200, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MIN_PLY", 60))
+    0, min(200, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MIN_PLY", 80))
 )
 DRAW_OFFER_ENGINE_MAX_CP = max(
-    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_CP", 12))
+    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_CP", 5))
 )
 DRAW_OFFER_ENGINE_MIN_PLY = max(
-    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MIN_PLY", 80))
+    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MIN_PLY", 120))
 )
 DRAW_OFFER_ENGINE_MAX_PIECES = max(
-    2, min(32, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_PIECES", 12))
+    2, min(32, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_PIECES", 8))
 )
 DRAW_OFFER_COOLDOWN_PLIES = max(
-    0, min(100, env_int("METALFISH_DRAW_OFFER_COOLDOWN_PLIES", 12))
+    0, min(100, env_int("METALFISH_DRAW_OFFER_COOLDOWN_PLIES", 20))
 )
 
 
@@ -727,12 +727,12 @@ BASE_ENGINE_OPTIONS = {
     "HybridABPolicyWeight": str(HYBRID_AB_POLICY_WEIGHT),
     "HybridRootPawnLeverTieBreak": HYBRID_ROOT_PAWN_LEVER_TIEBREAK,
     "HybridTrace": HYBRID_TRACE,
-    "Move Overhead": "500",
+    "Move Overhead": "150",
     "MCTSMinibatchSize": str(HYBRID_MCTS_MINIBATCH),
-    "MCTSMinimumKLDGainPerNode": "0.00005",
+    "MCTSMinimumKLDGainPerNode": "0.00003",
     "MCTSPolicySoftmaxTemp": "1.359",
     "MCTSRootPolicySoftmaxTemp": "1.6",
-    "MCTSSmartPruningFactor": "1.33",
+    "MCTSSmartPruningFactor": "1.52",
     "MCTSCacheHistoryLength": "0",
     "MCTSSolidTreeThreshold": "100",
 }
