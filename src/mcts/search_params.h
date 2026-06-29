@@ -77,8 +77,10 @@ struct SearchParams {
   bool capture_leader_quiet_major_probe = false;
   int fixed_movetime_q_override_cap = 0;
 
-  // Contempt (positive = avoid draws, negative = prefer draws)
-  float contempt = 0.0f;
+  // Contempt (positive = avoid draws, negative = prefer draws).
+  // Converted to draw_score via -contempt/10000. A value of 200 gives
+  // draw_score=-0.02 which meaningfully penalizes draw nodes in MCTS.
+  float contempt = 200.0f;
 
   // Threading
   int num_threads = 2;

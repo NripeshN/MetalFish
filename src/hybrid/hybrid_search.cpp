@@ -478,13 +478,13 @@ int ParallelHybridSearch::calculate_time_budget() const {
   if (time_left < 500)
     return std::max(50, std::min(time_left / 4, increment));
 
-  const int moves_to_go = limits_.movestogo > 0 ? limits_.movestogo : 30;
+  const int moves_to_go = limits_.movestogo > 0 ? limits_.movestogo : 25;
   const int base = time_left / std::max(1, moves_to_go);
-  const int inc_bonus = std::max(0, increment) * 3 / 4;
+  const int inc_bonus = std::max(0, increment) * 4 / 5;
   const int budget = base + inc_bonus;
-  const int hard_cap = std::max(500, time_left / 4);
-  const int reserve_cap = std::max(1, time_left - 100);
-  return std::max(250, std::min({budget, hard_cap, reserve_cap}));
+  const int hard_cap = std::max(500, time_left / 3);
+  const int reserve_cap = std::max(1, time_left - 80);
+  return std::max(200, std::min({budget, hard_cap, reserve_cap}));
 }
 
 bool HybridShouldContinueMCTSAfterAB(
@@ -3995,20 +3995,29 @@ void ParallelHybridSearch::coordinator_thread_main() {
             HybridCanStopEarlyOnAgreement(limits_);
         const int time_budget_ms =
             time_budget_ms_.load(std::memory_order_acquire);
-        const int min_time = (time_budget_ms > 0) ? time_budget_ms / 4 : 500;
+        const int min_time = (time_budget_ms > 0) ? time_budget_ms / 3 : 500;
         const uint64_t mcts_nodes =
             mcts_search_ ? mcts_search_->Stats().total_nodes.load(
                                std::memory_order_relaxed)
                          : 0;
         const uint64_t min_mcts_nodes = static_cast<uint64_t>(
-            std::max(100, current_strategy_.min_mcts_nodes));
+            std::max(150, current_strategy_.min_mcts_nodes));
         const int ab_depth =
             ab_state_.completed_depth.load(std::memory_order_relaxed);
         const int min_ab_depth =
             std::max(config_.ab_min_depth, current_strategy_.ab_verify_depth);
 
-        if (allow_agreement_stop && agreement_count >= 3 && ms > min_time &&
-            mcts_nodes >= min_mcts_nodes && ab_depth >= min_ab_depth) {
+        const int ab_score =
+            ab_state_.best_score.load(std::memory_order_relaxed);
+        const bool is_winning = (ab_score > 150 || ab_score < -150);
+        const int required_agreements = is_winning ? 6 : 4;
+        const int winning_min_time =
+            is_winning ? ((time_budget_ms > 0) ? time_budget_ms / 2 : 750)
+                       : min_time;
+
+        if (allow_agreement_stop && agreement_count >= required_agreements &&
+            ms > winning_min_time && mcts_nodes >= min_mcts_nodes &&
+            ab_depth >= min_ab_depth) {
           send_info_string("Hybrid: engines agree, stopping early at " +
                            std::to_string(ms) + "ms");
           break;
