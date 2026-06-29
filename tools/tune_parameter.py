@@ -15,6 +15,7 @@ Usage:
     # Quick test with fewer games (less accurate)
     python3 tools/tune_parameter.py --param MCTSContempt --min 400 --max 700 --step 100 --max-games 500 --movetime 500
 """
+
 from __future__ import annotations
 
 import argparse
@@ -103,17 +104,21 @@ def tune_parameter(
             verbose=verbose,
         )
 
-        results.append({
-            "param": param,
-            "value": val_str,
-            "result": result.as_dict(),
-        })
+        results.append(
+            {
+                "param": param,
+                "value": val_str,
+                "result": result.as_dict(),
+            }
+        )
 
         status_str = {"H1": "BETTER", "H0": "WORSE", "max_games": "NEUTRAL"}.get(
             result.status, result.status
         )
-        print(f"  >> {status_str}: {param}={val_str} | "
-              f"Elo={result.elo_est:+.1f} [{result.elo_ci_lo:+.1f}, {result.elo_ci_hi:+.1f}]")
+        print(
+            f"  >> {status_str}: {param}={val_str} | "
+            f"Elo={result.elo_est:+.1f} [{result.elo_ci_lo:+.1f}, {result.elo_ci_hi:+.1f}]"
+        )
 
     results.sort(key=lambda r: r["result"]["elo_estimate"], reverse=True)
 
@@ -125,12 +130,16 @@ def tune_parameter(
         ci = r["result"]["elo_95ci"]
         status = r["result"]["status"]
         icon = {"H1": "+", "H0": "-", "max_games": "~"}.get(status, "?")
-        print(f"  [{icon}] {param}={r['value']:>8s} | Elo={elo:+.1f} [{ci[0]:+.1f}, {ci[1]:+.1f}] | {status}")
+        print(
+            f"  [{icon}] {param}={r['value']:>8s} | Elo={elo:+.1f} [{ci[0]:+.1f}, {ci[1]:+.1f}] | {status}"
+        )
     print()
 
     if results:
         best = results[0]
-        print(f"  Best: {param}={best['value']} (Elo={best['result']['elo_estimate']:+.1f})")
+        print(
+            f"  Best: {param}={best['value']} (Elo={best['result']['elo_estimate']:+.1f})"
+        )
 
     return results
 
@@ -142,7 +151,9 @@ def main():
     parser.add_argument("--max", type=float, required=True, help="Maximum value")
     parser.add_argument("--step", type=float, required=True, help="Step size")
     parser.add_argument("--engine", default=str(PROJ / "build" / "metalfish"))
-    parser.add_argument("--weights", default=str(PROJ / "networks" / "BT4-1024x15x32h-swa-6147500.pb"))
+    parser.add_argument(
+        "--weights", default=str(PROJ / "networks" / "BT4-1024x15x32h-swa-6147500.pb")
+    )
     parser.add_argument("--threads", type=int, default=0)
     parser.add_argument("--hash", type=int, default=2048)
     parser.add_argument("--mode", choices=["hybrid", "ab", "mcts"], default="hybrid")

@@ -18,6 +18,7 @@ Usage:
     # Quick self-play sanity check (same engine both sides)
     python3 tools/sprt_test.py --self-play --games 50
 """
+
 from __future__ import annotations
 
 import argparse
@@ -69,6 +70,7 @@ BUILTIN_OPENINGS = [
 # SPRT math
 # ---------------------------------------------------------------------------
 
+
 def elo_to_prob(elo: float) -> float:
     return 1.0 / (1.0 + 10.0 ** (-elo / 400.0))
 
@@ -87,14 +89,20 @@ def llr_logistic(wins: int, draws: int, losses: int, elo0: float, elo1: float) -
     s1 = elo_to_prob(elo1)
     if s0 <= 0 or s0 >= 1 or s1 <= 0 or s1 >= 1:
         return 0.0
-    return 0.5 * n * (
-        (s1 - s0) * (2 * s - 1)
-        - (s1 * s1 - s0 * s0)
-        + (s1 * (1 - s1) - s0 * (1 - s0)) * 0
+    return (
+        0.5
+        * n
+        * (
+            (s1 - s0) * (2 * s - 1)
+            - (s1 * s1 - s0 * s0)
+            + (s1 * (1 - s1) - s0 * (1 - s0)) * 0
+        )
     )
 
 
-def llr_trinomial(wins: int, draws: int, losses: int, elo0: float, elo1: float) -> float:
+def llr_trinomial(
+    wins: int, draws: int, losses: int, elo0: float, elo1: float
+) -> float:
     """Compute LLR using the BayesElo trinomial model (standard for engine testing)."""
     n = wins + draws + losses
     if n < 4:
@@ -112,9 +120,7 @@ def llr_trinomial(wins: int, draws: int, losses: int, elo0: float, elo1: float) 
     s0 = elo_to_prob(elo0)
     s1 = elo_to_prob(elo1)
 
-    llr = n * (
-        (s1 - s0) * (2 * s - s0 - s1) / (2 * var)
-    )
+    llr = n * ((s1 - s0) * (2 * s - s0 - s1) / (2 * var))
     return llr
 
 
@@ -134,12 +140,14 @@ def elo_estimate(wins: int, draws: int, losses: int) -> Tuple[float, float, floa
         elo = 400.0 * math.copysign(1, score - 0.5) * 10
         return elo, elo, elo
     elo = -400.0 * math.log10(1.0 / score - 1.0)
-    var = (wins * (1 - score) ** 2 + draws * (0.5 - score) ** 2 + losses * score ** 2) / n
+    var = (wins * (1 - score) ** 2 + draws * (0.5 - score) ** 2 + losses * score**2) / n
     if var <= 0:
         return elo, elo, elo
     se = math.sqrt(var / n)
     elo_lo = -400.0 * math.log10(max(0.001, 1.0 / max(0.001, score - 1.96 * se) - 1.0))
-    elo_hi = -400.0 * math.log10(max(0.001, 1.0 / max(0.001, min(0.999, score + 1.96 * se)) - 1.0))
+    elo_hi = -400.0 * math.log10(
+        max(0.001, 1.0 / max(0.001, min(0.999, score + 1.96 * se)) - 1.0)
+    )
     return elo, elo_lo, elo_hi
 
 
@@ -195,8 +203,11 @@ class SPRTResult:
 # UCI Engine wrapper
 # ---------------------------------------------------------------------------
 
+
 class UCIEngine:
-    def __init__(self, cmd: str, name: str, options: Dict[str, str], cwd: Optional[str] = None):
+    def __init__(
+        self, cmd: str, name: str, options: Dict[str, str], cwd: Optional[str] = None
+    ):
         self.name = name
         self.cmd = cmd
         self.options = dict(options)
@@ -245,7 +256,9 @@ class UCIEngine:
                 line = self._lines.get(timeout=min(remaining, 1.0))
             except queue.Empty:
                 if self.proc and self.proc.poll() is not None:
-                    raise RuntimeError(f"{self.name}: process died (rc={self.proc.returncode})")
+                    raise RuntimeError(
+                        f"{self.name}: process died (rc={self.proc.returncode})"
+                    )
                 continue
             if line is None:
                 raise RuntimeError(f"{self.name}: EOF before '{token}'")
@@ -258,7 +271,9 @@ class UCIEngine:
         self._send("isready")
         self._wait_for("readyok", 30)
 
-    def go(self, position: str, movetime_ms: int = 0, tc: Optional[Tuple[int, int]] = None) -> str:
+    def go(
+        self, position: str, movetime_ms: int = 0, tc: Optional[Tuple[int, int]] = None
+    ) -> str:
         self._send(f"position {position}")
         if tc:
             wtime, btime = tc
@@ -273,7 +288,9 @@ class UCIEngine:
                 return parts[1] if len(parts) > 1 else "0000"
         return "0000"
 
-    def go_tc(self, position: str, wtime: int, btime: int, winc: int = 0, binc: int = 0) -> str:
+    def go_tc(
+        self, position: str, wtime: int, btime: int, winc: int = 0, binc: int = 0
+    ) -> str:
         self._send(f"position {position}")
         self._send(f"go wtime {wtime} btime {btime} winc {winc} binc {binc}")
         lines = self._wait_for("bestmove", 600)
@@ -296,6 +313,7 @@ class UCIEngine:
 # ---------------------------------------------------------------------------
 # Game playing
 # ---------------------------------------------------------------------------
+
 
 def load_openings() -> List[str]:
     if OPENINGS_BOOK.exists():
@@ -418,6 +436,7 @@ def play_game_pair(
 # SPRT runner
 # ---------------------------------------------------------------------------
 
+
 def run_sprt(
     baseline_cmd: str,
     candidate_cmd: str,
@@ -443,8 +462,11 @@ def run_sprt(
         elo0=elo0,
         elo1=elo1,
         candidate_label=label,
-        options_tested={k: v for k, v in candidate_options.items()
-                        if k not in baseline_options or baseline_options[k] != v},
+        options_tested={
+            k: v
+            for k, v in candidate_options.items()
+            if k not in baseline_options or baseline_options[k] != v
+        },
     )
 
     openings = load_openings()
@@ -462,7 +484,9 @@ def run_sprt(
             game_idx += 1
 
             r1, r2 = play_game_pair(
-                candidate, baseline, opening,
+                candidate,
+                baseline,
+                opening,
                 movetime_ms=movetime_ms,
                 tc_base_ms=tc_base_ms,
                 tc_inc_ms=tc_inc_ms,
@@ -476,7 +500,9 @@ def run_sprt(
                 else:
                     result.draws += 1
 
-            result.llr = llr_trinomial(result.wins, result.draws, result.losses, elo0, elo1)
+            result.llr = llr_trinomial(
+                result.wins, result.draws, result.losses, elo0, elo1
+            )
             result.elo_est, result.elo_ci_lo, result.elo_ci_hi = elo_estimate(
                 result.wins, result.draws, result.losses
             )
@@ -517,6 +543,7 @@ def run_sprt(
 # Batch testing
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BatchTest:
     label: str
@@ -530,12 +557,14 @@ def load_batch(path: str) -> List[BatchTest]:
         data = json.load(f)
     tests = []
     for item in data.get("tests", data if isinstance(data, list) else []):
-        tests.append(BatchTest(
-            label=item["label"],
-            options=item["options"],
-            elo0=item.get("elo0", 0.0),
-            elo1=item.get("elo1", 10.0),
-        ))
+        tests.append(
+            BatchTest(
+                label=item["label"],
+                options=item["options"],
+                elo0=item.get("elo0", 0.0),
+                elo1=item.get("elo1", 10.0),
+            )
+        )
     return tests
 
 
@@ -588,9 +617,11 @@ def run_batch(
             "H0": "FAIL",
             "max_games": "INCONCLUSIVE",
         }.get(result.status, "ERROR")
-        print(f"\n  >> {status_icon}: {test.label} | Elo={result.elo_est:+.1f} "
-              f"[{result.elo_ci_lo:+.1f}, {result.elo_ci_hi:+.1f}] "
-              f"| {result.total} games in {result.elapsed_sec:.0f}s")
+        print(
+            f"\n  >> {status_icon}: {test.label} | Elo={result.elo_est:+.1f} "
+            f"[{result.elo_ci_lo:+.1f}, {result.elo_ci_hi:+.1f}] "
+            f"| {result.total} games in {result.elapsed_sec:.0f}s"
+        )
         results.append(result)
 
     return results
@@ -599,6 +630,7 @@ def run_batch(
 # ---------------------------------------------------------------------------
 # Default engine configuration
 # ---------------------------------------------------------------------------
+
 
 def detect_threads() -> int:
     env = os.getenv("METALFISH_THREADS")
@@ -653,65 +685,101 @@ def default_hybrid_options(weights_path: str, threads: int) -> Dict[str, str]:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="MetalFish SPRT Engine Testing",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--engine", default=str(PROJ / "build" / "metalfish"),
-                        help="Path to baseline engine binary")
-    parser.add_argument("--candidate-engine", default=None,
-                        help="Path to candidate engine binary (default: same as --engine)")
-    parser.add_argument("--weights", default=str(PROJ / "networks" / "BT4-1024x15x32h-swa-6147500.pb"),
-                        help="Path to transformer weights")
-    parser.add_argument("--threads", type=int, default=0,
-                        help="Thread count (0=auto)")
-    parser.add_argument("--hash", type=int, default=2048,
-                        help="Hash table size in MB")
-    parser.add_argument("--mode", choices=["hybrid", "ab", "mcts"], default="hybrid",
-                        help="Engine mode to test")
+    parser.add_argument(
+        "--engine",
+        default=str(PROJ / "build" / "metalfish"),
+        help="Path to baseline engine binary",
+    )
+    parser.add_argument(
+        "--candidate-engine",
+        default=None,
+        help="Path to candidate engine binary (default: same as --engine)",
+    )
+    parser.add_argument(
+        "--weights",
+        default=str(PROJ / "networks" / "BT4-1024x15x32h-swa-6147500.pb"),
+        help="Path to transformer weights",
+    )
+    parser.add_argument("--threads", type=int, default=0, help="Thread count (0=auto)")
+    parser.add_argument("--hash", type=int, default=2048, help="Hash table size in MB")
+    parser.add_argument(
+        "--mode",
+        choices=["hybrid", "ab", "mcts"],
+        default="hybrid",
+        help="Engine mode to test",
+    )
 
     # SPRT parameters
-    parser.add_argument("--elo0", type=float, default=0.0,
-                        help="H0 Elo bound (null hypothesis)")
-    parser.add_argument("--elo1", type=float, default=10.0,
-                        help="H1 Elo bound (alternative hypothesis)")
-    parser.add_argument("--alpha", type=float, default=0.05,
-                        help="Type I error rate (false positive)")
-    parser.add_argument("--beta", type=float, default=0.05,
-                        help="Type II error rate (false negative)")
-    parser.add_argument("--max-games", type=int, default=2000,
-                        help="Maximum games before declaring inconclusive")
+    parser.add_argument(
+        "--elo0", type=float, default=0.0, help="H0 Elo bound (null hypothesis)"
+    )
+    parser.add_argument(
+        "--elo1", type=float, default=10.0, help="H1 Elo bound (alternative hypothesis)"
+    )
+    parser.add_argument(
+        "--alpha", type=float, default=0.05, help="Type I error rate (false positive)"
+    )
+    parser.add_argument(
+        "--beta", type=float, default=0.05, help="Type II error rate (false negative)"
+    )
+    parser.add_argument(
+        "--max-games",
+        type=int,
+        default=2000,
+        help="Maximum games before declaring inconclusive",
+    )
 
     # Time control
-    parser.add_argument("--movetime", type=int, default=1000,
-                        help="Fixed time per move in ms (used if --tc not set)")
-    parser.add_argument("--tc", default=None,
-                        help="Time control as BASE+INC in seconds (e.g. '10+0.1')")
+    parser.add_argument(
+        "--movetime",
+        type=int,
+        default=1000,
+        help="Fixed time per move in ms (used if --tc not set)",
+    )
+    parser.add_argument(
+        "--tc", default=None, help="Time control as BASE+INC in seconds (e.g. '10+0.1')"
+    )
 
     # Options to test
-    parser.add_argument("--option", action="append", default=[],
-                        help="Candidate option override as NAME=VALUE (repeatable)")
-    parser.add_argument("--baseline-option", action="append", default=[],
-                        help="Baseline option override as NAME=VALUE (repeatable)")
+    parser.add_argument(
+        "--option",
+        action="append",
+        default=[],
+        help="Candidate option override as NAME=VALUE (repeatable)",
+    )
+    parser.add_argument(
+        "--baseline-option",
+        action="append",
+        default=[],
+        help="Baseline option override as NAME=VALUE (repeatable)",
+    )
 
     # Batch mode
-    parser.add_argument("--batch", default=None,
-                        help="Path to batch test JSON file")
+    parser.add_argument("--batch", default=None, help="Path to batch test JSON file")
 
     # Self-play sanity
-    parser.add_argument("--self-play", action="store_true",
-                        help="Run self-play (same config both sides) as sanity check")
-    parser.add_argument("--games", type=int, default=None,
-                        help="Fixed game count (overrides SPRT)")
+    parser.add_argument(
+        "--self-play",
+        action="store_true",
+        help="Run self-play (same config both sides) as sanity check",
+    )
+    parser.add_argument(
+        "--games", type=int, default=None, help="Fixed game count (overrides SPRT)"
+    )
 
     # Output
-    parser.add_argument("--json-out", default=None,
-                        help="Write results JSON to this path")
+    parser.add_argument(
+        "--json-out", default=None, help="Write results JSON to this path"
+    )
     parser.add_argument("--quiet", action="store_true")
-    parser.add_argument("--label", default="",
-                        help="Label for this test run")
+    parser.add_argument("--label", default="", help="Label for this test run")
 
     args = parser.parse_args()
 
@@ -761,7 +829,9 @@ def main():
     # Batch mode
     if args.batch:
         results = run_batch(
-            args.batch, engine_cmd, base_options,
+            args.batch,
+            engine_cmd,
+            base_options,
             engine_cwd=str(PROJ),
             max_games=args.max_games,
             movetime_ms=args.movetime,
@@ -777,8 +847,10 @@ def main():
 
         passed = sum(1 for r in results if r.passed())
         failed = sum(1 for r in results if r.failed())
-        print(f"\nSummary: {passed} passed, {failed} failed, "
-              f"{len(results) - passed - failed} inconclusive out of {len(results)} tests")
+        print(
+            f"\nSummary: {passed} passed, {failed} failed, "
+            f"{len(results) - passed - failed} inconclusive out of {len(results)} tests"
+        )
         return 0 if failed == 0 else 1
 
     # Single test mode
@@ -804,7 +876,9 @@ def main():
             print(f"  TC: {tc_base_ms/1000:.1f}+{tc_inc_ms/1000:.1f}s")
         else:
             print(f"  Movetime: {args.movetime}ms")
-        print(f"  SPRT: H0={args.elo0}, H1={args.elo1}, alpha={args.alpha}, beta={args.beta}")
+        print(
+            f"  SPRT: H0={args.elo0}, H1={args.elo1}, alpha={args.alpha}, beta={args.beta}"
+        )
         print(f"  Max games: {max_games}")
         if args.option:
             print(f"  Testing: {args.option}")
@@ -835,9 +909,15 @@ def main():
     if not args.quiet:
         print(f"\n{'='*50}")
         print(f"  RESULT: {status_str}")
-        print(f"  W={result.wins} D={result.draws} L={result.losses} ({result.total} games)")
-        print(f"  Elo: {result.elo_est:+.1f} [{result.elo_ci_lo:+.1f}, {result.elo_ci_hi:+.1f}]")
-        print(f"  LLR: {result.llr:.4f} [{result.lower_bound:.4f}, {result.upper_bound:.4f}]")
+        print(
+            f"  W={result.wins} D={result.draws} L={result.losses} ({result.total} games)"
+        )
+        print(
+            f"  Elo: {result.elo_est:+.1f} [{result.elo_ci_lo:+.1f}, {result.elo_ci_hi:+.1f}]"
+        )
+        print(
+            f"  LLR: {result.llr:.4f} [{result.lower_bound:.4f}, {result.upper_bound:.4f}]"
+        )
         print(f"  Time: {result.elapsed_sec:.0f}s")
         print(f"{'='*50}")
 

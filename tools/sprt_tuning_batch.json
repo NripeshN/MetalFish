@@ -4,109 +4,148 @@
   "tests": [
     {
       "label": "SharedTT enabled (scale 230)",
-      "options": {"HybridMCTSUseSharedTT": "true", "HybridMCTSSharedTTCpScale": "230"},
+      "options": {
+        "HybridMCTSUseSharedTT": "true",
+        "HybridMCTSSharedTTCpScale": "230"
+      },
       "elo0": 0,
       "elo1": 10
     },
     {
       "label": "SharedTT scale 180",
-      "options": {"HybridMCTSUseSharedTT": "true", "HybridMCTSSharedTTCpScale": "180"},
+      "options": {
+        "HybridMCTSUseSharedTT": "true",
+        "HybridMCTSSharedTTCpScale": "180"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "SharedTT scale 290",
-      "options": {"HybridMCTSUseSharedTT": "true", "HybridMCTSSharedTTCpScale": "290"},
+      "options": {
+        "HybridMCTSUseSharedTT": "true",
+        "HybridMCTSSharedTTCpScale": "290"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "Contempt 600",
-      "options": {"MCTSContempt": "600"},
+      "options": {
+        "MCTSContempt": "600"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "Contempt 700",
-      "options": {"MCTSContempt": "700"},
+      "options": {
+        "MCTSContempt": "700"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "Contempt 400",
-      "options": {"MCTSContempt": "400"},
+      "options": {
+        "MCTSContempt": "400"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "ABPolicyWeight 0.10",
-      "options": {"HybridABPolicyWeight": "0.10"},
+      "options": {
+        "HybridABPolicyWeight": "0.10"
+      },
       "elo0": 0,
       "elo1": 10
     },
     {
       "label": "ABPolicyWeight 0.15",
-      "options": {"HybridABPolicyWeight": "0.15"},
+      "options": {
+        "HybridABPolicyWeight": "0.15"
+      },
       "elo0": 0,
       "elo1": 10
     },
     {
       "label": "SmartPruning 1.45",
-      "options": {"MCTSSmartPruningFactor": "1.45"},
+      "options": {
+        "MCTSSmartPruningFactor": "1.45"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "SmartPruning 1.60",
-      "options": {"MCTSSmartPruningFactor": "1.60"},
+      "options": {
+        "MCTSSmartPruningFactor": "1.60"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "RootPolicySoftmaxTemp 1.30",
-      "options": {"MCTSRootPolicySoftmaxTemp": "1.30"},
+      "options": {
+        "MCTSRootPolicySoftmaxTemp": "1.30"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "RootPolicySoftmaxTemp 1.45",
-      "options": {"MCTSRootPolicySoftmaxTemp": "1.45"},
+      "options": {
+        "MCTSRootPolicySoftmaxTemp": "1.45"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "KLD hybrid 0.00002",
-      "options": {"HybridMCTSMinimumKLDGainPerNode": "0.00002"},
+      "options": {
+        "HybridMCTSMinimumKLDGainPerNode": "0.00002"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "CPUCT root 1.90",
-      "options": {"MCTSCPuctAtRoot": "1.90"},
+      "options": {
+        "MCTSCPuctAtRoot": "1.90"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "CPUCT root 2.10",
-      "options": {"MCTSCPuctAtRoot": "2.10"},
+      "options": {
+        "MCTSCPuctAtRoot": "2.10"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "FPU reduction root 0.10",
-      "options": {"MCTSFPUReductionAtRoot": "0.10"},
+      "options": {
+        "MCTSFPUReductionAtRoot": "0.10"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "TreeReuse initial 0.60",
-      "options": {"MCTSTreeReuseDiscount": "0.60"},
+      "options": {
+        "MCTSTreeReuseDiscount": "0.60"
+      },
       "elo0": -5,
       "elo1": 5
     },
     {
       "label": "ABCandidateVerifyMs 400",
-      "options": {"HybridABCandidateVerifyMs": "400"},
+      "options": {
+        "HybridABCandidateVerifyMs": "400"
+      },
       "elo0": -5,
       "elo1": 5
     }
