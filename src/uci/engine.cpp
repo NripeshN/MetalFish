@@ -178,7 +178,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridANERootHintWaitMs", Option(0, 0, 1000));
   options.add("HybridANEMinBudgetMs", Option(0, 0, 30000));
   options.add("HybridTrace", Option(false));
-  options.add("TransformerLowTimeFallbackMs", Option(3000, 0, 30000));
+  options.add("TransformerLowTimeFallbackMs", Option(1500, 0, 30000));
   options.add("TransformerMinMoveBudgetMs", Option(400, 0, 5000));
 
   // Optional parity preset and exposed MCTS tuning controls
