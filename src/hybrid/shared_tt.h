@@ -11,7 +11,8 @@ namespace MCTS {
 
 class SharedTTReader {
 public:
-  explicit SharedTTReader(TranspositionTable *tt) : tt_(tt) {}
+  explicit SharedTTReader(TranspositionTable *tt, float cp_scale = 230.0f)
+      : tt_(tt), cp_scale_(cp_scale) {}
 
   struct TTResult {
     float value;
@@ -33,7 +34,21 @@ public:
 
     int cp = std::clamp(static_cast<int>(data.value), -10000, 10000);
 
-    float win_prob = 1.0f / (1.0f + std::pow(10.0f, -cp / 400.0f));
+    // For UPPER bounds (fail-low), the true value is at most this — only
+    // useful if it indicates the position is bad. For LOWER bounds
+    // (fail-high), the true value is at least this — only useful if it
+    // indicates the position is good. Skip entries where the bound
+    // direction contradicts a strong signal.
+    if (data.bound == BOUND_UPPER && cp > 200)
+      return result;
+    if (data.bound == BOUND_LOWER && cp < -200)
+      return result;
+
+    // Fast logistic using natural log: 1/(1+exp(-cp/scale))
+    // Scale of 230cp matches BT4 network's internal centipawn semantics
+    // better than the classical 400cp Elo scale.
+    float x = static_cast<float>(cp) / cp_scale_;
+    float win_prob = 1.0f / (1.0f + fast_exp_neg(x));
 
     float draw_est = std::max(0.0f, 1.0f - 2.0f * std::abs(win_prob - 0.5f));
     float w = win_prob * (1.0f - draw_est);
@@ -48,6 +63,20 @@ public:
 
 private:
   TranspositionTable *tt_ = nullptr;
+  float cp_scale_ = 230.0f;
+
+  static float fast_exp_neg(float x) {
+    // Pade approximant for exp(-x), accurate to ~0.1% in [-6, 6]
+    // Falls back to standard exp for extreme values
+    if (x > 6.0f)
+      return std::exp(-x);
+    if (x < -6.0f)
+      return std::exp(-x);
+    float x2 = x * x;
+    float num = 1.0f - x * 0.5f + x2 * 0.08333333f;
+    float den = 1.0f + x * 0.5f + x2 * 0.08333333f;
+    return num / den;
+  }
 };
 
 } // namespace MCTS

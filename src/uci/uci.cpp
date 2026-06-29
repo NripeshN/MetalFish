@@ -1207,6 +1207,8 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   config.ab_root_reject_mcts = engine.get_options()["HybridABRootRejectMCTS"];
   config.mcts_root_reject = engine.get_options()["HybridMCTSRootReject"];
   config.use_shared_tt = engine.get_options()["HybridMCTSUseSharedTT"];
+  config.shared_tt_cp_scale = static_cast<float>(
+      static_cast<int>(engine.get_options()["HybridMCTSSharedTTCpScale"]));
   config.mcts_ab_root_hints = engine.get_options()["HybridMCTSABRootHints"];
   config.mcts_ab_root_hint_delay_ms =
       static_cast<int>(engine.get_options()["HybridMCTSABRootHintDelayMs"]);
