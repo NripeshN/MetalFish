@@ -111,6 +111,9 @@ struct SearchParams {
   float kld_gain_min = 0.00003f;
   int kld_gain_average_interval = 150;
 
+  // SharedTT depth filter: only use AB TT entries with depth >= this
+  int shared_tt_depth_threshold = 8;
+
   // NNCache. Lc0 classic defaults to current-position cache keys.
   int cache_history_length = 0;
   int nn_cache_size = 500000;
