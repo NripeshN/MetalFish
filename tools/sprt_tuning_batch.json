@@ -188,6 +188,14 @@
       },
       "elo0": -5,
       "elo1": 5
+    },
+    {
+      "label": "MCTS root reject enabled",
+      "options": {
+        "HybridMCTSRootReject": "true"
+      },
+      "elo0": 0,
+      "elo1": 10
     }
   ]
 }
