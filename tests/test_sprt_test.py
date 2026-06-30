@@ -99,10 +99,26 @@ def test_play_game_draw_adjudication() -> None:
     expect("stable equal scores adjudicate draw", result == "1/2-1/2")
 
 
+def test_play_game_max_moves_adjudication() -> None:
+    white = FakeEngine([500] * 10)
+    black = FakeEngine([-500] * 10)
+    result = sprt_test.play_game(
+        white,
+        black,
+        "",
+        movetime_ms=1,
+        max_moves=1,
+        resign_score=1000,
+        draw_move=40,
+    )
+    expect("max moves adjudicates draw", result == "1/2-1/2")
+
+
 def main() -> int:
     test_parse_last_score_cp()
     test_play_game_resign_adjudication()
     test_play_game_draw_adjudication()
+    test_play_game_max_moves_adjudication()
     print("test_sprt_test: OK")
     return 0
 

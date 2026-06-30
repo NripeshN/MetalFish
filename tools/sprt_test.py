@@ -470,15 +470,47 @@ def play_game_pair(
     movetime_ms: int = 1000,
     tc_base_ms: int = 0,
     tc_inc_ms: int = 0,
+    max_moves: int = 200,
+    resign_score: int = 1000,
+    resign_count: int = 3,
+    draw_move: int = 40,
+    draw_count: int = 8,
+    draw_score: int = 10,
 ) -> Tuple[str, str]:
     """Play a pair of games with reversed colors. Returns (result1, result2) from engine1's perspective."""
     engine1.new_game()
     engine2.new_game()
-    r1 = play_game(engine1, engine2, opening, movetime_ms, tc_base_ms, tc_inc_ms)
+    r1 = play_game(
+        engine1,
+        engine2,
+        opening,
+        movetime_ms,
+        tc_base_ms,
+        tc_inc_ms,
+        max_moves=max_moves,
+        resign_score=resign_score,
+        resign_count=resign_count,
+        draw_move=draw_move,
+        draw_count=draw_count,
+        draw_score=draw_score,
+    )
 
     engine1.new_game()
     engine2.new_game()
-    r2 = play_game(engine2, engine1, opening, movetime_ms, tc_base_ms, tc_inc_ms)
+    r2 = play_game(
+        engine2,
+        engine1,
+        opening,
+        movetime_ms,
+        tc_base_ms,
+        tc_inc_ms,
+        max_moves=max_moves,
+        resign_score=resign_score,
+        resign_count=resign_count,
+        draw_move=draw_move,
+        draw_count=draw_count,
+        draw_score=draw_score,
+    )
 
     def from_perspective(result: str, played_white: bool) -> str:
         if result == "1-0":
@@ -510,6 +542,12 @@ def run_sprt(
     movetime_ms: int = 1000,
     tc_base_ms: int = 0,
     tc_inc_ms: int = 0,
+    max_moves: int = 200,
+    resign_score: int = 1000,
+    resign_count: int = 3,
+    draw_move: int = 40,
+    draw_count: int = 8,
+    draw_score: int = 10,
     label: str = "",
     verbose: bool = True,
 ) -> SPRTResult:
@@ -548,6 +586,12 @@ def run_sprt(
                 movetime_ms=movetime_ms,
                 tc_base_ms=tc_base_ms,
                 tc_inc_ms=tc_inc_ms,
+                max_moves=max_moves,
+                resign_score=resign_score,
+                resign_count=resign_count,
+                draw_move=draw_move,
+                draw_count=draw_count,
+                draw_score=draw_score,
             )
 
             for r in (r1, r2):
@@ -635,6 +679,12 @@ def run_batch(
     movetime_ms: int = 1000,
     tc_base_ms: int = 0,
     tc_inc_ms: int = 0,
+    max_moves: int = 200,
+    resign_score: int = 1000,
+    resign_count: int = 3,
+    draw_move: int = 40,
+    draw_count: int = 8,
+    draw_score: int = 10,
     verbose: bool = True,
 ) -> List[SPRTResult]:
     tests = load_batch(batch_path)
@@ -666,6 +716,12 @@ def run_batch(
             movetime_ms=movetime_ms,
             tc_base_ms=tc_base_ms,
             tc_inc_ms=tc_inc_ms,
+            max_moves=max_moves,
+            resign_score=resign_score,
+            resign_count=resign_count,
+            draw_move=draw_move,
+            draw_count=draw_count,
+            draw_score=draw_score,
             label=test.label,
             verbose=verbose,
         )
@@ -805,6 +861,44 @@ def main():
         "--tc", default=None, help="Time control as BASE+INC in seconds (e.g. '10+0.1')"
     )
 
+    # Adjudication
+    parser.add_argument(
+        "--max-moves",
+        type=int,
+        default=200,
+        help="Maximum full moves before adjudicating a draw",
+    )
+    parser.add_argument(
+        "--resign-score",
+        type=int,
+        default=1000,
+        help="Centipawn threshold for resign adjudication",
+    )
+    parser.add_argument(
+        "--resign-count",
+        type=int,
+        default=3,
+        help="Consecutive searches beyond --resign-score before adjudicating a loss",
+    )
+    parser.add_argument(
+        "--draw-move",
+        type=int,
+        default=40,
+        help="Earliest full move for draw adjudication",
+    )
+    parser.add_argument(
+        "--draw-count",
+        type=int,
+        default=8,
+        help="Consecutive searches within --draw-score before adjudicating a draw",
+    )
+    parser.add_argument(
+        "--draw-score",
+        type=int,
+        default=10,
+        help="Centipawn window for draw adjudication",
+    )
+
     # Options to test
     parser.add_argument(
         "--option",
@@ -895,6 +989,12 @@ def main():
             movetime_ms=args.movetime,
             tc_base_ms=tc_base_ms,
             tc_inc_ms=tc_inc_ms,
+            max_moves=args.max_moves,
+            resign_score=args.resign_score,
+            resign_count=args.resign_count,
+            draw_move=args.draw_move,
+            draw_count=args.draw_count,
+            draw_score=args.draw_score,
             verbose=not args.quiet,
         )
         out_path = args.json_out or str(RESULTS_DIR / "batch_results.json")
@@ -937,6 +1037,12 @@ def main():
         print(
             f"  SPRT: H0={args.elo0}, H1={args.elo1}, alpha={args.alpha}, beta={args.beta}"
         )
+        print(
+            "  Adjudication: "
+            f"max-moves={args.max_moves}, "
+            f"resign={args.resign_count}x{args.resign_score}cp, "
+            f"draw={args.draw_count}x±{args.draw_score}cp after move {args.draw_move}"
+        )
         print(f"  Max games: {max_games}")
         if args.option:
             print(f"  Testing: {args.option}")
@@ -957,6 +1063,12 @@ def main():
         movetime_ms=args.movetime,
         tc_base_ms=tc_base_ms,
         tc_inc_ms=tc_inc_ms,
+        max_moves=args.max_moves,
+        resign_score=args.resign_score,
+        resign_count=args.resign_count,
+        draw_move=args.draw_move,
+        draw_count=args.draw_count,
+        draw_score=args.draw_score,
         label=label,
         verbose=not args.quiet,
     )
