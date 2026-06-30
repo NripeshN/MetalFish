@@ -258,8 +258,7 @@ void ParallelHybridSearch::start_search(
   limits_ = limits;
   ponderhit_received_.store(false, std::memory_order_release);
   search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
-  const int time_budget_ms = calculate_time_budget();
-  time_budget_ms_.store(time_budget_ms, std::memory_order_release);
+  int time_budget_ms = calculate_time_budget();
   start_ane_root_probe();
 
   if (config_.use_position_classifier) {
@@ -270,6 +269,12 @@ void ParallelHybridSearch::start_search(
     int time_left = (us == WHITE) ? limits.time[WHITE] : limits.time[BLACK];
     int increment = (us == WHITE) ? limits.inc[WHITE] : limits.inc[BLACK];
     strategy_selector_.adjust_for_time(current_strategy_, time_left, increment);
+
+    if (time_budget_ms > 0 && current_strategy_.time_multiplier != 1.0f) {
+      time_budget_ms = std::max(
+          200, static_cast<int>(time_budget_ms *
+                                current_strategy_.time_multiplier));
+    }
 
     send_info_string(
         "Parallel search - Position: " +
@@ -283,6 +288,7 @@ void ParallelHybridSearch::start_search(
                         : "STRATEGIC"));
   }
 
+  time_budget_ms_.store(time_budget_ms, std::memory_order_release);
   send_info_string("Time budget: " + std::to_string(time_budget_ms) + "ms");
 
   mcts_thread_done_.store(false, std::memory_order_release);
@@ -4848,7 +4854,7 @@ Move ParallelHybridSearch::make_final_decision() {
     return ab_best;
   }
 
-  const int mcts_cp = QToNnueScore(mcts_q);
+  const int mcts_cp = QToNnueScore(mcts_q, config_.q_to_cp_scale);
   const int ab_depth =
       ab_state_.completed_depth.load(std::memory_order_relaxed);
   const float absolute_visit_share =

@@ -162,6 +162,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridMCTSRootReject", Option(false));
   options.add("HybridMCTSUseSharedTT", Option(true));
   options.add("HybridMCTSSharedTTCpScale", Option(230, 100, 600));
+  options.add("HybridQToCpScale", Option(300, 150, 500));
   options.add("HybridMCTSABRootHints", Option(true));
   options.add("HybridMCTSABRootHintDelayMs", Option(0, 0, 1000));
   options.add("HybridMCTSABRootHintCount", Option(8, 1, 16));

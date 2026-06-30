@@ -148,6 +148,22 @@
       },
       "elo0": -5,
       "elo1": 5
+    },
+    {
+      "label": "QToCpScale 250 (closer to SharedTT 230)",
+      "options": {
+        "HybridQToCpScale": "250"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "QToCpScale 350 (inflate MCTS cp)",
+      "options": {
+        "HybridQToCpScale": "350"
+      },
+      "elo0": -5,
+      "elo1": 5
     }
   ]
 }

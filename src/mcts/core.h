@@ -136,9 +136,9 @@ struct WDLRescaler {
   }
 };
 
-inline int QToNnueScore(float q) {
+inline int QToNnueScore(float q, float scale = 300.0f) {
   q = std::clamp(q, -0.999f, 0.999f);
-  return static_cast<int>(std::atanh(q) * 300.0f);
+  return static_cast<int>(std::atanh(q) * scale);
 }
 
 inline float TablebaseWDLToParentWL(int wdl) {
