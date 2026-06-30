@@ -2081,9 +2081,15 @@ void test_hybrid_config() {
     EXPECT(tc, HybridMCTSCrossRootConfidenceOverride(
                    true, true, 418, 276, 0.660f, 0.127f, 216, 45, 636, 2,
                    -32001, 619, 1436766, 3, 32, 0.421f, 0.619f));
+    EXPECT(tc, HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 419, 277, 0.661f, 0.138f, 222, 53, 642, 3,
+                   -32001, 592, 27544, 3, 32, 0.420f, 0.629f));
     EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
                    true, true, 265, 169, 0.660f, 0.145f, 226, 55, 619, 2,
                    -32001, 564, 2095896, 5, 16, 0.372f, 0.638f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 419, 277, 0.661f, 0.138f, 222, 53, 642, 3,
+                   -32001, 592, 19999, 3, 32, 0.420f, 0.629f));
     EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
                    true, true, 316, 203, 0.642f, 0.141f, 224, 61, 606, 2, 580,
                    585, 1339424, 5, 16, 0.372f, 0.634f));

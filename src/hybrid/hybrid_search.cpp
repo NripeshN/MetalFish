@@ -975,7 +975,7 @@ bool HybridMCTSCrossRootConfidenceOverride(
   }
 
   if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 4 ||
-      mcts_in_ab_score != -VALUE_INFINITE || mcts_effort < 100000) {
+      mcts_in_ab_score != -VALUE_INFINITE || mcts_effort < 20000) {
     return false;
   }
 
@@ -5267,7 +5267,7 @@ Move ParallelHybridSearch::make_final_decision() {
       mcts_bishop_endgame_retreat || mcts_root_reject_q_gap ||
       mcts_clock_root_reject_q_gap || mcts_discovered_pawn_push_override ||
       mcts_reused_root_current || mcts_root_rejects_ab ||
-      (mcts_overwhelming && eval_delta >= 60);
+      (mcts_overwhelming && eval_delta >= 60 && ab_score >= -300);
 
   bool choose_mcts = false;
   const char *reason = "ab_default";
@@ -5323,7 +5323,8 @@ Move ParallelHybridSearch::make_final_decision() {
     break;
   case ParallelHybridConfig::DecisionMode::AB_PRIMARY:
     choose_mcts =
-        mcts_override_allowed && mcts_overwhelming && eval_delta >= 150;
+        mcts_override_allowed && mcts_overwhelming && eval_delta >= 150 &&
+        ab_score >= -300;
     if (choose_mcts)
       reason = "ab_primary_mcts_overwhelming";
     break;
@@ -5346,7 +5347,7 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (ane_q_supported_root_override) {
       reason = "ane_q_supported_root";
     } else if (mcts_visit_evidence_sane && mcts_overwhelming &&
-               eval_delta >= 60) {
+               eval_delta >= 60 && ab_score >= -300) {
       choose_mcts = true;
       reason = "mcts_overwhelming_delta";
     } else if (mcts_decisive_fixed_budget) {
