@@ -214,6 +214,7 @@ class UCIEngine:
         self.cwd = cwd
         self.proc: Optional[subprocess.Popen] = None
         self._lines: queue.Queue = queue.Queue()
+        self.last_score_cp: Optional[int] = None
         self._start()
 
     def _start(self):
@@ -282,6 +283,7 @@ class UCIEngine:
         else:
             self._send(f"go movetime {movetime_ms}")
         lines = self._wait_for("bestmove", 300)
+        self.last_score_cp = parse_last_score_cp(lines)
         for line in reversed(lines):
             if line.startswith("bestmove"):
                 parts = line.split()
@@ -294,6 +296,7 @@ class UCIEngine:
         self._send(f"position {position}")
         self._send(f"go wtime {wtime} btime {btime} winc {winc} binc {binc}")
         lines = self._wait_for("bestmove", 600)
+        self.last_score_cp = parse_last_score_cp(lines)
         for line in reversed(lines):
             if line.startswith("bestmove"):
                 parts = line.split()
@@ -313,6 +316,31 @@ class UCIEngine:
 # ---------------------------------------------------------------------------
 # Game playing
 # ---------------------------------------------------------------------------
+
+
+def parse_last_score_cp(lines: Sequence[str]) -> Optional[int]:
+    """Return the final UCI score as centipawns from the engine side."""
+    for line in reversed(lines):
+        parts = line.split()
+        if not parts or parts[0] != "info":
+            continue
+        for i, part in enumerate(parts):
+            if part != "score" or i + 2 >= len(parts):
+                continue
+            kind = parts[i + 1]
+            value = parts[i + 2]
+            try:
+                score = int(value)
+            except ValueError:
+                continue
+            if kind == "cp":
+                return score
+            if kind == "mate":
+                if score == 0:
+                    return 0
+                sign = 1 if score > 0 else -1
+                return sign * max(10000, 32000 - min(abs(score), 31999))
+    return None
 
 
 def load_openings() -> List[str]:
@@ -401,6 +429,36 @@ def play_game(
             board.push(move)
         except (chess.InvalidMoveError, chess.IllegalMoveError, ValueError):
             return "0-1" if is_white else "1-0"
+
+        if engine.last_score_cp is None:
+            white_resign = 0
+            black_resign = 0
+            draw_adj_count = 0
+            continue
+
+        white_score = engine.last_score_cp if is_white else -engine.last_score_cp
+        if white_score >= resign_score:
+            black_resign += 1
+            white_resign = 0
+        elif white_score <= -resign_score:
+            white_resign += 1
+            black_resign = 0
+        else:
+            white_resign = 0
+            black_resign = 0
+
+        if white_resign >= resign_count:
+            return "0-1"
+        if black_resign >= resign_count:
+            return "1-0"
+
+        fullmove = max(1, (len(board.move_stack) + 1) // 2)
+        if fullmove >= draw_move and abs(white_score) <= draw_score:
+            draw_adj_count += 1
+        else:
+            draw_adj_count = 0
+        if draw_adj_count >= draw_count:
+            return "1/2-1/2"
 
     return "1/2-1/2"
 
