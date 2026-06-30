@@ -271,9 +271,9 @@ void ParallelHybridSearch::start_search(
     strategy_selector_.adjust_for_time(current_strategy_, time_left, increment);
 
     if (time_budget_ms > 0 && current_strategy_.time_multiplier != 1.0f) {
-      time_budget_ms = std::max(
-          200, static_cast<int>(time_budget_ms *
-                                current_strategy_.time_multiplier));
+      time_budget_ms =
+          std::max(200, static_cast<int>(time_budget_ms *
+                                         current_strategy_.time_multiplier));
     }
 
     send_info_string(
