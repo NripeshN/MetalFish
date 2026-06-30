@@ -132,6 +132,7 @@ jobs:
           ./build/metalfish_tests
           python3 tests/test_benchmark_configs.py
           python3 tests/test_hybrid_regression_compare.py
+          python3 tests/test_sprt_test.py
           python3 tests/test_ponder_stress.py --smoke --engine build/metalfish
 
       - name: Repeated hybrid regression benchmark

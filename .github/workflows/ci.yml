@@ -85,6 +85,7 @@ jobs:
           python3 tests/test_analyze_lichess_games.py
           python3 tests/test_hybrid_regression_compare.py
           python3 tests/test_benchmark_configs.py
+          python3 tests/test_sprt_test.py
           python3 tests/test_nn_backend_artifacts.py
           python3 tests/test_uci_search_result_tools.py
 
