@@ -26,7 +26,9 @@ class FakeEngine:
         del movetime_ms
         return self._move(position)
 
-    def go_tc(self, position: str, wtime: int, btime: int, winc: int = 0, binc: int = 0) -> str:
+    def go_tc(
+        self, position: str, wtime: int, btime: int, winc: int = 0, binc: int = 0
+    ) -> str:
         del wtime, btime, winc, binc
         return self._move(position)
 
@@ -43,7 +45,9 @@ class FakeEngine:
 def test_parse_last_score_cp() -> None:
     expect(
         "cp score parsed",
-        sprt_test.parse_last_score_cp(["info depth 1 score cp -42 nodes 1", "bestmove e2e4"])
+        sprt_test.parse_last_score_cp(
+            ["info depth 1 score cp -42 nodes 1", "bestmove e2e4"]
+        )
         == -42,
     )
     expect(
