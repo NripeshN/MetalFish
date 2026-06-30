@@ -1209,6 +1209,8 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   config.use_shared_tt = engine.get_options()["HybridMCTSUseSharedTT"];
   config.shared_tt_cp_scale = static_cast<float>(
       static_cast<int>(engine.get_options()["HybridMCTSSharedTTCpScale"]));
+  config.q_to_cp_scale = static_cast<float>(
+      static_cast<int>(engine.get_options()["HybridQToCpScale"]));
   config.mcts_ab_root_hints = engine.get_options()["HybridMCTSABRootHints"];
   config.mcts_ab_root_hint_delay_ms =
       static_cast<int>(engine.get_options()["HybridMCTSABRootHintDelayMs"]);
