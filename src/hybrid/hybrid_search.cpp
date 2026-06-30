@@ -5425,6 +5425,11 @@ Move ParallelHybridSearch::make_final_decision() {
                eval_delta >= -30) {
       choose_mcts = true;
       reason = "mcts_strong_no_ab_preference";
+    } else if (mcts_visit_evidence_sane && mcts_strong &&
+               visit_share >= 0.65f && root_q_gap >= 0.08f &&
+               eval_delta >= -60 && mcts_confidence_visits >= 180) {
+      choose_mcts = true;
+      reason = "mcts_dominant_visit_override";
     }
     break;
   }
