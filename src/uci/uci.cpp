@@ -1018,6 +1018,8 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
       engine, "MCTSSmartPruningFactor", config.smart_pruning_factor);
   config.smart_pruning_minimum_batches =
       static_cast<int>(engine.get_options()["MCTSSmartPruningMinimumBatches"]);
+  config.shared_tt_depth_threshold = static_cast<int>(
+      engine.get_options()["HybridMCTSSharedTTDepthThreshold"]);
   config.kld_gain_min = get_float_option(engine, "MCTSMinimumKLDGainPerNode",
                                          config.kld_gain_min);
   config.kld_gain_average_interval =

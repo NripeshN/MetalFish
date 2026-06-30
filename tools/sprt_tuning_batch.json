@@ -94,9 +94,9 @@
       "elo1": 5
     },
     {
-      "label": "RootPolicySoftmaxTemp 1.45",
+      "label": "RootPolicySoftmaxTemp 1.20 (sharper)",
       "options": {
-        "MCTSRootPolicySoftmaxTemp": "1.45"
+        "MCTSRootPolicySoftmaxTemp": "1.20"
       },
       "elo0": -5,
       "elo1": 5
@@ -128,7 +128,7 @@
     {
       "label": "FPU reduction root 0.10",
       "options": {
-        "MCTSFPUReductionAtRoot": "0.10"
+        "MCTSFpuReductionAtRoot": "0.10"
       },
       "elo0": -5,
       "elo1": 5
@@ -161,6 +161,30 @@
       "label": "QToCpScale 350 (inflate MCTS cp)",
       "options": {
         "HybridQToCpScale": "350"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "SharedTT depth threshold 6 (more entries)",
+      "options": {
+        "HybridMCTSSharedTTDepthThreshold": "6"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "SharedTT depth threshold 10 (higher quality)",
+      "options": {
+        "HybridMCTSSharedTTDepthThreshold": "10"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "SharedTT depth threshold 12 (deep only)",
+      "options": {
+        "HybridMCTSSharedTTDepthThreshold": "12"
       },
       "elo0": -5,
       "elo1": 5
