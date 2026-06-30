@@ -5,13 +5,13 @@ Launches the engine in hybrid mode and verifies evaluation/bestmove
 for a set of well-known endgame positions.
 """
 
+import os
+import queue
+import re
 import subprocess
 import sys
-import time
-import re
-import os
 import threading
-import queue
+import time
 
 ENGINE_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build", "metalfish"
@@ -200,7 +200,9 @@ def evaluate_result(pos, bestmove, score_cp, score_mate):
             reason = f"Found mate in {score_mate}"
         elif score_cp is not None and score_cp > 500:
             passed = True
-            reason = f"Large positive score {score_cp}cp (mate not announced but winning)"
+            reason = (
+                f"Large positive score {score_cp}cp (mate not announced but winning)"
+            )
         else:
             reason = f"Expected mate, got cp={score_cp} mate={score_mate}"
 
@@ -222,7 +224,9 @@ def evaluate_result(pos, bestmove, score_cp, score_mate):
             passed = True
             reason = f"Large positive score: {score_cp}cp"
         else:
-            reason = f"Expected large positive or mate, got cp={score_cp} mate={score_mate}"
+            reason = (
+                f"Expected large positive or mate, got cp={score_cp} mate={score_mate}"
+            )
 
     elif check == "positive":
         if score_mate is not None and score_mate > 0:
@@ -365,7 +369,9 @@ def run_test():
             # Print any lines we did get for diagnostics
             if search_lines:
                 print(f"  Last lines: {search_lines[-3:]}")
-            results.append((pos, None, None, None, False, "No bestmove (timeout/crash)"))
+            results.append(
+                (pos, None, None, None, False, "No bestmove (timeout/crash)")
+            )
             failed_count += 1
             # Kill and restart for next position
             engine.quit()

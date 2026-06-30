@@ -257,7 +257,9 @@ def run_all_tests(movetime: int = 5000, verbose: bool = False) -> bool:
 
     if not NN_WEIGHTS.exists():
         print(f"{RED}ERROR: NN weights not found at {NN_WEIGHTS}{RESET}")
-        print("Download with: python3 tools/download_engine_networks.py --dest networks")
+        print(
+            "Download with: python3 tools/download_engine_networks.py --dest networks"
+        )
         return False
 
     # UCI option sets for each mode
@@ -342,7 +344,9 @@ def run_all_tests(movetime: int = 5000, verbose: bool = False) -> bool:
         # --- Hybrid ---
         print(f"  {BOLD}Hybrid{RESET}    ... ", end="", flush=True)
         t0 = time.time()
-        hybrid_result = run_engine_search(fen, movetime, hybrid_options, timeout=timeout)
+        hybrid_result = run_engine_search(
+            fen, movetime, hybrid_options, timeout=timeout
+        )
         hybrid_time = time.time() - t0
         if hybrid_result.bestmove and not hybrid_result.bestmove.startswith("ERROR"):
             # Try to detect which engine was chosen from info lines
@@ -408,9 +412,7 @@ def run_all_tests(movetime: int = 5000, verbose: bool = False) -> bool:
     print(f"{'=' * 72}\n")
 
     # Results table
-    print(
-        f"  {'Position':<40} {'MCTS':<12} {'AB':<12} {'Hybrid':<12} {'Diff':<8}"
-    )
+    print(f"  {'Position':<40} {'MCTS':<12} {'AB':<12} {'Hybrid':<12} {'Diff':<8}")
     print(f"  {'-' * 84}")
     for r in results:
         name = r["name"][:38]
@@ -487,7 +489,9 @@ def run_all_tests(movetime: int = 5000, verbose: bool = False) -> bool:
     fork = results[7]  # Fork/mate threat
     fork_mcts = fork["mcts"]
     fork_ab = fork["ab"]
-    if fork_ab.score_mate is None and (fork_ab.score_cp is not None and fork_ab.score_cp < 300):
+    if fork_ab.score_mate is None and (
+        fork_ab.score_cp is not None and fork_ab.score_cp < 300
+    ):
         sanity_issues.append(
             f"Scholar's mate: AB didn't find mate or big advantage "
             f"(got {score_string(fork_ab)})"
@@ -510,9 +514,7 @@ def run_all_tests(movetime: int = 5000, verbose: bool = False) -> bool:
 # Entry point
 # ---------------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(
-        description="MetalFish MCTS regression test suite"
-    )
+    parser = argparse.ArgumentParser(description="MetalFish MCTS regression test suite")
     parser.add_argument(
         "--movetime",
         type=int,

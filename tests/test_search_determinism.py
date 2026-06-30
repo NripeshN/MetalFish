@@ -6,13 +6,15 @@ whether the engine produces consistent bestmove choices across runs.
 Each run launches a fresh engine process for true independence.
 """
 
+import os
 import subprocess
 import sys
 import time
-import os
 from collections import Counter
 
-ENGINE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build", "metalfish")
+ENGINE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build", "metalfish"
+)
 NETWORK = "networks/BT4-1024x15x32h-swa-6147500.pb.gz"
 RUNS = 8
 MOVETIME = 5000
@@ -20,9 +22,18 @@ STABILITY_THRESHOLD = 0.60  # >60% same move = stable
 
 POSITIONS = [
     ("Starting position", "position startpos"),
-    ("Rb4 blunder position", "position fen 2kr4/1q1r1p2/4p3/p3P3/2Pn1PP1/2R5/1Q3B1P/5BK1 w - - 4 34"),
-    ("Sicilian Najdorf", "position fen rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N5/PPP2PPP/R1BQKB1R w KQkq - 0 6"),
-    ("Sharp tactical", "position fen r1b1k2r/ppppqppp/2n2n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQK2R w KQkq - 0 6"),
+    (
+        "Rb4 blunder position",
+        "position fen 2kr4/1q1r1p2/4p3/p3P3/2Pn1PP1/2R5/1Q3B1P/5BK1 w - - 4 34",
+    ),
+    (
+        "Sicilian Najdorf",
+        "position fen rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N5/PPP2PPP/R1BQKB1R w KQkq - 0 6",
+    ),
+    (
+        "Sharp tactical",
+        "position fen r1b1k2r/ppppqppp/2n2n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQK2R w KQkq - 0 6",
+    ),
     ("Quiet endgame", "position fen 8/pp3pkp/2p3p1/8/4P3/2P3PP/PP3PK1/8 w - - 0 1"),
 ]
 
@@ -144,8 +155,12 @@ def main():
             stability_pct = most_common_count / len(valid_moves)
             stable = stability_pct > STABILITY_THRESHOLD
 
-            print(f"\n  Most common move: {most_common_move} ({stability_pct*100:.1f}%)")
-            print(f"  Stable: {'YES' if stable else 'NO'} (threshold: >{STABILITY_THRESHOLD*100:.0f}%)")
+            print(
+                f"\n  Most common move: {most_common_move} ({stability_pct*100:.1f}%)"
+            )
+            print(
+                f"  Stable: {'YES' if stable else 'NO'} (threshold: >{STABILITY_THRESHOLD*100:.0f}%)"
+            )
 
             if not stable:
                 all_stable = False
@@ -154,7 +169,9 @@ def main():
             if pos_name == "Rb4 blunder position":
                 blunder_count = counter.get("b2b4", 0)
                 if blunder_count > 0:
-                    print(f"\n  WARNING: Engine chose the blunder b2b4 {blunder_count}/{len(valid_moves)} times!")
+                    print(
+                        f"\n  WARNING: Engine chose the blunder b2b4 {blunder_count}/{len(valid_moves)} times!"
+                    )
                 else:
                     print(f"\n  GOOD: Engine never chose the blunder move b2b4")
         else:
@@ -162,7 +179,9 @@ def main():
             all_stable = False
 
     print(f"\n{'=' * 70}")
-    print(f"OVERALL: {'ALL POSITIONS STABLE' if all_stable else 'SOME POSITIONS UNSTABLE'}")
+    print(
+        f"OVERALL: {'ALL POSITIONS STABLE' if all_stable else 'SOME POSITIONS UNSTABLE'}"
+    )
     print(f"{'=' * 70}")
 
     return 0 if all_stable else 1

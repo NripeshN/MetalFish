@@ -209,9 +209,7 @@ def main():
     if rapid_passed:
         print(f"  PASS: All 20 rapid cycles completed successfully")
     else:
-        print(
-            f"  FAIL: Only {results['rapid_cycling_ok']}/20 cycles completed"
-        )
+        print(f"  FAIL: Only {results['rapid_cycling_ok']}/20 cycles completed")
 
     # =========================================================================
     # TEST 2: Ponderhit continuation
@@ -267,7 +265,9 @@ def main():
                         move = chess.Move.from_uci(best)
                         if move in board.legal_moves:
                             results["ponderhit_continuation_ok"] = True
-                            print(f"  PASS: Received legal bestmove after ponderhit: {r}")
+                            print(
+                                f"  PASS: Received legal bestmove after ponderhit: {r}"
+                            )
                         else:
                             print(f"  FAIL: Illegal bestmove: {best}")
                             results["timeouts"] += 1
@@ -300,7 +300,9 @@ def main():
     print("SUMMARY")
     print("=" * 60)
     print(f"  Rapid cycling:        {results['rapid_cycling_ok']}/20 OK")
-    print(f"  Ponderhit continuation: {'PASS' if results['ponderhit_continuation_ok'] else 'FAIL'}")
+    print(
+        f"  Ponderhit continuation: {'PASS' if results['ponderhit_continuation_ok'] else 'FAIL'}"
+    )
     print(f"  Crashes:              {results['crashes']}")
     print(f"  Timeouts:             {results['timeouts']}")
     print(f"  Hangs:                {results['hangs']}")

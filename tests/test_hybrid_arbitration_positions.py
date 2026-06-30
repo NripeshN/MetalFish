@@ -32,7 +32,9 @@ SEARCH_TIMEOUT = 90.0  # seconds beyond movetime to wait
 
 # --- Test positions ---
 # (name, fen, description, acceptable_moves or None, score_range or None)
-POSITIONS: List[Tuple[str, str, str, Optional[List[str]], Optional[Tuple[int, int]]]] = [
+POSITIONS: List[
+    Tuple[str, str, str, Optional[List[str]], Optional[Tuple[int, int]]]
+] = [
     (
         "zugzwang",
         "8/8/p1p5/1p5p/1P5k/8/PP3KPP/8 w - - 0 1",
@@ -442,8 +444,7 @@ def main() -> int:
     mcts_override_count = sum(
         1
         for r in results
-        if r.hybrid_reason
-        and r.hybrid_reason not in ("engines_agree", "ab_default")
+        if r.hybrid_reason and r.hybrid_reason not in ("engines_agree", "ab_default")
     )
 
     print(f"  Total positions:     {total}")

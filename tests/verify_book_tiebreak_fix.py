@@ -21,7 +21,22 @@ KOMODO = BOOKS_DIR / "komodo.bin"
 RODENT = BOOKS_DIR / "rodent.bin"
 
 # Bad moves that indicate the old lexicographic tiebreak bug
-BAD_PAWN_MOVES = {"h2h3", "h2h4", "h7h6", "h7h5", "g2g4", "g2g3", "g7g5", "h3", "h4", "h6", "h5", "g4", "g3", "g5"}
+BAD_PAWN_MOVES = {
+    "h2h3",
+    "h2h4",
+    "h7h6",
+    "h7h5",
+    "g2g4",
+    "g2g3",
+    "g7g5",
+    "h3",
+    "h4",
+    "h6",
+    "h5",
+    "g4",
+    "g3",
+    "g5",
+}
 
 
 def get_book_moves(reader, board):
@@ -54,7 +69,11 @@ def lookup_local_simulation(board, readers):
         if len(readers) > 1 and reader is readers[0]:
             continue
         # Fallback: lexicographic tiebreak (last resort)
-        return max(weights.items(), key=lambda item: (item[1], item[0]))[0], "tiebreak", reader
+        return (
+            max(weights.items(), key=lambda item: (item[1], item[0]))[0],
+            "tiebreak",
+            reader,
+        )
     return None, "no_move", None
 
 
@@ -71,7 +90,14 @@ TEST_POSITIONS = [
     (
         "Najdorf after 5...a6 (White to move)",
         ["e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3", "a6"],
-        {"f1e2", "c1e3", "c1g5", "f2f3", "g1e2", "f1c4"},  # Be2, Be3, Bg5, f3, Nge2, Bc4
+        {
+            "f1e2",
+            "c1e3",
+            "c1g5",
+            "f2f3",
+            "g1e2",
+            "f1c4",
+        },  # Be2, Be3, Bg5, f3, Nge2, Bc4
         {"h2h3", "h2h4", "g2g4"},  # h3, h4, g4 are bad
     ),
     (
@@ -101,7 +127,16 @@ TEST_POSITIONS = [
     (
         "After 1.e4 (Black to move)",
         ["e4"],
-        {"c7c5", "e7e5", "e7e6", "c7c6", "d7d5", "g8f6", "d7d6", "g7g6"},  # c5, e5, e6, c6, d5, Nf6, d6, g6
+        {
+            "c7c5",
+            "e7e5",
+            "e7e6",
+            "c7c6",
+            "d7d5",
+            "g8f6",
+            "d7d6",
+            "g7g6",
+        },  # c5, e5, e6, c6, d5, Nf6, d6, g6
         {"h7h5", "h7h6", "g7g5"},  # h5, h6, g5 are bad
     ),
     (
@@ -167,7 +202,9 @@ def run_tests():
     print("=" * 72)
 
     # Check book files exist
-    print(f"\nRepertoire book: {REPERTOIRE} {'[EXISTS]' if REPERTOIRE.exists() else '[MISSING]'}")
+    print(
+        f"\nRepertoire book: {REPERTOIRE} {'[EXISTS]' if REPERTOIRE.exists() else '[MISSING]'}"
+    )
     print(f"GM2001 book:     {GM2001} {'[EXISTS]' if GM2001.exists() else '[MISSING]'}")
     print(f"Komodo book:     {KOMODO} {'[EXISTS]' if KOMODO.exists() else '[MISSING]'}")
     print(f"Rodent book:     {RODENT} {'[EXISTS]' if RODENT.exists() else '[MISSING]'}")
@@ -246,7 +283,9 @@ def run_tests():
             passed += 1
         else:
             # Not in acceptable or bad - might be OK depending on context
-            print(f"  SELECTED: {best_san} ({best_uci}) -- not in expected list but not a bad pawn push")
+            print(
+                f"  SELECTED: {best_san} ({best_uci}) -- not in expected list but not a bad pawn push"
+            )
             print(f"  Result: PASS (acceptable)")
             passed += 1
 
@@ -273,7 +312,9 @@ def run_tests():
 
         fallthrough_tested += 1
         print(f"\n  Position: {desc}")
-        print(f"  Repertoire tie: {[board.san(chess.Move.from_uci(m)) for m in tied]} (weight={max_w})")
+        print(
+            f"  Repertoire tie: {[board.san(chess.Move.from_uci(m)) for m in tied]} (weight={max_w})"
+        )
 
         # Simulate the full _lookup_local with all readers
         result_uci, source, chosen_reader = lookup_local_simulation(board, all_readers)
@@ -294,7 +335,9 @@ def run_tests():
             elif len(fallback_readers) > 2 and chosen_reader is fallback_readers[2]:
                 reader_name = "rodent"
 
-        print(f"  Fallthrough result: {result_san} ({result_uci}) from {reader_name} [{source}]")
+        print(
+            f"  Fallthrough result: {result_san} ({result_uci}) from {reader_name} [{source}]"
+        )
 
         if result_uci in bad:
             print(f"  Result: FAIL -- still picks a bad pawn push")
@@ -313,11 +356,17 @@ def run_tests():
     print(f"  Fallthrough tests: {fallthrough_passed}/{fallthrough_tested} PASS")
 
     if failed == 0 and ties_found == 0:
-        print("\n  VERDICT: ALL CLEAR - No ties remain, popularity bonus fully resolved tiebreaks")
+        print(
+            "\n  VERDICT: ALL CLEAR - No ties remain, popularity bonus fully resolved tiebreaks"
+        )
     elif failed == 0 and ties_found > 0:
-        print(f"\n  VERDICT: PARTIAL - {ties_found} ties exist but fallthrough prevents bad moves")
+        print(
+            f"\n  VERDICT: PARTIAL - {ties_found} ties exist but fallthrough prevents bad moves"
+        )
     else:
-        print(f"\n  VERDICT: ISSUES REMAIN - {failed} positions still select bad pawn pushes")
+        print(
+            f"\n  VERDICT: ISSUES REMAIN - {failed} positions still select bad pawn pushes"
+        )
 
     print("=" * 72)
 

@@ -8,15 +8,16 @@ Usage:
 
 Requires: ./build/metalfish binary and networks/BT4-1024x15x32h-swa-6147500.pb.gz
 """
+
 from __future__ import annotations
 
 import os
 import pathlib
+import queue
 import subprocess
 import sys
-import time
-import queue
 import threading
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ENGINE = ROOT / "build" / "metalfish"
@@ -48,9 +49,7 @@ class UCIEngine:
             bufsize=1,
         )
         self._queue: queue.Queue[str | None] = queue.Queue()
-        self._reader_thread = threading.Thread(
-            target=self._reader, daemon=True
-        )
+        self._reader_thread = threading.Thread(target=self._reader, daemon=True)
         self._reader_thread.start()
 
     def _reader(self) -> None:
@@ -123,6 +122,7 @@ class UCIEngine:
 # ---------------------------------------------------------------------------
 # Test scenarios (as specified)
 # ---------------------------------------------------------------------------
+
 
 class Scenario:
     def __init__(self, name, go, min_time, max_time, description):
@@ -233,11 +233,13 @@ def run_audit() -> None:
                 )
             except TimeoutError as e:
                 print(f"  TIMEOUT: {e}")
-                results.append({
-                    "name": sc.name,
-                    "status": "TIMEOUT",
-                    "elapsed": None,
-                })
+                results.append(
+                    {
+                        "name": sc.name,
+                        "status": "TIMEOUT",
+                        "elapsed": None,
+                    }
+                )
                 failures += 1
                 print()
                 continue
@@ -251,15 +253,17 @@ def run_audit() -> None:
                 failures += 1
 
             budget_info = extract_time_budget_info(info_lines)
-            results.append({
-                "name": sc.name,
-                "status": status,
-                "elapsed": elapsed,
-                "min": sc.min_time,
-                "max": sc.max_time,
-                "bestmove": bestmove,
-                "budget_info": budget_info,
-            })
+            results.append(
+                {
+                    "name": sc.name,
+                    "status": status,
+                    "elapsed": elapsed,
+                    "min": sc.min_time,
+                    "max": sc.max_time,
+                    "bestmove": bestmove,
+                    "budget_info": budget_info,
+                }
+            )
 
             marker = "PASS" if in_range else "**FAIL**"
             print(f"  Actual time: {elapsed:.3f}s  [{marker}]")
@@ -288,7 +292,9 @@ def run_audit() -> None:
                 range_str = "N/A"
             print(f"{r['name']:<32} {range_str:>14} {time_str:>10} {r['status']:>8}")
         print("-" * 72)
-        print(f"Passed: {passes}/{len(SCENARIOS)}  |  Failed: {failures}/{len(SCENARIOS)}")
+        print(
+            f"Passed: {passes}/{len(SCENARIOS)}  |  Failed: {failures}/{len(SCENARIOS)}"
+        )
         print("=" * 72)
 
         if failures > 0:
@@ -297,11 +303,15 @@ def run_audit() -> None:
                 if r["status"] != "PASS":
                     if r["elapsed"] is not None:
                         if r["elapsed"] > r["max"]:
-                            print(f"  - {r['name']}: took {r['elapsed']:.2f}s "
-                                  f"(limit {r['max']:.1f}s) - risk of flagging")
+                            print(
+                                f"  - {r['name']}: took {r['elapsed']:.2f}s "
+                                f"(limit {r['max']:.1f}s) - risk of flagging"
+                            )
                         elif r["elapsed"] < r["min"]:
-                            print(f"  - {r['name']}: took {r['elapsed']:.2f}s "
-                                  f"(min {r['min']:.1f}s) - underusing time")
+                            print(
+                                f"  - {r['name']}: took {r['elapsed']:.2f}s "
+                                f"(min {r['min']:.1f}s) - underusing time"
+                            )
                     else:
                         print(f"  - {r['name']}: TIMEOUT")
             sys.exit(1)

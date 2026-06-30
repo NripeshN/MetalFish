@@ -3,18 +3,22 @@
 tracking eval and flagging blunders (eval drops > 150cp between consecutive
 moves from the same side)."""
 
+import os
 import subprocess
 import sys
 import time
-import os
 
 # Force unbuffered output
 sys.stdout.reconfigure(line_buffering=True)
 
-ENGINE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                           "build", "metalfish")
-NETWORK_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "networks", "BT4-1024x15x32h-swa-6147500.pb.gz")
+ENGINE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build", "metalfish"
+)
+NETWORK_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "networks",
+    "BT4-1024x15x32h-swa-6147500.pb.gz",
+)
 
 NUM_GAMES = 3
 MOVETIME = 3000
@@ -141,7 +145,7 @@ def play_game(game_num):
 
     try:
         while ply < MAX_MOVES:
-            is_white_turn = (ply % 2 == 0)
+            is_white_turn = ply % 2 == 0
             engine = white if is_white_turn else black
 
             bestmove, score_engine_pov = engine.go(moves)
@@ -160,8 +164,10 @@ def play_game(game_num):
 
             side = "W" if is_white_turn else "B"
             move_num = (ply // 2) + 1
-            print(f"  {move_num:3d}{'.' if is_white_turn else '...'} {bestmove:6s}  "
-                  f"eval={score_white_pov:+5d}cp (from white POV)")
+            print(
+                f"  {move_num:3d}{'.' if is_white_turn else '...'} {bestmove:6s}  "
+                f"eval={score_white_pov:+5d}cp (from white POV)"
+            )
 
             ply += 1
 
@@ -194,14 +200,16 @@ def play_game(game_num):
         # White wants score to be high; a drop means blunder
         drop = scores_white_pov[prev_idx] - scores_white_pov[curr_idx]
         if drop > BLUNDER_THRESHOLD:
-            blunders.append({
-                "side": "White",
-                "ply": curr_idx + 1,
-                "move": moves[curr_idx],
-                "score_before": scores_white_pov[prev_idx],
-                "score_after": scores_white_pov[curr_idx],
-                "drop": drop,
-            })
+            blunders.append(
+                {
+                    "side": "White",
+                    "ply": curr_idx + 1,
+                    "move": moves[curr_idx],
+                    "score_before": scores_white_pov[prev_idx],
+                    "score_after": scores_white_pov[curr_idx],
+                    "drop": drop,
+                }
+            )
 
     # Black's consecutive moves (from black's perspective, score should be low/negative from white POV)
     black_indices = list(range(1, len(scores_white_pov), 2))
@@ -214,14 +222,16 @@ def play_game(game_num):
         #                 = scores_white_pov[curr_idx] - scores_white_pov[prev_idx]
         drop = scores_white_pov[curr_idx] - scores_white_pov[prev_idx]
         if drop > BLUNDER_THRESHOLD:
-            blunders.append({
-                "side": "Black",
-                "ply": curr_idx + 1,
-                "move": moves[curr_idx],
-                "score_before": scores_white_pov[prev_idx],
-                "score_after": scores_white_pov[curr_idx],
-                "drop": drop,
-            })
+            blunders.append(
+                {
+                    "side": "Black",
+                    "ply": curr_idx + 1,
+                    "move": moves[curr_idx],
+                    "score_before": scores_white_pov[prev_idx],
+                    "score_after": scores_white_pov[curr_idx],
+                    "drop": drop,
+                }
+            )
 
     # Sort blunders by ply
     blunders.sort(key=lambda b: b["ply"])
@@ -260,9 +270,11 @@ def print_report(game_result):
     if g["blunders"]:
         print(f"  BLUNDERS DETECTED ({len(g['blunders'])}):")
         for b in g["blunders"]:
-            print(f"    Ply {b['ply']:3d} ({b['side']:5s}): {b['move']:6s} "
-                  f"| before={b['score_before']:+5d}cp -> after={b['score_after']:+5d}cp "
-                  f"| drop={b['drop']}cp")
+            print(
+                f"    Ply {b['ply']:3d} ({b['side']:5s}): {b['move']:6s} "
+                f"| before={b['score_before']:+5d}cp -> after={b['score_after']:+5d}cp "
+                f"| drop={b['drop']}cp"
+            )
     else:
         print("  No blunders detected (threshold: >150cp drop)")
 
@@ -295,8 +307,10 @@ def main():
     print(f"  Total moves (all games): {total_moves_all}")
     print(f"  Total blunders detected: {total_blunders}")
     for r in results:
-        print(f"    Game {r['game_num']}: {r['total_moves']} moves, "
-              f"{len(r['blunders'])} blunders, result={r['result']}")
+        print(
+            f"    Game {r['game_num']}: {r['total_moves']} moves, "
+            f"{len(r['blunders'])} blunders, result={r['result']}"
+        )
 
 
 if __name__ == "__main__":

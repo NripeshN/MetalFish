@@ -144,7 +144,13 @@ def encode_polyglot_move(move: chess.Move, board: chess.Board) -> int:
             chess.QUEEN: 4,
         }.get(move.promotion, 0)
 
-    raw = (to_file) | (to_row << 3) | (from_file << 6) | (from_row << 9) | (promotion << 12)
+    raw = (
+        (to_file)
+        | (to_row << 3)
+        | (from_file << 6)
+        | (from_row << 9)
+        | (promotion << 12)
+    )
     return raw
 
 
@@ -168,7 +174,10 @@ def main():
         "--output", type=str, default="books/masters.bin", help="Output path"
     )
     parser.add_argument(
-        "--token", type=str, default="", help="Lichess API token (or set LICHESS_API_KEY)"
+        "--token",
+        type=str,
+        default="",
+        help="Lichess API token (or set LICHESS_API_KEY)",
     )
     args = parser.parse_args()
 

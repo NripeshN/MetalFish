@@ -82,8 +82,7 @@ ENDGAMES = [
         expected_desc="White wins with Kd3 (opposition); score should be large positive or mate",
         accept_fn=lambda bm, cp, mate: (
             (
-                (mate is not None and mate > 0)
-                or (cp is not None and cp > 300),
+                (mate is not None and mate > 0) or (cp is not None and cp > 300),
                 f"move={bm}, cp={cp}, mate={mate}; "
                 f"expect winning eval (Kd3 is best, gains opposition)",
             )
@@ -140,9 +139,7 @@ EDGE_CASES = [
         ),
         accept_fn=lambda bm, cp, mate: (
             (
-                bm is not None
-                and bm != "(none)"
-                and len(bm) >= 4,
+                bm is not None and bm != "(none)" and len(bm) >= 4,
                 f"move={bm}, cp={cp}; valid defensive move found",
             )
         ),
@@ -154,8 +151,7 @@ EDGE_CASES = [
         accept_fn=lambda bm, cp, mate: (
             (
                 bm in ("e1d2", "e1f1"),
-                f"move={bm}, cp={cp}; "
-                f"expected one of [e1d2, e1f1]",
+                f"move={bm}, cp={cp}; " f"expected one of [e1d2, e1f1]",
             )
         ),
     ),

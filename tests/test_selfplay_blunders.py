@@ -390,9 +390,7 @@ def main():
             else:
                 print(f"  No blunders detected in game {game_num}.")
 
-            all_blunders.extend(
-                [{**b, "game": game_num} for b in blunders]
-            )
+            all_blunders.extend([{**b, "game": game_num} for b in blunders])
 
         except (TimeoutError, RuntimeError) as exc:
             print(f"\n  ERROR in game {game_num}: {exc}")
@@ -429,8 +427,10 @@ def main():
     print(f"Total blunders found (>{args.threshold} cp drop): {len(all_blunders)}")
 
     if all_blunders:
-        print(f"\nBlunder rate: {len(all_blunders)}/{total_moves} moves "
-              f"({100.0 * len(all_blunders) / max(1, total_moves):.2f}%)")
+        print(
+            f"\nBlunder rate: {len(all_blunders)}/{total_moves} moves "
+            f"({100.0 * len(all_blunders) / max(1, total_moves):.2f}%)"
+        )
         print("\nAll blunders:")
         print("-" * 70)
         for i, b in enumerate(all_blunders, 1):
