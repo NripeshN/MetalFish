@@ -1894,7 +1894,10 @@ bool HybridMCTSRootRejectsAB(bool fixed_budget, bool visit_evidence_sane,
       top_visits >= 180 && top_visits >= 4 * std::max<uint32_t>(1, ab_visits) &&
       ab_visits <= 64 && visit_share >= 0.60f && root_q_gap >= 0.10f &&
       eval_delta >= 10;
-  return hard_reject || no_clear_ab_reject;
+  const bool visit_dominance_reject =
+      top_visits >= 300 && top_visits >= 6 * std::max<uint32_t>(1, ab_visits) &&
+      visit_share >= 0.45f && root_q_gap >= 0.02f;
+  return hard_reject || no_clear_ab_reject || visit_dominance_reject;
 }
 
 bool HybridMCTSRootRejectQGapOverride(
@@ -5215,11 +5218,13 @@ Move ParallelHybridSearch::make_final_decision() {
         const uint32_t top_visits =
             mcts_state_.top_moves[0].current_visits.load(
                 std::memory_order_relaxed);
+        bool ab_found_in_mcts = false;
         for (int i = 1; i < top_count; ++i) {
           Move move(mcts_state_.top_moves[i].move_raw.load(
               std::memory_order_relaxed));
           if (move != ab_best)
             continue;
+          ab_found_in_mcts = true;
           const uint32_t ab_visits =
               mcts_state_.top_moves[i].current_visits.load(
                   std::memory_order_relaxed);
@@ -5231,7 +5236,15 @@ Move ParallelHybridSearch::make_final_decision() {
                   visit_share, eval_delta)) {
             mcts_root_rejects_ab = true;
           }
+          if (!mcts_root_rejects_ab && top_visits >= 300 &&
+              ab_visits <= top_visits / 10 && visit_share >= 0.40f) {
+            mcts_root_rejects_ab = true;
+          }
           break;
+        }
+        if (!ab_found_in_mcts && top_visits >= 250 && visit_share >= 0.40f &&
+            mcts_confidence_visits >= 200) {
+          mcts_root_rejects_ab = true;
         }
       }
     }

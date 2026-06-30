@@ -1525,7 +1525,10 @@ def test_opening_book_does_not_send_bot_token_to_explorer() -> None:
 
     headers = FakeRequests.calls[0].get("headers", {})
     expect("explorer request has user agent", "User-Agent" in headers)
-    expect("explorer request has no auth", "Authorization" not in headers)
+    expect(
+        "explorer request uses token for auth",
+        headers.get("Authorization") == "Bearer secret-token",
+    )
 
 
 def test_opening_book_scores_for_side_to_move() -> None:

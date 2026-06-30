@@ -392,7 +392,7 @@ LOAD_THROTTLE_EXTREME = max(
 DEFER_SEEK_LOAD = max(
     LOAD_THROTTLE_EXTREME, env_float("METALFISH_DEFER_SEEK_LOAD", 1.75)
 )
-BOOK_MAX_PLY = max(0, env_int("METALFISH_BOOK_MAX_PLY", 20))
+BOOK_MAX_PLY = max(0, env_int("METALFISH_BOOK_MAX_PLY", 30))
 BOOK_MIN_CLOCK_MS = 30_000
 SUBMITTED_TURN_HISTORY_LIMIT = 512
 COMPLETED_GAME_HISTORY_LIMIT = 512
@@ -1771,6 +1771,9 @@ def configured_book_paths() -> list[pathlib.Path]:
         candidates = []
         for pattern in ("*.bin", "*.book", "*.polyglot"):
             candidates.extend(sorted(DEFAULT_BOOK_DIR.glob(pattern)))
+        primary = [p for p in candidates if "metalfish_repertoire" in p.name]
+        rest = [p for p in candidates if "metalfish_repertoire" not in p.name]
+        candidates = primary + rest
     return [path for path in candidates if path.is_file()]
 
 
@@ -1789,7 +1792,10 @@ class OpeningBook:
         self.timeout = timeout
         self.allow_online = allow_online
         self.cache_path = cache_path
-        self.http = SerializedHttpClient(min_interval_s=EXPLORER_API_MIN_INTERVAL_S)
+        self.http = SerializedHttpClient(
+            min_interval_s=EXPLORER_API_MIN_INTERVAL_S,
+            auth_token=api_key if api_key else None,
+        )
         self._cache: dict[str, str] = self._load_cache()
         self._miss_cache: set[str] = set()
         self._readers: list[chess.polyglot.MemoryMappedReader] = []
@@ -1874,20 +1880,27 @@ class OpeningBook:
             board = chess.Board(fen)
         except ValueError:
             return None
-        weights: dict[str, int] = {}
         for reader in self._readers:
             try:
                 entries = list(reader.find_all(board))
             except Exception:
                 continue
+            weights: dict[str, int] = {}
             for entry in entries:
                 move_attr = entry.move
                 move = move_attr() if callable(move_attr) else move_attr
                 if move in board.legal_moves:
                     weights[move.uci()] = weights.get(move.uci(), 0) + entry.weight
-        if not weights:
-            return None
-        return max(weights.items(), key=lambda item: (item[1], item[0]))[0]
+            if not weights:
+                continue
+            max_weight = max(weights.values())
+            tied = [uci for uci, w in weights.items() if w == max_weight]
+            if len(tied) == 1:
+                return tied[0]
+            if len(self._readers) > 1 and reader is self._readers[0]:
+                continue
+            return max(weights.items(), key=lambda item: (item[1], item[0]))[0]
+        return None
 
     def _query_masters(self, fen: str) -> str | None:
         try:
@@ -1912,8 +1925,8 @@ class OpeningBook:
                 f"{EXPLORER_API}/lichess",
                 params={
                     "fen": fen,
-                    "ratings": "2200,2500",
-                    "speeds": "blitz,rapid,classical",
+                    "ratings": "2500",
+                    "speeds": "rapid,classical",
                     "topGames": 0,
                     "recentGames": 0,
                 },
@@ -1931,18 +1944,26 @@ class OpeningBook:
             return None
         fen_parts = fen.split()
         black_to_move = len(fen_parts) > 1 and fen_parts[1] == "b"
-        best, best_score = None, -1.0
+        candidates: list[tuple[float, str]] = []
         for m in moves:
             games = m.get("white", 0) + m.get("draws", 0) + m.get("black", 0)
             if games < self.min_games:
                 continue
             wins = m.get("black" if black_to_move else "white", 0)
-            wins += m.get("draws", 0) * 0.5
-            score = (wins / games) * (games**0.3) if games > 0 else 0
-            if score > best_score:
-                best_score = score
-                best = m.get("uci")
-        return best
+            losses = m.get("white" if black_to_move else "black", 0)
+            draws = m.get("draws", 0)
+            win_rate = (wins + draws * 0.5) / games if games > 0 else 0
+            if win_rate < 0.45:
+                continue
+            loss_rate = losses / games if games > 0 else 1
+            if loss_rate > 0.40:
+                continue
+            score = win_rate * (games**0.25)
+            candidates.append((score, m.get("uci", "")))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: -x[0])
+        return candidates[0][1]
 
 
 class LichessBot:
@@ -4841,6 +4862,10 @@ class LichessBot:
                     **self._audit_context(moves),
                 )
                 parsed = self._parse_legal_move(game_id, book_move, board, "book")
+                if parsed is not None and not self._verify_book_move(
+                    engine, initial_fen, moves, board, parsed, game_id
+                ):
+                    parsed = None
                 if parsed is not None:
                     if self._submit_move_if_active(
                         game_id,
@@ -5174,6 +5199,45 @@ class LichessBot:
         if not isinstance(binc, int):
             binc = 0
         return wtime, btime, winc, binc
+
+    def _verify_book_move(
+        self,
+        engine,
+        initial_fen: str,
+        moves: list[str],
+        board: chess.Board,
+        move: chess.Move,
+        game_id: str,
+    ) -> bool:
+        if not engine.alive():
+            return True
+        try:
+            engine.set_position(initial_fen, moves)
+            best, _ = engine.go(movetime=200, timeout=5)
+            if best is None:
+                return True
+            info = engine.search_diagnostics()
+            score_cp = info.get("score_cp")
+            if score_cp is None:
+                return True
+            score_cp = int(score_cp)
+            if score_cp < -50:
+                self._audit(
+                    game_id,
+                    "book_rejected",
+                    move=move.uci(),
+                    engine_best=best,
+                    score=score_cp,
+                    fen=board.fen(),
+                )
+                print(
+                    f"  [{game_id}] Book move {move.uci()} rejected"
+                    f" (engine prefers {best} at {score_cp}cp)"
+                )
+                return False
+        except Exception:
+            pass
+        return True
 
     def _should_query_book(
         self, board: chess.Board, my_color: str, wtime: int, btime: int
