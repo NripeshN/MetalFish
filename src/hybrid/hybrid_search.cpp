@@ -5322,9 +5322,8 @@ Move ParallelHybridSearch::make_final_decision() {
                                          : "mcts_primary_reliable";
     break;
   case ParallelHybridConfig::DecisionMode::AB_PRIMARY:
-    choose_mcts =
-        mcts_override_allowed && mcts_overwhelming && eval_delta >= 150 &&
-        ab_score >= -300;
+    choose_mcts = mcts_override_allowed && mcts_overwhelming &&
+                  eval_delta >= 150 && ab_score >= -300;
     if (choose_mcts)
       reason = "ab_primary_mcts_overwhelming";
     break;
