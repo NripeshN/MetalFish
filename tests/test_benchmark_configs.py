@@ -691,7 +691,7 @@ def main() -> int:
             'env_float("METALFISH_HYBRID_MCTS_KLD", 0.0)',
             '"METALFISH_HYBRID_AB_ROOT_REJECT_MCTS", True',
             '"METALFISH_HYBRID_MCTS_ROOT_REJECT", True',
-            '"METALFISH_HYBRID_MCTS_SHARED_TT", True',
+            '"METALFISH_HYBRID_MCTS_SHARED_TT", False',
             '"METALFISH_HYBRID_MCTS_AB_ROOT_HINTS", True',
             'env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS", 0)',
             'env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_COUNT", 8)',

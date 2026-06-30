@@ -160,7 +160,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridMCTSMinimumKLDGainPerNode", Option("0.0"));
   options.add("HybridABRootRejectMCTS", Option(true));
   options.add("HybridMCTSRootReject", Option(false));
-  options.add("HybridMCTSUseSharedTT", Option(true));
+  options.add("HybridMCTSUseSharedTT", Option(false));
   options.add("HybridMCTSSharedTTCpScale", Option(230, 100, 600));
   options.add("HybridMCTSSharedTTDepthThreshold", Option(8, 4, 16));
   options.add("HybridQToCpScale", Option(300, 150, 500));

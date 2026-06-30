@@ -964,7 +964,7 @@ bool HybridMCTSCompactClearPreferenceOverride(
 bool HybridMCTSCrossRootConfidenceOverride(
     bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
     uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
-    int eval_delta, int ab_average_score, int mcts_in_ab_rank,
+    int eval_delta, int ab_score, int ab_average_score, int mcts_in_ab_rank,
     int mcts_in_ab_score, int mcts_average_score, uint64_t mcts_effort,
     int ab_in_mcts_rank, uint32_t ab_in_mcts_visits, float ab_in_mcts_q,
     float mcts_q) {
@@ -975,7 +975,8 @@ bool HybridMCTSCrossRootConfidenceOverride(
   }
 
   if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 4 ||
-      mcts_in_ab_score != -VALUE_INFINITE || mcts_effort < 20000) {
+      mcts_in_ab_score != -VALUE_INFINITE || mcts_effort < 1000 ||
+      ab_score < -300) {
     return false;
   }
 
@@ -4998,7 +4999,7 @@ Move ParallelHybridSearch::make_final_decision() {
       HybridMCTSCrossRootConfidenceOverride(
           mcts_decision_budget, mcts_strong, mcts_confidence_total_nodes,
           mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
-          ab_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
+          ab_score, ab_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
           mcts_in_ab.average_score, mcts_in_ab.effort, ab_in_mcts.rank,
           ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
   const bool mcts_root_confidence_reject_override =
