@@ -181,26 +181,26 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridANERootHintWaitMs", Option(0, 0, 1000));
   options.add("HybridANEMinBudgetMs", Option(0, 0, 30000));
   options.add("HybridTrace", Option(false));
-  options.add("TransformerLowTimeFallbackMs", Option(1500, 0, 30000));
+  options.add("TransformerLowTimeFallbackMs", Option(3000, 0, 30000));
   options.add("TransformerMinMoveBudgetMs", Option(400, 0, 5000));
 
   // Optional parity preset and exposed MCTS tuning controls
   options.add("MCTSParityPreset", Option(false));
   options.add("MCTSCPuct", Option("1.745"));
-  options.add("MCTSCPuctAtRoot", Option("1.80"));
+  options.add("MCTSCPuctAtRoot", Option("1.745"));
   options.add("MCTSCPuctBase", Option("38739"));
   options.add("MCTSCPuctFactor", Option("3.894"));
   options.add("MCTSCPuctBaseAtRoot", Option("38739"));
-  options.add("MCTSCPuctFactorAtRoot", Option("4.10"));
+  options.add("MCTSCPuctFactorAtRoot", Option("3.894"));
   options.add("MCTSFpuAbsolute", Option(false));
   options.add("MCTSFpuAbsoluteAtRoot", Option(false));
   options.add("MCTSFpuValue", Option("0.33"));
   options.add("MCTSFpuValueAtRoot", Option("0.33"));
   options.add("MCTSFpuReduction", Option("0.33"));
-  options.add("MCTSFpuReductionAtRoot", Option("0.25"));
+  options.add("MCTSFpuReductionAtRoot", Option("0.33"));
   options.add("MCTSPolicySoftmaxTemp", Option("1.359"));
   options.add("MCTSPolicyTemperature", Option("1.359"));
-  options.add("MCTSRootPolicySoftmaxTemp", Option("1.45"));
+  options.add("MCTSRootPolicySoftmaxTemp", Option("1.6"));
   options.add("MCTSHighPolicyRootLever", Option(true));
   options.add("MCTSLowPolicyRootLever", Option(true));
   options.add("MCTSRootTacticalCaptureProbe", Option(true));
@@ -212,12 +212,12 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSMovesLeftQuadraticFactor", Option("-0.6521"));
   options.add("MCTSTemperature", Option("0.0"));
   options.add("MCTSTempValueCutoff", Option("100.0"));
-  options.add("MCTSSmartPruningFactor", Option("1.60"));
+  options.add("MCTSSmartPruningFactor", Option("1.33"));
   options.add("PureMCTSSmartPruningFactor", Option("0.5"));
   options.add("PureMCTSCPuctAtRoot", Option("2.4"));
   options.add("MCTSSmartPruningMinimumBatches", Option(0, 0, 10000));
-  options.add("MCTSMinimumKLDGainPerNode", Option("0.00003"));
-  options.add("MCTSKLDGainAverageInterval", Option(150, 1, 10000000));
+  options.add("MCTSMinimumKLDGainPerNode", Option("0.00005"));
+  options.add("MCTSKLDGainAverageInterval", Option(100, 1, 10000000));
   options.add("MCTSTimeManager", Option("smooth"));
   options.add("MCTSCacheHistoryLength", Option(0, 0, 7));
   options.add("MCTSNNCacheSize", Option(2000000, 1, 100000000));

@@ -241,7 +241,7 @@ HYBRID_MCTS_KLD = max(0.0, min(1.0, env_float("METALFISH_HYBRID_MCTS_KLD", 0.0))
 HYBRID_AB_ROOT_REJECT_MCTS = env_bool_string(
     "METALFISH_HYBRID_AB_ROOT_REJECT_MCTS", True
 )
-HYBRID_MCTS_ROOT_REJECT = env_bool_string("METALFISH_HYBRID_MCTS_ROOT_REJECT", True)
+HYBRID_MCTS_ROOT_REJECT = env_bool_string("METALFISH_HYBRID_MCTS_ROOT_REJECT", False)
 HYBRID_MCTS_SHARED_TT = env_bool_string("METALFISH_HYBRID_MCTS_SHARED_TT", False)
 HYBRID_MCTS_AB_ROOT_HINTS = env_bool_string("METALFISH_HYBRID_MCTS_AB_ROOT_HINTS", True)
 HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS = max(
@@ -295,7 +295,7 @@ HYBRID_ANE_MIN_BUDGET_MS = max(
     0, min(30000, env_int("METALFISH_HYBRID_ANE_MIN_BUDGET_MS", 500))
 )
 TRANSFORMER_LOW_TIME_FALLBACK_MS = max(
-    0, min(30000, env_int("METALFISH_TRANSFORMER_LOW_TIME_FALLBACK_MS", 1500))
+    0, min(30000, env_int("METALFISH_TRANSFORMER_LOW_TIME_FALLBACK_MS", 3000))
 )
 TRANSFORMER_MIN_MOVE_BUDGET_MS = max(
     0, min(5000, env_int("METALFISH_TRANSFORMER_MIN_MOVE_BUDGET_MS", 400))
@@ -392,7 +392,7 @@ LOAD_THROTTLE_EXTREME = max(
 DEFER_SEEK_LOAD = max(
     LOAD_THROTTLE_EXTREME, env_float("METALFISH_DEFER_SEEK_LOAD", 1.75)
 )
-BOOK_MAX_PLY = max(0, env_int("METALFISH_BOOK_MAX_PLY", 30))
+BOOK_MAX_PLY = max(0, env_int("METALFISH_BOOK_MAX_PLY", 20))
 BOOK_MIN_CLOCK_MS = 30_000
 SUBMITTED_TURN_HISTORY_LIMIT = 512
 COMPLETED_GAME_HISTORY_LIMIT = 512
@@ -737,12 +737,12 @@ BASE_ENGINE_OPTIONS = {
     "HybridABPolicyWeight": str(HYBRID_AB_POLICY_WEIGHT),
     "HybridRootPawnLeverTieBreak": HYBRID_ROOT_PAWN_LEVER_TIEBREAK,
     "HybridTrace": HYBRID_TRACE,
-    "Move Overhead": "200",
+    "Move Overhead": "500",
     "MCTSMinibatchSize": str(HYBRID_MCTS_MINIBATCH),
-    "MCTSMinimumKLDGainPerNode": "0.00003",
+    "MCTSMinimumKLDGainPerNode": "0.00005",
     "MCTSPolicySoftmaxTemp": "1.359",
-    "MCTSRootPolicySoftmaxTemp": "1.38",
-    "MCTSSmartPruningFactor": "1.52",
+    "MCTSRootPolicySoftmaxTemp": "1.6",
+    "MCTSSmartPruningFactor": "1.33",
     "MCTSCacheHistoryLength": "0",
     "MCTSSolidTreeThreshold": "100",
 }

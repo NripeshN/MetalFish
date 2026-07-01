@@ -1453,7 +1453,7 @@ void Search::ConfigureStopper() {
     }
     if (!node_only_limit && params_.kld_gain_min > 0.0f) {
       const int64_t kld_min_elapsed_ms =
-          time_budget_ms > 0 ? std::min<int64_t>(750, (time_budget_ms * 3) / 4)
+          time_budget_ms > 0 ? std::min<int64_t>(500, (time_budget_ms * 2) / 3)
                              : 0;
       stopper->Add(std::make_unique<KLDGainStopper>(
           params_.kld_gain_min, params_.kld_gain_average_interval,
@@ -1577,7 +1577,7 @@ int64_t Search::CalculateTimeBudget() {
             : 1.0f;
     tmgr_.tree_reuse =
         ExponentialDecay(tmgr_.tree_reuse, this_reuse, 3.39f, update_rate);
-    tmgr_.tree_reuse = std::min(tmgr_.tree_reuse, 0.80f);
+    tmgr_.tree_reuse = std::min(tmgr_.tree_reuse, 0.73f);
   }
 
   float remaining_moves = EstimateMovesToGo(ply);

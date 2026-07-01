@@ -1695,6 +1695,15 @@ void test_hybrid_config() {
                                              0.200f, -0.200f, -0.230f, 0.250f));
     EXPECT(tc, !HybridRootPawnLeverCandidate(-47, -77, 373, 5, 13, 1, -0.038f,
                                              0.220f, -0.038f, -0.112f, 0.050f));
+    EXPECT(tc, HybridRootPawnLeverCandidate(-205, -271, 2141, 4, 23, 1,
+                                            -0.196f, 0.258f, -0.196f, -0.219f,
+                                            0.043f));
+    EXPECT(tc, !HybridRootPawnLeverCandidate(-205, -276, 2141, 4, 23, 1,
+                                             -0.196f, 0.258f, -0.196f, -0.219f,
+                                             0.043f));
+    EXPECT(tc, !HybridRootPawnLeverCandidate(-205, -271, 2141, 4, 23, 1,
+                                             -0.196f, 0.258f, -0.196f, -0.241f,
+                                             0.043f));
     EXPECT(tc, !HybridRootPawnLeverCandidate(932, 891, 303, 6, 6, 1, 0.927f,
                                              0.206f, 0.927f, 0.885f, 0.050f));
     EXPECT(tc, HybridRootPawnLeverCandidate(907, 902, 1742, 6, 3, 3, 0.918f,
@@ -2047,16 +2056,14 @@ void test_hybrid_config() {
   {
     TestCase tc("AB root rejection blocks low-effort MCTS blunders");
 
-    // gap=37, effort=2.5M, mcts_score=-447: gap < 55 and < 60 → no reject
-    EXPECT(tc, !HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
-                                        -447));
-    // gap=37, mcts_score=-32001 (mate): 3rd condition fires (effort=2.5M >=
-    // 50k,
-    // >= 20*649=12980)
+    // gap=37, effort=2.5M: AB has enough root work to reject this MCTS move.
+    EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
+                                       -447));
+    // Mate-score MCTS candidates are rejected when AB has meaningful effort.
     EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
                                        -32001));
-    // gap=4, mcts_score=-32001: 3rd condition (effort=25M >= 50k, >=
-    // 20*1663=33260)
+    // Even a small average gap should reject a mate-score MCTS candidate with
+    // very high AB effort.
     EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 4, -432, -436, 25349399, 1663,
                                        -32001));
     EXPECT(tc, !HybridABRootRejectsMCTS(false, 1, 5, -410, -447, 2523397, 649,
@@ -2087,6 +2094,12 @@ void test_hybrid_config() {
     EXPECT(tc, HybridMCTSCrossRootConfidenceOverride(
                    true, true, 454, 301, 0.663f, 0.142f, 219, 45, 174, 644, 2,
                    -32001, 626, 10835, 3, 32, 0.420f, 0.625f));
+    EXPECT(tc, HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 490, 329, 0.671f, 0.133f, 213, 38, 175, 643, 2,
+                   -32001, 606, 27615, 3, 32, 0.420f, 0.611f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 490, 329, 0.671f, 0.133f, 213, 29, 175, 643, 2,
+                   -32001, 606, 27615, 3, 32, 0.420f, 0.611f));
     EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
                    true, true, 265, 169, 0.660f, 0.145f, 226, 55, 171, 619, 2,
                    -32001, 564, 2095896, 5, 16, 0.372f, 0.638f));
