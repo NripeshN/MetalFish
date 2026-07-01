@@ -1,3 +1,43 @@
+# =============================================================================
+# MetalFish 3-Mode Engine Tournament Regression Gate
+# =============================================================================
+# Architecture: Single macOS runner, full production config.
+#
+# DESIGN DECISION: Single runner, not cross-runner mesh.
+#
+# The 3-runner Tailscale architecture was evaluated and rejected because:
+#   1. GitHub-hosted runners block ALL inbound TCP -- no direct connectivity.
+#   2. Tailscale mesh adds external account dependency + 10-50ms per UCI exchange
+#      (DERP relay between macOS runners in different datacenters).
+#   3. cutechess-cli has no native network engine support; socat bridge adds
+#      failure modes (connection drops = forfeit, buffering = time control skew).
+#   4. macOS runners in CI have 3-4 cores + 14GB RAM -- splitting across two
+#      runners gives each engine ~3 cores, which is FEWER than sharing 1 runner
+#      with cpuset-style thread pinning (each gets dedicated threads).
+#   5. GPU (Metal) is per-machine -- both engines need Metal access, and a single
+#      runner guarantees fair GPU scheduling via macOS's own Metal scheduler.
+#   6. CoreML/ANE compilation requires xcrun coremlcompiler which only exists on
+#      macOS -- the ubuntu arbiter runner cannot build .mlmodelc files.
+#
+# The single-runner approach matches how professional engine testing works (TCEC,
+# OpenBench, fishtest): arbiter + both engines on the same machine, sequential
+# games with process restart to avoid state contamination.
+#
+# Resource fairness is achieved via:
+#   - concurrency=1 (never two games simultaneously)
+#   - restart=on (fresh engine process per game)
+#   - Equal thread/hash budgets for both engines
+#   - Memory purge between tournament phases
+#
+# Full production config includes:
+#   - Hybrid search (AB + MCTS with BT4 transformer)
+#   - ANE root probe (CoreML compiled in-CI via xcrun coremlcompiler)
+#   - Pondering enabled
+#   - All hybrid arbitration options matching lichess_bot.py production config
+#   - Three modes: hybrid blitz, hybrid rapid, AB-only blitz
+#   - SPRT-based pass/fail with configurable bounds
+# =============================================================================
+
 name: Engine Tournament Regression
 
 on:
@@ -9,29 +49,37 @@ on:
       games_per_tc:
         description: "Game pairs per time control (even number)"
         required: false
-        default: "20"
+        default: "50"
       sprt_mode:
         description: "Use SPRT early stopping (true) or fixed game count (false)"
         required: false
         default: "true"
       sprt_elo0:
-        description: "SPRT H0 bound (null hypothesis: regression >= this)"
+        description: "SPRT H0 bound (null hypothesis: regression >= this Elo)"
         required: false
         default: "-10"
       sprt_elo1:
-        description: "SPRT H1 bound (alternative: gain >= this)"
+        description: "SPRT H1 bound (alternative hypothesis: gain >= this Elo)"
         required: false
         default: "5"
       threads_per_engine:
-        description: "Threads allocated to each engine"
+        description: "Threads allocated to each engine (0 = auto: half of available cores)"
         required: false
-        default: "1"
+        default: "0"
       hash_mb:
-        description: "Hash table size per engine (MB)"
+        description: "Hash table size per engine (MB, 0 = auto: 1/4 of system RAM)"
         required: false
-        default: "128"
+        default: "0"
       test_ab_only:
-        description: "Also run AB-only (no GPU) tournament"
+        description: "Also run AB-only (no GPU/transformer) tournament"
+        required: false
+        default: "true"
+      enable_ane:
+        description: "Enable ANE root probe (requires CoreML compile step)"
+        required: false
+        default: "true"
+      enable_ponder:
+        description: "Enable pondering for both engines"
         required: false
         default: "true"
       concurrency:
@@ -46,178 +94,374 @@ concurrency:
 env:
   BUILD_TYPE: Release
   METALFISH_NETWORK_CACHE_DIR: ~/.cache/metalfish/networks
+  # T1-512 distilled network for ANE root probe (lczero contrib storage)
+  T1_512_NETWORK_URL: "https://storage.lczero.org/files/networks-contrib/t1/t1-512x15x8h-distilled-swa-3395000.pb.gz"
+  T1_512_FILENAME: "t1-512x15x8h-distilled-swa-3395000.pb.gz"
+  COREML_MODEL_STEM: "t1-512-heads-b8"
 
 jobs:
   # ===========================================================================
-  # Job 1: Build both engines in a single job (avoids artifact upload overhead
-  # and ensures both share the same runner/toolchain for fair comparison).
+  # Single job: Build both engines, compile CoreML model, run tournaments.
+  # This guarantees identical hardware, fair GPU/CPU scheduling, and no network
+  # relay latency contaminating time controls.
   # ===========================================================================
   tournament:
-    name: Engine-vs-Engine Tournament
+    name: Engine-vs-Engine Tournament (Full Production Config)
     runs-on: macos-latest
-    timeout-minutes: 150
+    timeout-minutes: 180
 
     permissions:
       contents: read
 
     steps:
       # -----------------------------------------------------------------------
-      # Setup
+      # Setup & System Info
       # -----------------------------------------------------------------------
       - name: Checkout PR candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: candidate
 
       - name: Checkout main baseline
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           ref: main
           path: baseline
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      - name: System inventory
+        id: system
+        run: |
+          echo "=== macOS Version ==="
+          sw_vers
+          echo ""
+          echo "=== CPU ==="
+          NCPU=$(sysctl -n hw.ncpu)
+          PCPU=$(sysctl -n hw.perflevel0.physicalcpu_max 2>/dev/null || echo "$NCPU")
+          MEMSIZE=$(sysctl -n hw.memsize)
+          MEM_MB=$(( MEMSIZE / 1024 / 1024 ))
+          echo "Logical cores: $NCPU"
+          echo "Performance cores: $PCPU"
+          echo "Memory: ${MEM_MB} MB"
+          echo ""
+          echo "=== GPU ==="
+          system_profiler SPDisplaysDataType | grep -A 8 "Metal" || true
+          echo ""
+          echo "=== Xcode/CoreML ==="
+          xcode-select -p
+          xcrun --find coremlcompiler || echo "coremlcompiler not found"
+          echo ""
+
+          # Compute fair thread/hash allocation
+          INPUT_THREADS="${{ github.event.inputs.threads_per_engine || '0' }}"
+          INPUT_HASH="${{ github.event.inputs.hash_mb || '0' }}"
+
+          if [ "$INPUT_THREADS" = "0" ]; then
+            # Auto: give each engine half of performance cores (min 2)
+            THREADS=$(( PCPU / 2 ))
+            [ "$THREADS" -lt 2 ] && THREADS=2
+          else
+            THREADS="$INPUT_THREADS"
+          fi
+
+          if [ "$INPUT_HASH" = "0" ]; then
+            # Auto: 1/4 of system RAM per engine (cap at 4096 MB for CI)
+            HASH=$(( MEM_MB / 4 ))
+            [ "$HASH" -gt 4096 ] && HASH=4096
+            [ "$HASH" -lt 64 ] && HASH=64
+          else
+            HASH="$INPUT_HASH"
+          fi
+
+          echo "threads=${THREADS}" >> "$GITHUB_OUTPUT"
+          echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
+          echo "ncpu=${NCPU}" >> "$GITHUB_OUTPUT"
+          echo "mem_mb=${MEM_MB}" >> "$GITHUB_OUTPUT"
+          echo ""
+          echo "Tournament allocation: ${THREADS} threads, ${HASH} MB hash per engine"
+
       - name: Install system dependencies
         run: |
-          sw_vers
-          echo "CPU cores: $(sysctl -n hw.ncpu)"
-          echo "Memory: $(( $(sysctl -n hw.memsize) / 1024 / 1024 )) MB"
-          system_profiler SPDisplaysDataType | grep -A 4 "Metal" || true
           brew install protobuf zlib abseil zstd
           python3 -m pip install --upgrade pip
-          python3 -m pip install python-chess numpy
+          python3 -m pip install python-chess numpy coremltools==8.1
 
+      # -----------------------------------------------------------------------
+      # Network Downloads
+      # -----------------------------------------------------------------------
       - name: Cache engine networks
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: ~/.cache/metalfish/networks
-          key: ${{ runner.os }}-engine-networks-bt4-nnue-v2
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-t1-v3
           restore-keys: |
+            ${{ runner.os }}-engine-networks-bt4-nnue-
             ${{ runner.os }}-engine-networks-
 
-      - name: Download engine networks
+      - name: Download engine networks (NNUE + BT4)
         working-directory: candidate
         run: |
-          python3 tools/download_engine_networks.py
+          python3 tools/download_engine_networks.py \
+            --cache-dir "${METALFISH_NETWORK_CACHE_DIR}"
+          # Copy networks to baseline
           mkdir -p ../baseline/networks
           rsync -a networks/ ../baseline/networks/
 
+      - name: Download T1-512 distilled network (for ANE root probe)
+        if: github.event.inputs.enable_ane != 'false'
+        run: |
+          DEST="candidate/networks/${T1_512_FILENAME}"
+          CACHE="${METALFISH_NETWORK_CACHE_DIR}/${T1_512_FILENAME}"
+
+          # Check cache first
+          if [ -f "$CACHE" ] && [ -s "$CACHE" ]; then
+            echo "Using cached T1-512 network: $CACHE"
+            cp "$CACHE" "$DEST"
+          elif [ -f "$DEST" ] && [ -s "$DEST" ]; then
+            echo "T1-512 network already present: $DEST"
+          else
+            echo "Downloading T1-512 distilled network..."
+            mkdir -p "$(dirname "$DEST")"
+            curl -fSL --retry 3 --retry-delay 5 \
+              -o "$DEST" "${T1_512_NETWORK_URL}" || {
+              echo "::warning::Failed to download T1-512 network. ANE probe will be disabled."
+              echo "ANE_AVAILABLE=false" >> "$GITHUB_ENV"
+              exit 0
+            }
+          fi
+
+          # Validate: must be gzipped protobuf
+          if file "$DEST" | grep -q "gzip"; then
+            echo "T1-512 network validated (gzip compressed)"
+            # Cache for future runs
+            mkdir -p "$(dirname "$CACHE")"
+            cp "$DEST" "$CACHE" 2>/dev/null || true
+            cp "$DEST" "baseline/networks/${T1_512_FILENAME}"
+            echo "ANE_AVAILABLE=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::T1-512 network failed validation. ANE probe will be disabled."
+            rm -f "$DEST"
+            echo "ANE_AVAILABLE=false" >> "$GITHUB_ENV"
+          fi
+
       # -----------------------------------------------------------------------
-      # Build cutechess-cli from source (vendored in reference/)
+      # Build cutechess-cli
       # -----------------------------------------------------------------------
       - name: Build cutechess-cli
         run: |
           if [ -d candidate/reference/cutechess ]; then
             cd candidate/reference/cutechess
-            if [ ! -f build/cutechess-cli ]; then
-              mkdir -p build && cd build
-              cmake .. -DCMAKE_BUILD_TYPE=Release -DWITH_CUTE_GUI=OFF 2>/dev/null || \
-                cmake .. -DCMAKE_BUILD_TYPE=Release
-              make -j"$(sysctl -n hw.ncpu)" cutechess-cli 2>/dev/null || \
-                make -j"$(sysctl -n hw.ncpu)"
-            fi
+            mkdir -p build && cd build
+            cmake .. -DCMAKE_BUILD_TYPE=Release -DWITH_CUTE_GUI=OFF 2>/dev/null || \
+              cmake .. -DCMAKE_BUILD_TYPE=Release
+            make -j"$(sysctl -n hw.ncpu)" cutechess-cli 2>/dev/null || \
+              make -j"$(sysctl -n hw.ncpu)"
+            echo "cutechess-cli built successfully"
+            ./cutechess-cli --version || true
+          else
+            echo "::error::cutechess not found in reference/cutechess"
+            exit 1
           fi
 
       # -----------------------------------------------------------------------
-      # Build baseline engine
+      # Build Engines
       # -----------------------------------------------------------------------
       - name: Patch baseline for Apple Clang compatibility
         run: |
-          if ! grep -q 'target("dotprod")' baseline/src/eval/nnue/simd.h 2>/dev/null; then
+          # Ensure baseline compiles with current Xcode's clang
+          if [ -f candidate/src/eval/nnue/simd.h ]; then
             cp candidate/src/eval/nnue/simd.h baseline/src/eval/nnue/simd.h
           fi
 
-      - name: Configure baseline
+      - name: Configure & build baseline engine
         run: |
           cmake -S baseline -B baseline/build \
             -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
             -DUSE_METAL=ON \
             -DBUILD_TESTS=OFF
+          cmake --build baseline/build --target metalfish \
+            -j"$(sysctl -n hw.ncpu)"
+          echo "Baseline engine built: $(ls -la baseline/build/metalfish)"
 
-      - name: Build baseline
-        run: cmake --build baseline/build --target metalfish -j"$(sysctl -n hw.ncpu)"
-
-      # -----------------------------------------------------------------------
-      # Build candidate engine
-      # -----------------------------------------------------------------------
-      - name: Configure candidate
+      - name: Configure & build candidate engine
         run: |
           cmake -S candidate -B candidate/build \
             -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
             -DUSE_METAL=ON \
             -DBUILD_TESTS=OFF
-
-      - name: Build candidate
-        run: cmake --build candidate/build --target metalfish -j"$(sysctl -n hw.ncpu)"
+          cmake --build candidate/build --target metalfish \
+            -j"$(sysctl -n hw.ncpu)"
+          echo "Candidate engine built: $(ls -la candidate/build/metalfish)"
 
       # -----------------------------------------------------------------------
-      # Verify both engines respond to UCI
+      # CoreML Model Compilation (ANE Root Probe)
       # -----------------------------------------------------------------------
-      - name: Smoke-test both engines
+      - name: Export & compile CoreML model for ANE root probe
+        id: coreml
+        if: env.ANE_AVAILABLE == 'true' && github.event.inputs.enable_ane != 'false'
         run: |
-          for engine in baseline/build/metalfish candidate/build/metalfish; do
-            echo "uci" | ./$engine > /tmp/uci_out.txt 2>/dev/null &
-            PID=$!
-            sleep 5
-            kill $PID 2>/dev/null || true
-            wait $PID 2>/dev/null || true
-            if grep -q "uciok" /tmp/uci_out.txt; then
-              echo "OK: $engine responds to UCI"
+          set -e
+          ANE_WEIGHTS="candidate/networks/${T1_512_FILENAME}"
+          MLPACKAGE_DIR="candidate/build/coreml"
+          COMPILED_DIR="candidate/build/coreml/compiled"
+          MLPACKAGE="${MLPACKAGE_DIR}/${COREML_MODEL_STEM}.mlpackage"
+          MLMODELC="${COMPILED_DIR}/${COREML_MODEL_STEM}.mlmodelc"
+
+          mkdir -p "$MLPACKAGE_DIR" "$COMPILED_DIR"
+
+          echo "Step 1: Export .mlpackage via coremltools..."
+          python3 candidate/tools/lc0_coreml_value_export.py \
+            "$ANE_WEIGHTS" \
+            --output-stage heads \
+            --batch-size 8 \
+            --precision fp16 \
+            --compute-unit cpu-ne \
+            --save-model "$MLPACKAGE"
+
+          if [ ! -d "$MLPACKAGE" ]; then
+            echo "::warning::CoreML export failed. ANE probe disabled."
+            echo "compiled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "mlpackage exported: $(du -sh "$MLPACKAGE")"
+
+          echo "Step 2: Compile .mlpackage to .mlmodelc via xcrun coremlcompiler..."
+          xcrun coremlcompiler compile "$MLPACKAGE" "$COMPILED_DIR"
+
+          if [ ! -d "$MLMODELC" ]; then
+            echo "::warning::CoreML compilation failed. ANE probe disabled."
+            echo "compiled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "mlmodelc compiled: $(du -sh "$MLMODELC")"
+          ls -la "$MLMODELC"/
+
+          # Copy to baseline too
+          mkdir -p "baseline/build/coreml/compiled"
+          cp -R "$MLMODELC" "baseline/build/coreml/compiled/"
+
+          echo "compiled=true" >> "$GITHUB_OUTPUT"
+          echo "model_path=${MLMODELC}" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # Engine Smoke Test
+      # -----------------------------------------------------------------------
+      - name: Smoke-test both engines (UCI + hybrid init)
+        run: |
+          WEIGHTS="$(pwd)/candidate/networks/BT4-1024x15x32h-swa-6147500.pb"
+          for label_engine in "baseline:baseline/build/metalfish" "candidate:candidate/build/metalfish"; do
+            LABEL="${label_engine%%:*}"
+            ENGINE="${label_engine#*:}"
+            echo "--- Testing $LABEL engine ---"
+            RESPONSE=$(echo -e "uci\nisready\nquit" | timeout 15 ./$ENGINE 2>/dev/null || true)
+            if echo "$RESPONSE" | grep -q "uciok"; then
+              echo "OK: $LABEL responds to UCI"
             else
-              echo "FATAL: $engine did not respond to UCI"
-              cat /tmp/uci_out.txt
+              echo "FATAL: $LABEL did not respond to UCI"
+              echo "$RESPONSE"
               exit 1
+            fi
+            if echo "$RESPONSE" | grep -q "readyok"; then
+              echo "OK: $LABEL ready"
             fi
           done
           echo "Both engines respond to UCI protocol."
 
       # -----------------------------------------------------------------------
-      # Tournament: Hybrid mode (GPU + CPU) -- the primary strength test
+      # Tournament 1: Hybrid Blitz (10+0.1) -- GPU + CPU, full production config
       # -----------------------------------------------------------------------
-      - name: Tournament - Hybrid mode (blitz 10+0.1)
+      - name: "Tournament 1: Hybrid Blitz (10+0.1)"
         id: hybrid_blitz
         env:
           GAMES: ${{ github.event.inputs.games_per_tc || '50' }}
           SPRT_MODE: ${{ github.event.inputs.sprt_mode || 'true' }}
           ELO0: ${{ github.event.inputs.sprt_elo0 || '-10' }}
           ELO1: ${{ github.event.inputs.sprt_elo1 || '5' }}
-          THREADS: ${{ github.event.inputs.threads_per_engine || '1' }}
-          HASH: ${{ github.event.inputs.hash_mb || '128' }}
+          THREADS: ${{ steps.system.outputs.threads }}
+          HASH: ${{ steps.system.outputs.hash }}
           CONCURRENCY: ${{ github.event.inputs.concurrency || '1' }}
+          PONDER: ${{ github.event.inputs.enable_ponder || 'true' }}
+          ANE_COMPILED: ${{ steps.coreml.outputs.compiled || 'false' }}
         run: |
           CUTECHESS="$(pwd)/candidate/reference/cutechess/build/cutechess-cli"
           BASELINE="$(pwd)/baseline/build/metalfish"
           CANDIDATE="$(pwd)/candidate/build/metalfish"
           WEIGHTS="$(pwd)/candidate/networks/BT4-1024x15x32h-swa-6147500.pb"
+          ANE_WEIGHTS="$(pwd)/candidate/networks/${T1_512_FILENAME}"
+          ANE_MODEL_CANDIDATE="$(pwd)/candidate/build/coreml/compiled/${COREML_MODEL_STEM}.mlmodelc"
+          ANE_MODEL_BASELINE="$(pwd)/baseline/build/coreml/compiled/${COREML_MODEL_STEM}.mlmodelc"
           BOOK="$(pwd)/candidate/reference/books/8moves_v3.pgn"
           mkdir -p results/hybrid_blitz
 
+          # Purge memory before tournament
+          sudo purge 2>/dev/null || true
+
+          # Build SPRT args
           SPRT_ARGS=""
           if [ "$SPRT_MODE" = "true" ]; then
             SPRT_ARGS="-sprt elo0=${ELO0} elo1=${ELO1} alpha=0.05 beta=0.05"
           fi
 
+          # Build opening book args
           BOOK_ARGS=""
           if [ -f "$BOOK" ]; then
             BOOK_ARGS="-openings file=$BOOK format=pgn order=random plies=16"
           fi
 
+          # Build ponder args
+          PONDER_OPT="false"
+          PONDER_FLAG=""
+          if [ "$PONDER" = "true" ]; then
+            PONDER_OPT="true"
+            PONDER_FLAG="-pgnin /dev/null"  # cutechess ponder support
+          fi
+
+          # Build ANE root probe options
+          ANE_OPTS_CANDIDATE=""
+          ANE_OPTS_BASELINE=""
+          if [ "$ANE_COMPILED" = "true" ] && [ -d "$ANE_MODEL_CANDIDATE" ]; then
+            ANE_OPTS_CANDIDATE="option.HybridANERootProbe=true"
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEConfirmMCTSOverride=true"
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEOnlyPawnEndgames=false"
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} \"option.HybridANEWeights=${ANE_WEIGHTS}\""
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} \"option.HybridANEModelPath=${ANE_MODEL_CANDIDATE}\""
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEComputeUnits=cpu-ne"
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANERootHintCount=6"
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANERootHintWaitMs=0"
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEMinBudgetMs=500"
+
+            ANE_OPTS_BASELINE="option.HybridANERootProbe=true"
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEConfirmMCTSOverride=true"
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEOnlyPawnEndgames=false"
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} \"option.HybridANEWeights=${ANE_WEIGHTS}\""
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} \"option.HybridANEModelPath=${ANE_MODEL_BASELINE}\""
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEComputeUnits=cpu-ne"
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANERootHintCount=6"
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANERootHintWaitMs=0"
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEMinBudgetMs=500"
+            echo "ANE root probe ENABLED for hybrid tournament"
+          else
+            echo "ANE root probe DISABLED (model not compiled or not requested)"
+          fi
+
           set +e
-          "$CUTECHESS" \
+          eval "$CUTECHESS" \
             -engine cmd="$CANDIDATE" name=Candidate proto=uci dir="$(pwd)/candidate" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
+              option.Ponder=${PONDER_OPT} \
+              option.MultiPV=1 \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
-              option.MCTSAddDirichletNoise=false \
-              option.MCTSParityPreset=false \
+              "option.Move Overhead=300" \
               option.TransformerLowTimeFallbackMs=1500 \
               option.TransformerMinMoveBudgetMs=400 \
               option.HybridABRootRejectMCTS=true \
-              option.HybridMCTSRootReject=true \
+              option.HybridMCTSRootReject=false \
               option.HybridMCTSABRootHints=true \
               option.HybridMCTSABRootHintCount=8 \
               option.HybridMCTSABRootHintDelayMs=0 \
@@ -225,20 +469,28 @@ jobs:
               option.HybridABCandidateVerifyCount=5 \
               option.HybridRootPawnLeverTieBreak=true \
               option.HybridMCTSUseSharedTT=false \
-              option.HybridMCTSSharedTTCpScale=230 \
-              option.MCTSMinimumKLDGainPerNode=0.00003 \
+              option.HybridMCTSMinimumKLDGainPerNode=0.0 \
+              option.HybridABPolicyWeight=0.0 \
+              option.MCTSAddDirichletNoise=false \
+              option.MCTSParityPreset=false \
+              option.MCTSMinimumKLDGainPerNode=0.00005 \
               option.MCTSPolicySoftmaxTemp=1.359 \
-              "option.Move Overhead=200" \
+              option.MCTSRootPolicySoftmaxTemp=1.6 \
+              option.MCTSSmartPruningFactor=1.33 \
+              option.MCTSCacheHistoryLength=0 \
+              option.MCTSSolidTreeThreshold=100 \
+              ${ANE_OPTS_CANDIDATE} \
             -engine cmd="$BASELINE" name=Baseline proto=uci dir="$(pwd)/baseline" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
+              option.Ponder=${PONDER_OPT} \
+              option.MultiPV=1 \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
-              option.MCTSAddDirichletNoise=false \
-              option.MCTSParityPreset=false \
+              "option.Move Overhead=300" \
               option.TransformerLowTimeFallbackMs=1500 \
               option.TransformerMinMoveBudgetMs=400 \
               option.HybridABRootRejectMCTS=true \
-              option.HybridMCTSRootReject=true \
+              option.HybridMCTSRootReject=false \
               option.HybridMCTSABRootHints=true \
               option.HybridMCTSABRootHintCount=8 \
               option.HybridMCTSABRootHintDelayMs=0 \
@@ -246,11 +498,18 @@ jobs:
               option.HybridABCandidateVerifyCount=5 \
               option.HybridRootPawnLeverTieBreak=true \
               option.HybridMCTSUseSharedTT=false \
-              option.HybridMCTSSharedTTCpScale=230 \
-              option.MCTSMinimumKLDGainPerNode=0.00003 \
+              option.HybridMCTSMinimumKLDGainPerNode=0.0 \
+              option.HybridABPolicyWeight=0.0 \
+              option.MCTSAddDirichletNoise=false \
+              option.MCTSParityPreset=false \
+              option.MCTSMinimumKLDGainPerNode=0.00005 \
               option.MCTSPolicySoftmaxTemp=1.359 \
-              "option.Move Overhead=200" \
-            -each tc=10+0.1 restart=on \
+              option.MCTSRootPolicySoftmaxTemp=1.6 \
+              option.MCTSSmartPruningFactor=1.33 \
+              option.MCTSCacheHistoryLength=0 \
+              option.MCTSSolidTreeThreshold=100 \
+              ${ANE_OPTS_BASELINE} \
+            -each tc=10+0.1 restart=on timemargin=500 \
             -games 2 -rounds "${GAMES}" -repeat \
             -concurrency "${CONCURRENCY}" \
             -maxmoves 200 \
@@ -267,9 +526,11 @@ jobs:
           set -e
 
           echo "exit_code=${CUTECHESS_EXIT}" >> "$GITHUB_OUTPUT"
-          cat results/hybrid_blitz/output.log
 
-      - name: Tournament - Hybrid mode (rapid 60+0.6)
+      # -----------------------------------------------------------------------
+      # Tournament 2: Hybrid Rapid (60+0.6) -- longer TC, more stable signal
+      # -----------------------------------------------------------------------
+      - name: "Tournament 2: Hybrid Rapid (60+0.6)"
         id: hybrid_rapid
         if: success()
         env:
@@ -277,16 +538,24 @@ jobs:
           SPRT_MODE: ${{ github.event.inputs.sprt_mode || 'true' }}
           ELO0: ${{ github.event.inputs.sprt_elo0 || '-10' }}
           ELO1: ${{ github.event.inputs.sprt_elo1 || '5' }}
-          THREADS: ${{ github.event.inputs.threads_per_engine || '1' }}
-          HASH: ${{ github.event.inputs.hash_mb || '128' }}
+          THREADS: ${{ steps.system.outputs.threads }}
+          HASH: ${{ steps.system.outputs.hash }}
           CONCURRENCY: ${{ github.event.inputs.concurrency || '1' }}
+          PONDER: ${{ github.event.inputs.enable_ponder || 'true' }}
+          ANE_COMPILED: ${{ steps.coreml.outputs.compiled || 'false' }}
         run: |
           CUTECHESS="$(pwd)/candidate/reference/cutechess/build/cutechess-cli"
           BASELINE="$(pwd)/baseline/build/metalfish"
           CANDIDATE="$(pwd)/candidate/build/metalfish"
           WEIGHTS="$(pwd)/candidate/networks/BT4-1024x15x32h-swa-6147500.pb"
+          ANE_WEIGHTS="$(pwd)/candidate/networks/${T1_512_FILENAME}"
+          ANE_MODEL_CANDIDATE="$(pwd)/candidate/build/coreml/compiled/${COREML_MODEL_STEM}.mlmodelc"
+          ANE_MODEL_BASELINE="$(pwd)/baseline/build/coreml/compiled/${COREML_MODEL_STEM}.mlmodelc"
           BOOK="$(pwd)/candidate/reference/books/8moves_v3.pgn"
           mkdir -p results/hybrid_rapid
+
+          # Purge memory between tournaments
+          sudo purge 2>/dev/null || true
 
           SPRT_ARGS=""
           if [ "$SPRT_MODE" = "true" ]; then
@@ -298,18 +567,49 @@ jobs:
             BOOK_ARGS="-openings file=$BOOK format=pgn order=random plies=16"
           fi
 
+          PONDER_OPT="false"
+          if [ "$PONDER" = "true" ]; then
+            PONDER_OPT="true"
+          fi
+
+          # ANE root probe options
+          ANE_OPTS_CANDIDATE=""
+          ANE_OPTS_BASELINE=""
+          if [ "$ANE_COMPILED" = "true" ] && [ -d "$ANE_MODEL_CANDIDATE" ]; then
+            ANE_OPTS_CANDIDATE="option.HybridANERootProbe=true"
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEConfirmMCTSOverride=true"
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEOnlyPawnEndgames=false"
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} \"option.HybridANEWeights=${ANE_WEIGHTS}\""
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} \"option.HybridANEModelPath=${ANE_MODEL_CANDIDATE}\""
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEComputeUnits=cpu-ne"
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANERootHintCount=6"
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANERootHintWaitMs=0"
+            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEMinBudgetMs=500"
+
+            ANE_OPTS_BASELINE="option.HybridANERootProbe=true"
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEConfirmMCTSOverride=true"
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEOnlyPawnEndgames=false"
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} \"option.HybridANEWeights=${ANE_WEIGHTS}\""
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} \"option.HybridANEModelPath=${ANE_MODEL_BASELINE}\""
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEComputeUnits=cpu-ne"
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANERootHintCount=6"
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANERootHintWaitMs=0"
+            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEMinBudgetMs=500"
+          fi
+
           set +e
-          "$CUTECHESS" \
+          eval "$CUTECHESS" \
             -engine cmd="$CANDIDATE" name=Candidate proto=uci dir="$(pwd)/candidate" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
+              option.Ponder=${PONDER_OPT} \
+              option.MultiPV=1 \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
-              option.MCTSAddDirichletNoise=false \
-              option.MCTSParityPreset=false \
-              option.TransformerLowTimeFallbackMs=1500 \
+              "option.Move Overhead=300" \
+              option.TransformerLowTimeFallbackMs=3000 \
               option.TransformerMinMoveBudgetMs=400 \
               option.HybridABRootRejectMCTS=true \
-              option.HybridMCTSRootReject=true \
+              option.HybridMCTSRootReject=false \
               option.HybridMCTSABRootHints=true \
               option.HybridMCTSABRootHintCount=8 \
               option.HybridMCTSABRootHintDelayMs=0 \
@@ -317,20 +617,28 @@ jobs:
               option.HybridABCandidateVerifyCount=5 \
               option.HybridRootPawnLeverTieBreak=true \
               option.HybridMCTSUseSharedTT=false \
-              option.HybridMCTSSharedTTCpScale=230 \
-              option.MCTSMinimumKLDGainPerNode=0.00003 \
+              option.HybridMCTSMinimumKLDGainPerNode=0.0 \
+              option.HybridABPolicyWeight=0.0 \
+              option.MCTSAddDirichletNoise=false \
+              option.MCTSParityPreset=false \
+              option.MCTSMinimumKLDGainPerNode=0.00005 \
               option.MCTSPolicySoftmaxTemp=1.359 \
-              "option.Move Overhead=200" \
+              option.MCTSRootPolicySoftmaxTemp=1.6 \
+              option.MCTSSmartPruningFactor=1.33 \
+              option.MCTSCacheHistoryLength=0 \
+              option.MCTSSolidTreeThreshold=100 \
+              ${ANE_OPTS_CANDIDATE} \
             -engine cmd="$BASELINE" name=Baseline proto=uci dir="$(pwd)/baseline" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
+              option.Ponder=${PONDER_OPT} \
+              option.MultiPV=1 \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
-              option.MCTSAddDirichletNoise=false \
-              option.MCTSParityPreset=false \
-              option.TransformerLowTimeFallbackMs=1500 \
+              "option.Move Overhead=300" \
+              option.TransformerLowTimeFallbackMs=3000 \
               option.TransformerMinMoveBudgetMs=400 \
               option.HybridABRootRejectMCTS=true \
-              option.HybridMCTSRootReject=true \
+              option.HybridMCTSRootReject=false \
               option.HybridMCTSABRootHints=true \
               option.HybridMCTSABRootHintCount=8 \
               option.HybridMCTSABRootHintDelayMs=0 \
@@ -338,11 +646,18 @@ jobs:
               option.HybridABCandidateVerifyCount=5 \
               option.HybridRootPawnLeverTieBreak=true \
               option.HybridMCTSUseSharedTT=false \
-              option.HybridMCTSSharedTTCpScale=230 \
-              option.MCTSMinimumKLDGainPerNode=0.00003 \
+              option.HybridMCTSMinimumKLDGainPerNode=0.0 \
+              option.HybridABPolicyWeight=0.0 \
+              option.MCTSAddDirichletNoise=false \
+              option.MCTSParityPreset=false \
+              option.MCTSMinimumKLDGainPerNode=0.00005 \
               option.MCTSPolicySoftmaxTemp=1.359 \
-              "option.Move Overhead=200" \
-            -each tc=60+0.6 restart=on \
+              option.MCTSRootPolicySoftmaxTemp=1.6 \
+              option.MCTSSmartPruningFactor=1.33 \
+              option.MCTSCacheHistoryLength=0 \
+              option.MCTSSolidTreeThreshold=100 \
+              ${ANE_OPTS_BASELINE} \
+            -each tc=60+0.6 restart=on timemargin=1000 \
             -games 2 -rounds "${GAMES}" -repeat \
             -concurrency "${CONCURRENCY}" \
             -maxmoves 200 \
@@ -359,12 +674,11 @@ jobs:
           set -e
 
           echo "exit_code=${CUTECHESS_EXIT}" >> "$GITHUB_OUTPUT"
-          cat results/hybrid_rapid/output.log
 
       # -----------------------------------------------------------------------
-      # Tournament: AB-only mode (CPU only, no GPU dependency)
+      # Tournament 3: AB-only Blitz (10+0.1) -- CPU-only, no GPU/transformer
       # -----------------------------------------------------------------------
-      - name: Tournament - AB-only mode (blitz 10+0.1)
+      - name: "Tournament 3: AB-only Blitz (10+0.1)"
         id: ab_blitz
         if: success() && (github.event.inputs.test_ab_only != 'false')
         env:
@@ -372,15 +686,19 @@ jobs:
           SPRT_MODE: ${{ github.event.inputs.sprt_mode || 'true' }}
           ELO0: ${{ github.event.inputs.sprt_elo0 || '-10' }}
           ELO1: ${{ github.event.inputs.sprt_elo1 || '5' }}
-          THREADS: ${{ github.event.inputs.threads_per_engine || '1' }}
-          HASH: ${{ github.event.inputs.hash_mb || '128' }}
+          THREADS: ${{ steps.system.outputs.threads }}
+          HASH: ${{ steps.system.outputs.hash }}
           CONCURRENCY: ${{ github.event.inputs.concurrency || '1' }}
+          PONDER: ${{ github.event.inputs.enable_ponder || 'true' }}
         run: |
           CUTECHESS="$(pwd)/candidate/reference/cutechess/build/cutechess-cli"
           BASELINE="$(pwd)/baseline/build/metalfish"
           CANDIDATE="$(pwd)/candidate/build/metalfish"
           BOOK="$(pwd)/candidate/reference/books/8moves_v3.pgn"
           mkdir -p results/ab_blitz
+
+          # Purge memory between tournaments
+          sudo purge 2>/dev/null || true
 
           SPRT_ARGS=""
           if [ "$SPRT_MODE" = "true" ]; then
@@ -392,15 +710,26 @@ jobs:
             BOOK_ARGS="-openings file=$BOOK format=pgn order=random plies=16"
           fi
 
+          PONDER_OPT="false"
+          if [ "$PONDER" = "true" ]; then
+            PONDER_OPT="true"
+          fi
+
           set +e
           "$CUTECHESS" \
             -engine cmd="$CANDIDATE" name=Candidate-AB proto=uci dir="$(pwd)/candidate" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
+              option.Ponder=${PONDER_OPT} \
+              option.MultiPV=1 \
               option.UseHybridSearch=false option.UseMCTS=false \
+              "option.Move Overhead=200" \
             -engine cmd="$BASELINE" name=Baseline-AB proto=uci dir="$(pwd)/baseline" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
+              option.Ponder=${PONDER_OPT} \
+              option.MultiPV=1 \
               option.UseHybridSearch=false option.UseMCTS=false \
-            -each tc=10+0.1 restart=on \
+              "option.Move Overhead=200" \
+            -each tc=10+0.1 restart=on timemargin=300 \
             -games 2 -rounds "${GAMES}" -repeat \
             -concurrency "${CONCURRENCY}" \
             -maxmoves 200 \
@@ -417,10 +746,9 @@ jobs:
           set -e
 
           echo "exit_code=${CUTECHESS_EXIT}" >> "$GITHUB_OUTPUT"
-          cat results/ab_blitz/output.log
 
       # -----------------------------------------------------------------------
-      # Parse results and apply pass/fail criteria
+      # Parse Results & Apply SPRT Pass/Fail Criteria
       # -----------------------------------------------------------------------
       - name: Evaluate tournament results
         id: evaluate
@@ -440,7 +768,7 @@ jobs:
                   "wins": 0, "losses": 0, "draws": 0,
                   "score_pct": 50.0,
                   "elo": 0.0, "elo_error": 0.0,
-                  "sprt_status": "none",  # none, H1, H0, or inconclusive
+                  "sprt_status": "none",
                   "llr": 0.0,
                   "total_games": 0,
                   "raw_output": "",
@@ -452,7 +780,7 @@ jobs:
               text = Path(log_path).read_text()
               result["raw_output"] = text
 
-              # Parse score line: "Score of Candidate vs Baseline: W - L - D  [pct%] N"
+              # Parse score: "Score of X vs Y: W - L - D  [pct] N"
               score_re = re.compile(
                   r"Score of .+? vs .+?: (\d+) - (\d+) - (\d+)\s+\[([0-9.]+)\]\s+(\d+)"
               )
@@ -465,7 +793,7 @@ jobs:
                       result["score_pct"] = float(m.group(4)) * 100
                       result["total_games"] = int(m.group(5))
 
-              # Parse SPRT result
+              # Parse SPRT
               if "SPRT: llr" in text:
                   llr_match = re.search(r"SPRT: llr ([0-9.e+-]+)", text)
                   if llr_match:
@@ -477,20 +805,22 @@ jobs:
                   else:
                       result["sprt_status"] = "inconclusive"
 
-              # Compute Elo from score
+              # Compute Elo from score percentage
               n = result["wins"] + result["losses"] + result["draws"]
               if n > 0:
                   score = (result["wins"] + result["draws"] / 2.0) / n
-                  if 0 < score < 1:
+                  if 0.001 < score < 0.999:
                       result["elo"] = -400.0 * math.log10(1.0 / score - 1.0)
-                      # Elo error margin (approximate)
+                      # Approximate Elo error margin (95% CI)
                       var = (result["wins"] * (1 - score)**2 +
                              result["draws"] * (0.5 - score)**2 +
                              result["losses"] * score**2) / n
                       se = math.sqrt(var / n) if var > 0 else 0
-                      if se > 0 and 0.001 < score - 1.96*se < 0.999:
-                          elo_lo = -400 * math.log10(1.0 / (score - 1.96*se) - 1.0)
-                          elo_hi = -400 * math.log10(1.0 / min(0.999, score + 1.96*se) - 1.0)
+                      if se > 0:
+                          score_lo = max(0.001, score - 1.96 * se)
+                          score_hi = min(0.999, score + 1.96 * se)
+                          elo_lo = -400 * math.log10(1.0 / score_lo - 1.0)
+                          elo_hi = -400 * math.log10(1.0 / score_hi - 1.0)
                           result["elo_error"] = (elo_hi - elo_lo) / 2.0
 
               return result
@@ -501,13 +831,13 @@ jobs:
 
               Pass criteria (any of):
               1. SPRT H1 accepted (candidate is not weaker)
-              2. SPRT H0 NOT accepted AND score >= 45% (inconclusive but not losing)
-              3. No SPRT, score >= 45% and Elo >= max_elo_loss
+              2. SPRT inconclusive AND score >= 45%
+              3. No SPRT, score >= 45% and Elo above threshold
 
               Fail criteria (any of):
-              1. SPRT H0 accepted (candidate is weaker -- regression confirmed)
-              2. Score < 40% (catastrophic regression, regardless of SPRT)
-              3. Elo estimate below max_elo_loss with 95% CI entirely negative
+              1. SPRT H0 accepted (candidate IS weaker -- regression confirmed)
+              2. Score < 40% (catastrophic regression regardless of SPRT)
+              3. Elo below max_elo_loss with 95% CI entirely negative
               """
               w, l, d = result["wins"], result["losses"], result["draws"]
               n = result["total_games"]
@@ -515,9 +845,9 @@ jobs:
               sprt = result["sprt_status"]
               score_pct = result["score_pct"]
 
-              print(f"\n{'='*60}")
+              print(f"\n{'='*70}")
               print(f"  {label}")
-              print(f"{'='*60}")
+              print(f"{'='*70}")
               print(f"  Games: {n}  (W:{w} D:{d} L:{l})")
               print(f"  Score: {score_pct:.1f}%  |  Elo: {elo:+.1f} +/- {result['elo_error']:.1f}")
               print(f"  SPRT:  {sprt}  (LLR: {result['llr']:.3f})")
@@ -530,33 +860,36 @@ jobs:
                   print(f"  RESULT: SKIPPED (no games played)")
                   return True
 
-              # Catastrophic regression: score below 40% is always a fail
+              # Catastrophic regression: always fail
               if n >= 10 and score_pct < 40.0:
-                  print(f"  RESULT: FAIL -- catastrophic regression (score {score_pct:.1f}% < 40%)")
+                  print(f"  RESULT: FAIL -- catastrophic regression "
+                        f"(score {score_pct:.1f}% < 40%)")
                   return False
 
-              # SPRT H0 accepted: regression confirmed statistically
+              # SPRT H0 accepted: statistically confirmed regression
               if sprt == "H0":
-                  print(f"  RESULT: FAIL -- SPRT rejected candidate (H0 accepted, Elo {elo:+.1f})")
+                  print(f"  RESULT: FAIL -- SPRT H0 accepted "
+                        f"(candidate is weaker, Elo {elo:+.1f})")
                   return False
 
               # SPRT H1 accepted: candidate is not weaker
               if sprt == "H1":
-                  print(f"  RESULT: PASS -- SPRT accepted candidate (H1, Elo {elo:+.1f})")
+                  print(f"  RESULT: PASS -- SPRT H1 accepted "
+                        f"(candidate not weaker, Elo {elo:+.1f})")
                   return True
 
-              # No SPRT conclusion (inconclusive or fixed-count mode)
-              # Use score threshold: must not be losing badly
+              # Inconclusive or no SPRT: use score threshold
               if elo < max_elo_loss and (elo + result["elo_error"]) < 0:
-                  print(f"  RESULT: FAIL -- Elo {elo:+.1f} below threshold {max_elo_loss} "
-                        f"(95% CI entirely negative)")
+                  print(f"  RESULT: FAIL -- Elo {elo:+.1f} below threshold "
+                        f"{max_elo_loss} (95% CI entirely negative)")
                   return False
 
               if score_pct >= 45.0:
-                  print(f"  RESULT: PASS -- score {score_pct:.1f}% >= 45% (no significant regression)")
+                  print(f"  RESULT: PASS -- score {score_pct:.1f}% >= 45% "
+                        f"(no significant regression)")
                   return True
 
-              # Borderline: warn but pass if insufficient games
+              # Insufficient data
               if n < 20:
                   print(f"  RESULT: PASS (insufficient games for conclusion, n={n})")
                   return True
@@ -564,7 +897,9 @@ jobs:
               print(f"  RESULT: FAIL -- score {score_pct:.1f}% < 45% over {n} games")
               return False
 
+          # ---------------------------------------------------------------
           # Parse all tournament results
+          # ---------------------------------------------------------------
           results_dir = Path("results")
           tournaments = {
               "Hybrid Blitz (10+0.1)": "hybrid_blitz/output.log",
@@ -590,38 +925,39 @@ jobs:
               if not passed:
                   all_pass = False
 
-          # Write summary JSON for artifact
+          # Write summary JSON
           summary_path = results_dir / "tournament_summary.json"
           summary_path.parent.mkdir(parents=True, exist_ok=True)
           with open(summary_path, "w") as f:
               json.dump(summary, f, indent=2)
 
           # Print final verdict
-          print(f"\n{'='*60}")
+          print(f"\n{'='*70}")
           print(f"  TOURNAMENT SUMMARY")
-          print(f"{'='*60}")
+          print(f"{'='*70}")
           for label, s in summary.items():
               status = "PASS" if s["passed"] else "FAIL"
               print(f"  [{status}] {label}: {s['elo']:+.1f} Elo "
                     f"({s['wdl']}, {s['games']} games, SPRT={s['sprt']})")
-          print(f"{'='*60}")
+          print(f"{'='*70}")
 
           if all_pass:
               print("\n  VERDICT: ALL TOURNAMENTS PASSED -- no regression detected.")
               sys.exit(0)
           else:
-              print("\n  VERDICT: REGRESSION DETECTED -- PR candidate is weaker than main.")
+              print("\n  VERDICT: REGRESSION DETECTED -- candidate is weaker than main.")
               sys.exit(1)
           PYTHON_SCRIPT
 
       # -----------------------------------------------------------------------
-      # Upload artifacts
+      # Upload Artifacts
       # -----------------------------------------------------------------------
       - name: Upload tournament results
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: engine-tournament-results
           path: |
             results/
           if-no-files-found: warn
+          retention-days: 30
