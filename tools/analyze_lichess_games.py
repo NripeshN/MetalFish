@@ -47,6 +47,13 @@ class AuditSummary:
     stream_errors: int = 0
     stream_failures: int = 0
     stream_reconnects: int = 0
+    max_score_cp: int | None = None
+    max_score_ply: int = 0
+    max_score_move: str = ""
+    min_score_cp: int | None = None
+    min_score_ply: int = 0
+    min_score_move: str = ""
+    decisive_score_samples: int = 0
     issue_counts: Counter[str] = field(default_factory=Counter)
     final_status: str = ""
     final_winner: str = ""
@@ -117,6 +124,38 @@ def latest_audit_files(
 
 def parse_audit(path: pathlib.Path) -> AuditSummary:
     summary = AuditSummary(game_id=path.stem, path=path)
+
+    def record_engine_score(row: dict) -> None:
+        engine_info = row.get("engine_info")
+        if not isinstance(engine_info, dict):
+            return
+        if engine_info.get("score_mate") is not None:
+            try:
+                mate = int(engine_info["score_mate"])
+            except (TypeError, ValueError):
+                return
+            score_cp = 32000 if mate > 0 else -32000
+        else:
+            try:
+                score_cp = int(engine_info["score_cp"])
+            except (KeyError, TypeError, ValueError):
+                return
+        try:
+            ply = int(row.get("ply") or 0)
+        except (TypeError, ValueError):
+            ply = 0
+        move = str(row.get("best") or "")
+        if summary.max_score_cp is None or score_cp > summary.max_score_cp:
+            summary.max_score_cp = score_cp
+            summary.max_score_ply = ply
+            summary.max_score_move = move
+        if summary.min_score_cp is None or score_cp < summary.min_score_cp:
+            summary.min_score_cp = score_cp
+            summary.min_score_ply = ply
+            summary.min_score_move = move
+        if abs(score_cp) >= 300:
+            summary.decisive_score_samples += 1
+
     for raw in path.read_text(errors="replace").splitlines():
         try:
             row = json.loads(raw)
@@ -178,6 +217,7 @@ def parse_audit(path: pathlib.Path) -> AuditSummary:
             summary.draw_offer_candidates += 1
         elif event == "engine_search_result":
             summary.engine_searches += 1
+            record_engine_score(row)
             summary.max_engine_ms = max(
                 summary.max_engine_ms, int(row.get("elapsed_ms") or 0)
             )
@@ -185,6 +225,7 @@ def parse_audit(path: pathlib.Path) -> AuditSummary:
             summary.ponder_starts += 1
         elif event == "ponderhit_result":
             summary.ponderhits += 1
+            record_engine_score(row)
             summary.max_ponderhit_ms = max(
                 summary.max_ponderhit_ms, int(row.get("elapsed_ms") or 0)
             )
@@ -485,6 +526,21 @@ def print_report(games: list[GameSummary]) -> None:
             f"{stream_errors} errors, {stream_failures} failed responses, "
             f"{stream_reconnects} reconnects"
         )
+    scored_games = [game for game in games if game.audit.max_score_cp is not None]
+    if scored_games:
+        max_game = max(scored_games, key=lambda game: game.audit.max_score_cp or 0)
+        min_game = min(scored_games, key=lambda game: game.audit.min_score_cp or 0)
+        decisive_samples = sum(game.audit.decisive_score_samples for game in games)
+        print(
+            "Score extremes: "
+            f"best {max_game.audit.max_score_cp:+d} cp "
+            f"({max_game.audit.game_id} ply {max_game.audit.max_score_ply} "
+            f"{max_game.audit.max_score_move}), "
+            f"worst {min_game.audit.min_score_cp:+d} cp "
+            f"({min_game.audit.game_id} ply {min_game.audit.min_score_ply} "
+            f"{min_game.audit.min_score_move}), "
+            f"{decisive_samples} decisive samples"
+        )
     print(
         "Max elapsed: "
         f"search {max((g.audit.max_engine_ms for g in games), default=0)} ms, "
@@ -575,6 +631,13 @@ def summaries_to_json(games: list[GameSummary]) -> list[dict]:
             "stream_errors": game.audit.stream_errors,
             "stream_failures": game.audit.stream_failures,
             "stream_reconnects": game.audit.stream_reconnects,
+            "max_score_cp": game.audit.max_score_cp,
+            "max_score_ply": game.audit.max_score_ply,
+            "max_score_move": game.audit.max_score_move,
+            "min_score_cp": game.audit.min_score_cp,
+            "min_score_ply": game.audit.min_score_ply,
+            "min_score_move": game.audit.min_score_move,
+            "decisive_score_samples": game.audit.decisive_score_samples,
             "issues": dict(game.audit.issue_counts),
         }
         for game in games
