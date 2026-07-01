@@ -91,6 +91,13 @@ POSITIONS: List[
         None,
         (-30, 200),  # d4 is strong, engine may see significant advantage
     ),
+    (
+        "lichess_hc4_queen_blunder",
+        "2kr4/1q1r1p2/4p3/p3P3/2Pn1PP1/2R5/1Q3B1P/5BK1 w - - 4 34",
+        "Historical hC4lRCc0 regression: avoid MCTS override Qb6??",
+        ["b2a3"],
+        (-100, 100),
+    ),
 ]
 
 
