@@ -50,9 +50,9 @@ on:
   workflow_dispatch:
     inputs:
       games_per_tc:
-        description: "Game pairs per time control (even number)"
+        description: "Game pairs per time control (even number, shared across all TCs)"
         required: false
-        default: "50"
+        default: "20"
       sprt_mode:
         description: "Use SPRT early stopping (true) or fixed game count (false)"
         required: false
@@ -397,12 +397,12 @@ jobs:
           echo "Both engines warmed: Metal shaders compiled, BT4 weights loaded."
 
       # -----------------------------------------------------------------------
-      # Tournament 1: Hybrid Blitz (10+0.1) -- GPU + CPU, full production config
+      # Tournament 1: Hybrid Blitz (60+0.6) -- GPU + CPU, full production config
       # -----------------------------------------------------------------------
-      - name: "Tournament 1: Hybrid Blitz (10+0.1)"
+      - name: "Tournament 1: Hybrid Blitz (60+0.6)"
         id: hybrid_blitz
         env:
-          GAMES: ${{ github.event.inputs.games_per_tc || '50' }}
+          GAMES: ${{ github.event.inputs.games_per_tc || '20' }}
           SPRT_MODE: ${{ github.event.inputs.sprt_mode || 'true' }}
           ELO0: ${{ github.event.inputs.sprt_elo0 || '-10' }}
           ELO1: ${{ github.event.inputs.sprt_elo1 || '5' }}
@@ -540,7 +540,7 @@ jobs:
               option.MCTSSolidTreeThreshold=100 \
               tscale=10 \
               "${ANE_ARGS_BASELINE[@]}" \
-            -each tc=10+0.1 restart=on timemargin=500 \
+            -each tc=60+0.6 restart=on timemargin=1000 \
             -games 2 -rounds "${GAMES}" -repeat \
             -concurrency "${CONCURRENCY}" \
             -maxmoves 200 \
@@ -559,13 +559,13 @@ jobs:
           echo "exit_code=${CUTECHESS_EXIT}" >> "$GITHUB_OUTPUT"
 
       # -----------------------------------------------------------------------
-      # Tournament 2: Hybrid Rapid (60+0.6) -- longer TC, more stable signal
+      # Tournament 2: Hybrid Rapid (180+1.8) -- longer TC, more stable signal
       # -----------------------------------------------------------------------
-      - name: "Tournament 2: Hybrid Rapid (60+0.6)"
+      - name: "Tournament 2: Hybrid Rapid (180+1.8)"
         id: hybrid_rapid
         if: success()
         env:
-          GAMES: ${{ github.event.inputs.games_per_tc || '50' }}
+          GAMES: ${{ github.event.inputs.games_per_tc || '20' }}
           SPRT_MODE: ${{ github.event.inputs.sprt_mode || 'true' }}
           ELO0: ${{ github.event.inputs.sprt_elo0 || '-10' }}
           ELO1: ${{ github.event.inputs.sprt_elo1 || '5' }}
@@ -695,7 +695,7 @@ jobs:
               option.MCTSSolidTreeThreshold=100 \
               tscale=10 \
               "${ANE_ARGS_BASELINE[@]}" \
-            -each tc=60+0.6 restart=on timemargin=1000 \
+            -each tc=180+1.8 restart=on timemargin=2000 \
             -games 2 -rounds "${GAMES}" -repeat \
             -concurrency "${CONCURRENCY}" \
             -maxmoves 200 \
@@ -720,7 +720,7 @@ jobs:
         id: ab_blitz
         if: success() && (github.event.inputs.test_ab_only != 'false')
         env:
-          GAMES: ${{ github.event.inputs.games_per_tc || '50' }}
+          GAMES: ${{ github.event.inputs.games_per_tc || '20' }}
           SPRT_MODE: ${{ github.event.inputs.sprt_mode || 'true' }}
           ELO0: ${{ github.event.inputs.sprt_elo0 || '-10' }}
           ELO1: ${{ github.event.inputs.sprt_elo1 || '5' }}
@@ -944,8 +944,8 @@ jobs:
           # ---------------------------------------------------------------
           results_dir = Path("results")
           tournaments = {
-              "Hybrid Blitz (10+0.1)": "hybrid_blitz/output.log",
-              "Hybrid Rapid (60+0.6)": "hybrid_rapid/output.log",
+              "Hybrid Blitz (60+0.6)": "hybrid_blitz/output.log",
+              "Hybrid Rapid (180+1.8)": "hybrid_rapid/output.log",
               "AB-only Blitz (10+0.1)": "ab_blitz/output.log",
           }
 
