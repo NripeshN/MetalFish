@@ -160,10 +160,18 @@ jobs:
       - name: Smoke-test both engines
         run: |
           for engine in baseline/build/metalfish candidate/build/metalfish; do
-            echo "uci" | timeout 10 ./$engine | grep -q "uciok" || {
+            echo "uci" | ./$engine > /tmp/uci_out.txt 2>/dev/null &
+            PID=$!
+            sleep 5
+            kill $PID 2>/dev/null || true
+            wait $PID 2>/dev/null || true
+            if grep -q "uciok" /tmp/uci_out.txt; then
+              echo "OK: $engine responds to UCI"
+            else
               echo "FATAL: $engine did not respond to UCI"
+              cat /tmp/uci_out.txt
               exit 1
-            }
+            fi
           done
           echo "Both engines respond to UCI protocol."
 
