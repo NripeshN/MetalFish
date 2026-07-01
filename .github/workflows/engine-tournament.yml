@@ -213,15 +213,43 @@ jobs:
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
               option.MCTSAddDirichletNoise=false \
-              option.TransformerLowTimeFallbackMs=3000 \
+              option.MCTSParityPreset=false \
+              option.TransformerLowTimeFallbackMs=1500 \
               option.TransformerMinMoveBudgetMs=400 \
+              option.HybridABRootRejectMCTS=true \
+              option.HybridMCTSRootReject=true \
+              option.HybridMCTSABRootHints=true \
+              option.HybridMCTSABRootHintCount=8 \
+              option.HybridMCTSABRootHintDelayMs=0 \
+              option.HybridABCandidateVerifyMs=240 \
+              option.HybridABCandidateVerifyCount=5 \
+              option.HybridRootPawnLeverTieBreak=true \
+              option.HybridMCTSUseSharedTT=false \
+              option.HybridMCTSSharedTTCpScale=230 \
+              option.MCTSMinimumKLDGainPerNode=0.00003 \
+              option.MCTSPolicySoftmaxTemp=1.359 \
+              "option.Move Overhead=200" \
             -engine cmd="$BASELINE" name=Baseline proto=uci dir="$(pwd)/baseline" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
               option.MCTSAddDirichletNoise=false \
-              option.TransformerLowTimeFallbackMs=3000 \
+              option.MCTSParityPreset=false \
+              option.TransformerLowTimeFallbackMs=1500 \
               option.TransformerMinMoveBudgetMs=400 \
+              option.HybridABRootRejectMCTS=true \
+              option.HybridMCTSRootReject=true \
+              option.HybridMCTSABRootHints=true \
+              option.HybridMCTSABRootHintCount=8 \
+              option.HybridMCTSABRootHintDelayMs=0 \
+              option.HybridABCandidateVerifyMs=240 \
+              option.HybridABCandidateVerifyCount=5 \
+              option.HybridRootPawnLeverTieBreak=true \
+              option.HybridMCTSUseSharedTT=false \
+              option.HybridMCTSSharedTTCpScale=230 \
+              option.MCTSMinimumKLDGainPerNode=0.00003 \
+              option.MCTSPolicySoftmaxTemp=1.359 \
+              "option.Move Overhead=200" \
             -each tc=10+0.1 restart=on \
             -games 2 -rounds "${GAMES}" -repeat \
             -concurrency "${CONCURRENCY}" \
@@ -277,15 +305,43 @@ jobs:
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
               option.MCTSAddDirichletNoise=false \
-              option.TransformerLowTimeFallbackMs=3000 \
+              option.MCTSParityPreset=false \
+              option.TransformerLowTimeFallbackMs=1500 \
               option.TransformerMinMoveBudgetMs=400 \
+              option.HybridABRootRejectMCTS=true \
+              option.HybridMCTSRootReject=true \
+              option.HybridMCTSABRootHints=true \
+              option.HybridMCTSABRootHintCount=8 \
+              option.HybridMCTSABRootHintDelayMs=0 \
+              option.HybridABCandidateVerifyMs=240 \
+              option.HybridABCandidateVerifyCount=5 \
+              option.HybridRootPawnLeverTieBreak=true \
+              option.HybridMCTSUseSharedTT=false \
+              option.HybridMCTSSharedTTCpScale=230 \
+              option.MCTSMinimumKLDGainPerNode=0.00003 \
+              option.MCTSPolicySoftmaxTemp=1.359 \
+              "option.Move Overhead=200" \
             -engine cmd="$BASELINE" name=Baseline proto=uci dir="$(pwd)/baseline" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
               option.MCTSAddDirichletNoise=false \
-              option.TransformerLowTimeFallbackMs=3000 \
+              option.MCTSParityPreset=false \
+              option.TransformerLowTimeFallbackMs=1500 \
               option.TransformerMinMoveBudgetMs=400 \
+              option.HybridABRootRejectMCTS=true \
+              option.HybridMCTSRootReject=true \
+              option.HybridMCTSABRootHints=true \
+              option.HybridMCTSABRootHintCount=8 \
+              option.HybridMCTSABRootHintDelayMs=0 \
+              option.HybridABCandidateVerifyMs=240 \
+              option.HybridABCandidateVerifyCount=5 \
+              option.HybridRootPawnLeverTieBreak=true \
+              option.HybridMCTSUseSharedTT=false \
+              option.HybridMCTSSharedTTCpScale=230 \
+              option.MCTSMinimumKLDGainPerNode=0.00003 \
+              option.MCTSPolicySoftmaxTemp=1.359 \
+              "option.Move Overhead=200" \
             -each tc=60+0.6 restart=on \
             -games 2 -rounds "${GAMES}" -repeat \
             -concurrency "${CONCURRENCY}" \
