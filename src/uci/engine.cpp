@@ -139,6 +139,7 @@ Engine::Engine(std::optional<std::string> path)
               Option("", [](const Option &) { return std::nullopt; }));
   options.add("NNBackend", Option("auto"));
   options.add("NNBackendRequireAccelerator", Option(false));
+  options.add("NNMetalFP16", Option(true));
   options.add("NNCoreMLModelPath", Option(""));
   options.add("NNCoreMLComputeUnits", Option("cpu-ne"));
   options.add("NNCudaDevice", Option(-1, -1, 255));
@@ -160,6 +161,9 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridABRootRejectMCTS", Option(true));
   options.add("HybridMCTSRootReject", Option(false));
   options.add("HybridMCTSUseSharedTT", Option(false));
+  options.add("HybridMCTSSharedTTCpScale", Option(230, 100, 600));
+  options.add("HybridMCTSSharedTTDepthThreshold", Option(8, 4, 16));
+  options.add("HybridQToCpScale", Option(300, 150, 500));
   options.add("HybridMCTSABRootHints", Option(true));
   options.add("HybridMCTSABRootHintDelayMs", Option(0, 0, 1000));
   options.add("HybridMCTSABRootHintCount", Option(8, 1, 16));

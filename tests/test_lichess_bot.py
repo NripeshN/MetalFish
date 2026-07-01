@@ -1525,7 +1525,10 @@ def test_opening_book_does_not_send_bot_token_to_explorer() -> None:
 
     headers = FakeRequests.calls[0].get("headers", {})
     expect("explorer request has user agent", "User-Agent" in headers)
-    expect("explorer request has no auth", "Authorization" not in headers)
+    expect(
+        "explorer request uses token for auth",
+        headers.get("Authorization") == "Bearer secret-token",
+    )
 
 
 def test_opening_book_scores_for_side_to_move() -> None:
@@ -2569,6 +2572,10 @@ def test_make_move_can_offer_draw_on_same_request() -> None:
             {
                 "path": "/bot/game/game/move/e2e4",
                 "params": {"offeringDraw": "true"},
+                "timeout": (
+                    lichess_bot.LICHESS_API_CONNECT_TIMEOUT_S,
+                    lichess_bot.LICHESS_MOVE_POST_TIMEOUT_S,
+                ),
             }
         ],
     )
@@ -2580,14 +2587,65 @@ def test_respond_draw_offer_uses_bot_draw_endpoint() -> None:
         text = ""
 
     bot = object.__new__(lichess_bot.LichessBot)
-    calls: list[str] = []
-    bot.api_post = lambda path, **kwargs: calls.append(path) or Response()
+    calls: list[dict] = []
+    bot.api_post = (
+        lambda path, **kwargs: calls.append({"path": path, **kwargs}) or Response()
+    )
 
     expect("draw accept succeeds", bot.respond_draw_offer("game", True))
     expect("draw decline succeeds", bot.respond_draw_offer("game", False))
     expect(
         "draw endpoint paths",
-        calls == ["/bot/game/game/draw/yes", "/bot/game/game/draw/no"],
+        calls
+        == [
+            {
+                "path": "/bot/game/game/draw/yes",
+                "timeout": (
+                    lichess_bot.LICHESS_API_CONNECT_TIMEOUT_S,
+                    lichess_bot.LICHESS_DRAW_POST_TIMEOUT_S,
+                ),
+            },
+            {
+                "path": "/bot/game/game/draw/no",
+                "timeout": (
+                    lichess_bot.LICHESS_API_CONNECT_TIMEOUT_S,
+                    lichess_bot.LICHESS_DRAW_POST_TIMEOUT_S,
+                ),
+            },
+        ],
+    )
+
+
+def test_make_move_request_error_is_bounded_failure() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    calls: list[dict] = []
+
+    def api_post(path: str, **kwargs):
+        calls.append({"path": path, **kwargs})
+        raise TimeoutError("move post hung")
+
+    bot.api_post = api_post
+
+    with redirect_stdout(io.StringIO()):
+        ok = bot.make_move("game", "e2e4")
+
+    expect("request error fails move", not ok)
+    expect(
+        "request error detail recorded",
+        "TimeoutError" in bot._last_move_failure_detail,
+    )
+    expect(
+        "move request has explicit timeout",
+        calls
+        == [
+            {
+                "path": "/bot/game/game/move/e2e4",
+                "timeout": (
+                    lichess_bot.LICHESS_API_CONNECT_TIMEOUT_S,
+                    lichess_bot.LICHESS_MOVE_POST_TIMEOUT_S,
+                ),
+            }
+        ],
     )
 
 
@@ -2604,7 +2662,9 @@ def test_draw_offer_reason_uses_tablebase_draw() -> None:
 
     bot._draw_claim_available = lambda candidate: False
     bot._tablebase_wdl = lambda candidate: 0
-    expect("tb draw offers even without claim", bot._draw_offer_reason(board) == "tb_draw")
+    expect(
+        "tb draw offers even without claim", bot._draw_offer_reason(board) == "tb_draw"
+    )
 
 
 def test_engine_equal_low_material_can_offer_draw_late() -> None:
@@ -2637,7 +2697,9 @@ def test_draw_accept_reason_uses_tablebase_and_engine_score() -> None:
     )
 
     bot._tablebase_wdl = lambda candidate: 2
-    expect("reject winning tablebase draw offer", bot._draw_accept_reason(board) is None)
+    expect(
+        "reject winning tablebase draw offer", bot._draw_accept_reason(board) is None
+    )
 
     board.turn = lichess_bot.chess.BLACK
     bot._tablebase_wdl = lambda candidate: 2
@@ -2659,8 +2721,13 @@ def test_draw_accept_reason_uses_tablebase_and_engine_score() -> None:
         == "engine_losing",
     )
     expect(
-        "accept late equal engine draw offer",
+        "reject late slightly better engine draw offer",
         bot._draw_accept_reason(board, engine_info={"score_cp": 10}, moves=moves)
+        is None,
+    )
+    expect(
+        "accept late dead-even engine draw offer",
+        bot._draw_accept_reason(board, engine_info={"score_cp": 0}, moves=moves)
         == "engine_not_better",
     )
     expect(
@@ -2816,9 +2883,9 @@ def test_incoming_draw_offer_accepts_after_engine_says_worse() -> None:
     bot._should_query_book = lambda board, my_color, wtime, btime: False
     bot._tablebase_wdl = lambda board: None
     bot._pre_submit_active_check_needed = lambda board: False
-    bot.respond_draw_offer = lambda game_id, accept: draw_calls.append(
-        (game_id, accept)
-    ) or True
+    bot.respond_draw_offer = (
+        lambda game_id, accept: draw_calls.append((game_id, accept)) or True
+    )
     bot.make_move = lambda game_id, move, **kwargs: submitted.append(move) or True
 
     state = {

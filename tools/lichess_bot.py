@@ -306,25 +306,25 @@ DRAW_OFFER_SEARCH_CAP_MS = max(
     0, min(30_000, env_int("METALFISH_DRAW_OFFER_SEARCH_CAP_MS", 1500))
 )
 DRAW_ACCEPT_ENGINE_MAX_CP = max(
-    0, min(300, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MAX_CP", 25))
+    0, min(300, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MAX_CP", 0))
 )
 DRAW_ACCEPT_ENGINE_LOSING_CP = -max(
-    50, min(1000, env_int("METALFISH_DRAW_ACCEPT_ENGINE_LOSING_CP", 150))
+    50, min(1000, env_int("METALFISH_DRAW_ACCEPT_ENGINE_LOSING_CP", 200))
 )
 DRAW_ACCEPT_ENGINE_MIN_PLY = max(
-    0, min(200, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MIN_PLY", 60))
+    0, min(200, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MIN_PLY", 80))
 )
 DRAW_OFFER_ENGINE_MAX_CP = max(
-    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_CP", 12))
+    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_CP", 0))
 )
 DRAW_OFFER_ENGINE_MIN_PLY = max(
-    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MIN_PLY", 80))
+    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MIN_PLY", 120))
 )
 DRAW_OFFER_ENGINE_MAX_PIECES = max(
-    2, min(32, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_PIECES", 12))
+    2, min(32, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_PIECES", 8))
 )
 DRAW_OFFER_COOLDOWN_PLIES = max(
-    0, min(100, env_int("METALFISH_DRAW_OFFER_COOLDOWN_PLIES", 12))
+    0, min(100, env_int("METALFISH_DRAW_OFFER_COOLDOWN_PLIES", 20))
 )
 
 
@@ -448,6 +448,15 @@ EVENT_STREAM_RECONNECT_DELAY_S = env_float(
 LICHESS_API_MIN_INTERVAL_S = env_float("METALFISH_LICHESS_API_MIN_INTERVAL_S", 0.35)
 EXPLORER_API_MIN_INTERVAL_S = env_float("METALFISH_EXPLORER_API_MIN_INTERVAL_S", 0.25)
 LICHESS_429_BACKOFF_S = env_float("METALFISH_LICHESS_429_BACKOFF_S", 65.0)
+LICHESS_API_CONNECT_TIMEOUT_S = max(
+    0.5, min(10.0, env_float("METALFISH_LICHESS_API_CONNECT_TIMEOUT_S", 3.0))
+)
+LICHESS_MOVE_POST_TIMEOUT_S = max(
+    0.5, min(10.0, env_float("METALFISH_LICHESS_MOVE_POST_TIMEOUT_S", 3.0))
+)
+LICHESS_DRAW_POST_TIMEOUT_S = max(
+    0.5, min(10.0, env_float("METALFISH_LICHESS_DRAW_POST_TIMEOUT_S", 3.0))
+)
 BOT_ONLINE_FETCH_LIMIT = max(
     1, min(512, env_int("METALFISH_BOT_ONLINE_FETCH_LIMIT", 512))
 )
@@ -688,7 +697,9 @@ def local_hash_mb(active_peer_engines: int = 0) -> int:
 def live_resource_profile(
     active_peer_engines: int = 0, forced_workers: int = 0
 ) -> dict[str, float | int | str]:
-    forced_workers = normalize_search_workers(forced_workers) if forced_workers > 0 else 0
+    forced_workers = (
+        normalize_search_workers(forced_workers) if forced_workers > 0 else 0
+    )
     return {
         "threads": dynamic_search_workers(active_peer_engines, forced_workers),
         "hash_mb": local_hash_mb(active_peer_engines),
@@ -717,6 +728,7 @@ BASE_ENGINE_OPTIONS = {
     "HybridABRootRejectMCTS": HYBRID_AB_ROOT_REJECT_MCTS,
     "HybridMCTSRootReject": HYBRID_MCTS_ROOT_REJECT,
     "HybridMCTSUseSharedTT": HYBRID_MCTS_SHARED_TT,
+    "HybridMCTSSharedTTCpScale": "230",
     "HybridMCTSABRootHints": HYBRID_MCTS_AB_ROOT_HINTS,
     "HybridMCTSABRootHintDelayMs": str(HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS),
     "HybridMCTSABRootHintCount": str(HYBRID_MCTS_AB_ROOT_HINT_COUNT),
@@ -1768,6 +1780,9 @@ def configured_book_paths() -> list[pathlib.Path]:
         candidates = []
         for pattern in ("*.bin", "*.book", "*.polyglot"):
             candidates.extend(sorted(DEFAULT_BOOK_DIR.glob(pattern)))
+        primary = [p for p in candidates if "metalfish_repertoire" in p.name]
+        rest = [p for p in candidates if "metalfish_repertoire" not in p.name]
+        candidates = primary + rest
     return [path for path in candidates if path.is_file()]
 
 
@@ -1786,7 +1801,10 @@ class OpeningBook:
         self.timeout = timeout
         self.allow_online = allow_online
         self.cache_path = cache_path
-        self.http = SerializedHttpClient(min_interval_s=EXPLORER_API_MIN_INTERVAL_S)
+        self.http = SerializedHttpClient(
+            min_interval_s=EXPLORER_API_MIN_INTERVAL_S,
+            auth_token=api_key if api_key else None,
+        )
         self._cache: dict[str, str] = self._load_cache()
         self._miss_cache: set[str] = set()
         self._readers: list[chess.polyglot.MemoryMappedReader] = []
@@ -1871,20 +1889,27 @@ class OpeningBook:
             board = chess.Board(fen)
         except ValueError:
             return None
-        weights: dict[str, int] = {}
         for reader in self._readers:
             try:
                 entries = list(reader.find_all(board))
             except Exception:
                 continue
+            weights: dict[str, int] = {}
             for entry in entries:
                 move_attr = entry.move
                 move = move_attr() if callable(move_attr) else move_attr
                 if move in board.legal_moves:
                     weights[move.uci()] = weights.get(move.uci(), 0) + entry.weight
-        if not weights:
-            return None
-        return max(weights.items(), key=lambda item: (item[1], item[0]))[0]
+            if not weights:
+                continue
+            max_weight = max(weights.values())
+            tied = [uci for uci, w in weights.items() if w == max_weight]
+            if len(tied) == 1:
+                return tied[0]
+            if len(self._readers) > 1 and reader is self._readers[0]:
+                continue
+            return max(weights.items(), key=lambda item: (item[1], item[0]))[0]
+        return None
 
     def _query_masters(self, fen: str) -> str | None:
         try:
@@ -1909,8 +1934,8 @@ class OpeningBook:
                 f"{EXPLORER_API}/lichess",
                 params={
                     "fen": fen,
-                    "ratings": "2200,2500",
-                    "speeds": "blitz,rapid,classical",
+                    "ratings": "2500",
+                    "speeds": "rapid,classical",
                     "topGames": 0,
                     "recentGames": 0,
                 },
@@ -1928,18 +1953,26 @@ class OpeningBook:
             return None
         fen_parts = fen.split()
         black_to_move = len(fen_parts) > 1 and fen_parts[1] == "b"
-        best, best_score = None, -1.0
+        candidates: list[tuple[float, str]] = []
         for m in moves:
             games = m.get("white", 0) + m.get("draws", 0) + m.get("black", 0)
             if games < self.min_games:
                 continue
             wins = m.get("black" if black_to_move else "white", 0)
-            wins += m.get("draws", 0) * 0.5
-            score = (wins / games) * (games**0.3) if games > 0 else 0
-            if score > best_score:
-                best_score = score
-                best = m.get("uci")
-        return best
+            losses = m.get("white" if black_to_move else "black", 0)
+            draws = m.get("draws", 0)
+            win_rate = (wins + draws * 0.5) / games if games > 0 else 0
+            if win_rate < 0.45:
+                continue
+            loss_rate = losses / games if games > 0 else 1
+            if loss_rate > 0.40:
+                continue
+            score = win_rate * (games**0.25)
+            candidates.append((score, m.get("uci", "")))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: -x[0])
+        return candidates[0][1]
 
 
 class LichessBot:
@@ -2126,7 +2159,14 @@ class LichessBot:
 
     def respond_draw_offer(self, game_id: str, accept: bool) -> bool:
         action = "yes" if accept else "no"
-        r = self.api_post(f"/bot/game/{game_id}/draw/{action}")
+        try:
+            r = self.api_post(
+                f"/bot/game/{game_id}/draw/{action}",
+                timeout=(LICHESS_API_CONNECT_TIMEOUT_S, LICHESS_DRAW_POST_TIMEOUT_S),
+            )
+        except Exception as exc:
+            print(f"  [{game_id}] Draw {action} failed: {type(exc).__name__}: {exc}")
+            return False
         if r.status_code != 200:
             detail = r.text.strip().replace("\n", " ")[:200]
             suffix = f": {detail}" if detail else ""
@@ -2139,7 +2179,17 @@ class LichessBot:
     ) -> bool:
         self._last_move_failure_detail = ""
         kwargs = {"params": {"offeringDraw": "true"}} if offering_draw else {}
-        r = self.api_post(f"/bot/game/{game_id}/move/{move}", **kwargs)
+        kwargs["timeout"] = (
+            LICHESS_API_CONNECT_TIMEOUT_S,
+            LICHESS_MOVE_POST_TIMEOUT_S,
+        )
+        try:
+            r = self.api_post(f"/bot/game/{game_id}/move/{move}", **kwargs)
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {exc}".strip()
+            self._last_move_failure_detail = f"request_error: {detail}"[:200]
+            print(f"  [{game_id}] Move {move} failed: {detail}")
+            return False
         if r.status_code != 200:
             detail = r.text.strip().replace("\n", " ")[:200]
             suffix = f": {detail}" if detail else ""
@@ -2307,7 +2357,9 @@ class LichessBot:
         offering_draw: bool = False,
         draw_offer_reason: str | None = None,
     ) -> bool:
+        submit_start = time.time()
         if self.make_move(game_id, move, offering_draw=offering_draw):
+            submit_ms = int((time.time() - submit_start) * 1000)
             self._record_submitted_turn(game_id, moves, move)
             if offering_draw:
                 self._remember_draw_offer_sent(game_id, moves)
@@ -2316,12 +2368,14 @@ class LichessBot:
                 "move_submit",
                 move=move,
                 result="accepted",
+                elapsed_ms=submit_ms,
                 offering_draw=offering_draw,
                 draw_offer_reason=draw_offer_reason or "",
                 **self._audit_context(moves),
             )
             return True
 
+        submit_ms = int((time.time() - submit_start) * 1000)
         if self._move_failure_looks_stale():
             self._record_submitted_turn(game_id, moves)
             if self._move_failure_looks_game_over():
@@ -2339,6 +2393,7 @@ class LichessBot:
             move=move,
             result="rejected",
             detail=self._last_move_failure_detail,
+            elapsed_ms=submit_ms,
             stale=self._move_failure_looks_stale(),
             offering_draw=offering_draw,
             draw_offer_reason=draw_offer_reason or "",
@@ -2534,7 +2589,9 @@ class LichessBot:
         if DRAW_OFFER_COOLDOWN_PLIES <= 0:
             return False
         last_ply = getattr(self, "_draw_offers_sent", {}).get(game_id)
-        return last_ply is not None and len(moves) - last_ply < DRAW_OFFER_COOLDOWN_PLIES
+        return (
+            last_ply is not None and len(moves) - last_ply < DRAW_OFFER_COOLDOWN_PLIES
+        )
 
     def _remember_draw_offer_sent(self, game_id: str, moves: list[str]) -> None:
         if not hasattr(self, "_draw_offers_sent"):
@@ -3407,9 +3464,7 @@ class LichessBot:
         self._played_by_speed.setdefault(str(speed), {})[key] = time.time()
         self._save_played_format_history()
 
-    def _reset_played_format_cycle(
-        self, speed: str, candidate_ids: list[str]
-    ) -> int:
+    def _reset_played_format_cycle(self, speed: str, candidate_ids: list[str]) -> int:
         if speed not in ACCEPTED_SPEEDS:
             return 0
         history = getattr(self, "_played_by_speed", {})
@@ -4297,7 +4352,9 @@ class LichessBot:
                 increment = 0
             if speed == "bullet" and not getattr(self.args, "include_bullet", False):
                 return "bullet disabled"
-            if speed == "classical" and not getattr(self.args, "include_classic", False):
+            if speed == "classical" and not getattr(
+                self.args, "include_classic", False
+            ):
                 return "classical disabled"
             if increment == 0 and not getattr(
                 self.args, "include_zero_increment", False
@@ -4836,6 +4893,10 @@ class LichessBot:
                     **self._audit_context(moves),
                 )
                 parsed = self._parse_legal_move(game_id, book_move, board, "book")
+                if parsed is not None and not self._verify_book_move(
+                    engine, initial_fen, moves, board, parsed, game_id
+                ):
+                    parsed = None
                 if parsed is not None:
                     if self._submit_move_if_active(
                         game_id,
@@ -5169,6 +5230,45 @@ class LichessBot:
         if not isinstance(binc, int):
             binc = 0
         return wtime, btime, winc, binc
+
+    def _verify_book_move(
+        self,
+        engine,
+        initial_fen: str,
+        moves: list[str],
+        board: chess.Board,
+        move: chess.Move,
+        game_id: str,
+    ) -> bool:
+        if not engine.alive():
+            return True
+        try:
+            engine.set_position(initial_fen, moves)
+            best, _ = engine.go(movetime=200, timeout=5)
+            if best is None:
+                return True
+            info = engine.search_diagnostics()
+            score_cp = info.get("score_cp")
+            if score_cp is None:
+                return True
+            score_cp = int(score_cp)
+            if score_cp < -50:
+                self._audit(
+                    game_id,
+                    "book_rejected",
+                    move=move.uci(),
+                    engine_best=best,
+                    score=score_cp,
+                    fen=board.fen(),
+                )
+                print(
+                    f"  [{game_id}] Book move {move.uci()} rejected"
+                    f" (engine prefers {best} at {score_cp}cp)"
+                )
+                return False
+        except Exception:
+            pass
+        return True
 
     def _should_query_book(
         self, board: chess.Board, my_color: str, wtime: int, btime: int
@@ -5588,7 +5688,9 @@ class LichessBot:
             worker_label = f"fixed {int(header_profile['threads'])} search"
         else:
             worker_label = f"dynamic up to {MAX_SEARCH_WORKERS} search"
-        print(f"  Workers:  {worker_label} + 1 coordinator | CPU: {LOGICAL_CORES} logical")
+        print(
+            f"  Workers:  {worker_label} + 1 coordinator | CPU: {LOGICAL_CORES} logical"
+        )
         print(
             f"  Initial:  {int(header_profile['threads'])} search threads "
             f"| Hash {header_options['Hash']} MB | Free {memory}"

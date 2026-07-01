@@ -343,7 +343,7 @@ def test_uci_protocol():
         engine.send_command("uci")
         low_time = engine.contains("option name TransformerLowTimeFallbackMs")
         min_budget = engine.contains("option name TransformerMinMoveBudgetMs")
-        assert "default 3000" in low_time, low_time
+        assert "default 1500" in low_time, low_time
         assert "min 0" in low_time and "max 30000" in low_time, low_time
         assert "default 400" in min_budget, min_budget
         assert "min 0" in min_budget and "max 5000" in min_budget, min_budget

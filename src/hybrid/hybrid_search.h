@@ -208,6 +208,8 @@ struct ParallelHybridConfig {
   bool ab_root_reject_mcts = true;
   bool mcts_root_reject = true;
   bool use_shared_tt = false;
+  float shared_tt_cp_scale = 230.0f;
+  float q_to_cp_scale = 300.0f;
   bool mcts_ab_root_hints = true;
   int mcts_ab_root_hint_delay_ms = 0;
   int mcts_ab_root_hint_count = 8;
@@ -518,7 +520,7 @@ bool HybridMCTSCompactClearPreferenceOverride(
 bool HybridMCTSCrossRootConfidenceOverride(
     bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
     uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
-    int eval_delta, int ab_average_score, int mcts_in_ab_rank,
+    int eval_delta, int ab_score, int ab_average_score, int mcts_in_ab_rank,
     int mcts_in_ab_score, int mcts_average_score, uint64_t mcts_effort,
     int ab_in_mcts_rank, uint32_t ab_in_mcts_visits, float ab_in_mcts_q,
     float mcts_q);
