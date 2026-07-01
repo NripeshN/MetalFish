@@ -98,7 +98,7 @@ env:
   BUILD_TYPE: Release
   METALFISH_NETWORK_CACHE_DIR: ~/.cache/metalfish/networks
   # T1-512 distilled network for ANE root probe (lczero contrib storage)
-  T1_512_NETWORK_URL: "https://storage.lczero.org/files/networks-contrib/t1/t1-512x15x8h-distilled-swa-3395000.pb.gz"
+  T1_512_NETWORK_URL: "https://storage.lczero.org/files/networks-contrib/t1-512x15x8h-distilled-swa-3395000.pb.gz"
   T1_512_FILENAME: "t1-512x15x8h-distilled-swa-3395000.pb.gz"
   COREML_MODEL_STEM: "t1-512-heads-b8"
 
@@ -255,23 +255,28 @@ jobs:
           fi
 
       # -----------------------------------------------------------------------
-      # Build cutechess-cli
+      # Build cutechess-cli (cloned fresh -- reference/ is gitignored)
       # -----------------------------------------------------------------------
-      - name: Build cutechess-cli
+      - name: Clone & build cutechess-cli
         run: |
-          if [ -d candidate/reference/cutechess ]; then
-            cd candidate/reference/cutechess
-            mkdir -p build && cd build
-            cmake .. -DCMAKE_BUILD_TYPE=Release -DWITH_CUTE_GUI=OFF 2>/dev/null || \
-              cmake .. -DCMAKE_BUILD_TYPE=Release
-            make -j"$(sysctl -n hw.ncpu)" cutechess-cli 2>/dev/null || \
-              make -j"$(sysctl -n hw.ncpu)"
-            echo "cutechess-cli built successfully"
-            ./cutechess-cli --version || true
-          else
-            echo "::error::cutechess not found in reference/cutechess"
-            exit 1
-          fi
+          git clone --depth 1 https://github.com/cutechess/cutechess.git cutechess-src
+          cd cutechess-src
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DWITH_CUTE_GUI=OFF 2>/dev/null || \
+            cmake .. -DCMAKE_BUILD_TYPE=Release
+          make -j"$(sysctl -n hw.ncpu)" cutechess-cli 2>/dev/null || \
+            make -j"$(sysctl -n hw.ncpu)"
+          echo "cutechess-cli built successfully"
+          ./cutechess-cli --version || true
+
+      - name: Download opening book
+        run: |
+          mkdir -p opening-books
+          curl -fSL --retry 3 \
+            -o opening-books/8moves_v3.pgn.zip \
+            "https://raw.githubusercontent.com/official-stockfish/books/master/8moves_v3.pgn.zip"
+          cd opening-books && unzip -o 8moves_v3.pgn.zip
+          echo "Opening book ready: $(wc -l 8moves_v3.pgn | awk '{print $1}') lines"
 
       # -----------------------------------------------------------------------
       # Build Engines
@@ -409,14 +414,14 @@ jobs:
           PONDER: ${{ github.event.inputs.enable_ponder || 'false' }}
           ANE_COMPILED: ${{ steps.coreml.outputs.compiled || 'false' }}
         run: |
-          CUTECHESS="$(pwd)/candidate/reference/cutechess/build/cutechess-cli"
+          CUTECHESS="$(pwd)/cutechess-src/build/cutechess-cli"
           BASELINE="$(pwd)/baseline/build/metalfish"
           CANDIDATE="$(pwd)/candidate/build/metalfish"
           WEIGHTS="$(pwd)/candidate/networks/BT4-1024x15x32h-swa-6147500.pb"
           ANE_WEIGHTS="$(pwd)/candidate/networks/${T1_512_FILENAME}"
           ANE_MODEL_CANDIDATE="$(pwd)/candidate/build/coreml/compiled/${COREML_MODEL_STEM}.mlmodelc"
           ANE_MODEL_BASELINE="$(pwd)/baseline/build/coreml/compiled/${COREML_MODEL_STEM}.mlmodelc"
-          BOOK="$(pwd)/candidate/reference/books/8moves_v3.pgn"
+          BOOK="$(pwd)/opening-books/8moves_v3.pgn"
           mkdir -p results/hybrid_blitz
 
           # Purge memory before tournament
@@ -565,14 +570,14 @@ jobs:
           PONDER: ${{ github.event.inputs.enable_ponder || 'false' }}
           ANE_COMPILED: ${{ steps.coreml.outputs.compiled || 'false' }}
         run: |
-          CUTECHESS="$(pwd)/candidate/reference/cutechess/build/cutechess-cli"
+          CUTECHESS="$(pwd)/cutechess-src/build/cutechess-cli"
           BASELINE="$(pwd)/baseline/build/metalfish"
           CANDIDATE="$(pwd)/candidate/build/metalfish"
           WEIGHTS="$(pwd)/candidate/networks/BT4-1024x15x32h-swa-6147500.pb"
           ANE_WEIGHTS="$(pwd)/candidate/networks/${T1_512_FILENAME}"
           ANE_MODEL_CANDIDATE="$(pwd)/candidate/build/coreml/compiled/${COREML_MODEL_STEM}.mlmodelc"
           ANE_MODEL_BASELINE="$(pwd)/baseline/build/coreml/compiled/${COREML_MODEL_STEM}.mlmodelc"
-          BOOK="$(pwd)/candidate/reference/books/8moves_v3.pgn"
+          BOOK="$(pwd)/opening-books/8moves_v3.pgn"
           mkdir -p results/hybrid_rapid
 
           # Purge memory between tournaments
@@ -712,10 +717,10 @@ jobs:
           CONCURRENCY: "1"
           PONDER: ${{ github.event.inputs.enable_ponder || 'false' }}
         run: |
-          CUTECHESS="$(pwd)/candidate/reference/cutechess/build/cutechess-cli"
+          CUTECHESS="$(pwd)/cutechess-src/build/cutechess-cli"
           BASELINE="$(pwd)/baseline/build/metalfish"
           CANDIDATE="$(pwd)/candidate/build/metalfish"
-          BOOK="$(pwd)/candidate/reference/books/8moves_v3.pgn"
+          BOOK="$(pwd)/opening-books/8moves_v3.pgn"
           mkdir -p results/ab_blitz
 
           # Purge memory between tournaments
