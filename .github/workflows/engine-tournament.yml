@@ -481,7 +481,6 @@ jobs:
             -engine cmd="$CANDIDATE" name=Candidate proto=uci dir="$(pwd)/candidate" \
               stderr="results/hybrid_blitz/candidate_stderr.log" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
-              option.Ponder=false \
               option.MultiPV=1 \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
@@ -512,7 +511,6 @@ jobs:
             -engine cmd="$BASELINE" name=Baseline proto=uci dir="$(pwd)/baseline" \
               stderr="results/hybrid_blitz/baseline_stderr.log" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
-              option.Ponder=false \
               option.MultiPV=1 \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
@@ -636,7 +634,6 @@ jobs:
             -engine cmd="$CANDIDATE" name=Candidate proto=uci dir="$(pwd)/candidate" \
               stderr="results/hybrid_rapid/candidate_stderr.log" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
-              option.Ponder=false \
               option.MultiPV=1 \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
@@ -667,7 +664,6 @@ jobs:
             -engine cmd="$BASELINE" name=Baseline proto=uci dir="$(pwd)/baseline" \
               stderr="results/hybrid_rapid/baseline_stderr.log" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
-              option.Ponder=false \
               option.MultiPV=1 \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
@@ -758,7 +754,6 @@ jobs:
             -engine cmd="$CANDIDATE" name=Candidate-AB proto=uci dir="$(pwd)/candidate" \
               stderr="results/ab_blitz/candidate_stderr.log" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
-              option.Ponder=false \
               option.MultiPV=1 \
               option.UseHybridSearch=false option.UseMCTS=false \
               "option.Move Overhead=200" \
@@ -766,7 +761,6 @@ jobs:
             -engine cmd="$BASELINE" name=Baseline-AB proto=uci dir="$(pwd)/baseline" \
               stderr="results/ab_blitz/baseline_stderr.log" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
-              option.Ponder=false \
               option.MultiPV=1 \
               option.UseHybridSearch=false option.UseMCTS=false \
               "option.Move Overhead=200" \
