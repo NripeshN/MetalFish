@@ -25,14 +25,17 @@
 #
 # Resource fairness is achieved via:
 #   - concurrency=1 (never two games simultaneously)
+#   - Pondering DISABLED (only one engine computes at any time)
 #   - restart=on (fresh engine process per game)
-#   - Equal thread/hash budgets for both engines
+#   - Full core/hash allocation per engine (they never overlap)
+#   - GPU warmup step before tournament (equalizes Metal shader cache)
 #   - Memory purge between tournament phases
+#   - Randomized opening seed per CI run (avoids systematic book bias)
 #
 # Full production config includes:
 #   - Hybrid search (AB + MCTS with BT4 transformer)
 #   - ANE root probe (CoreML compiled in-CI via xcrun coremlcompiler)
-#   - Pondering enabled
+#   - Pondering DISABLED (causes simultaneous compute → resource contention)
 #   - All hybrid arbitration options matching lichess_bot.py production config
 #   - Three modes: hybrid blitz, hybrid rapid, AB-only blitz
 #   - SPRT-based pass/fail with configurable bounds
@@ -63,7 +66,7 @@ on:
         required: false
         default: "5"
       threads_per_engine:
-        description: "Threads allocated to each engine (0 = auto: half of available cores)"
+        description: "Threads allocated to each engine (0 = auto: all perf cores, since engines alternate)"
         required: false
         default: "0"
       hash_mb:
@@ -79,11 +82,11 @@ on:
         required: false
         default: "true"
       enable_ponder:
-        description: "Enable pondering for both engines"
+        description: "Enable pondering for both engines (DISABLED by default: causes resource contention on shared runner)"
         required: false
-        default: "true"
+        default: "false"
       concurrency:
-        description: "Concurrent games (1 = fairest, 2 = faster on 4+ cores)"
+        description: "Concurrent games (ALWAYS 1 on shared runner -- higher values invalidate results)"
         required: false
         default: "1"
 
@@ -162,16 +165,18 @@ jobs:
           INPUT_HASH="${{ github.event.inputs.hash_mb || '0' }}"
 
           if [ "$INPUT_THREADS" = "0" ]; then
-            # Auto: give each engine half of performance cores (min 2)
-            THREADS=$(( PCPU / 2 ))
+            # Auto: with ponder OFF and concurrency=1, only one engine computes
+            # at a time so each gets ALL performance cores (min 2)
+            THREADS="$PCPU"
             [ "$THREADS" -lt 2 ] && THREADS=2
           else
             THREADS="$INPUT_THREADS"
           fi
 
           if [ "$INPUT_HASH" = "0" ]; then
-            # Auto: 1/4 of system RAM per engine (cap at 4096 MB for CI)
-            HASH=$(( MEM_MB / 4 ))
+            # Auto: with concurrency=1, only one engine uses hash at a time.
+            # Give each 1/3 of RAM (leaves headroom for OS + Metal + engine overhead).
+            HASH=$(( MEM_MB / 3 ))
             [ "$HASH" -gt 4096 ] && HASH=4096
             [ "$HASH" -lt 64 ] && HASH=64
           else
@@ -373,6 +378,22 @@ jobs:
           echo "Both engines respond to UCI protocol."
 
       # -----------------------------------------------------------------------
+      # GPU/Metal Warmup -- equalize shader compilation and cache state
+      # -----------------------------------------------------------------------
+      - name: Warm up Metal GPU for both engines
+        run: |
+          WEIGHTS="$(pwd)/candidate/networks/BT4-1024x15x32h-swa-6147500.pb"
+          for label_engine in "baseline:baseline/build/metalfish:baseline" "candidate:candidate/build/metalfish:candidate"; do
+            LABEL="${label_engine%%:*}"
+            REST="${label_engine#*:}"
+            ENGINE="${REST%%:*}"
+            DIR="${REST#*:}"
+            echo "--- Warming $LABEL (hybrid init + 1s search) ---"
+            echo -e "uci\nsetoption name UseHybridSearch value true\nsetoption name NNWeights value ${WEIGHTS}\nsetoption name Threads value 2\nisready\nposition startpos\ngo movetime 1000\nwait\nquit" | timeout 15 ./$ENGINE 2>/dev/null || true
+          done
+          echo "Both engines warmed: Metal shaders compiled, BT4 weights loaded."
+
+      # -----------------------------------------------------------------------
       # Tournament 1: Hybrid Blitz (10+0.1) -- GPU + CPU, full production config
       # -----------------------------------------------------------------------
       - name: "Tournament 1: Hybrid Blitz (10+0.1)"
@@ -384,8 +405,8 @@ jobs:
           ELO1: ${{ github.event.inputs.sprt_elo1 || '5' }}
           THREADS: ${{ steps.system.outputs.threads }}
           HASH: ${{ steps.system.outputs.hash }}
-          CONCURRENCY: ${{ github.event.inputs.concurrency || '1' }}
-          PONDER: ${{ github.event.inputs.enable_ponder || 'true' }}
+          CONCURRENCY: "1"
+          PONDER: ${{ github.event.inputs.enable_ponder || 'false' }}
           ANE_COMPILED: ${{ steps.coreml.outputs.compiled || 'false' }}
         run: |
           CUTECHESS="$(pwd)/candidate/reference/cutechess/build/cutechess-cli"
@@ -513,7 +534,7 @@ jobs:
             -games 2 -rounds "${GAMES}" -repeat \
             -concurrency "${CONCURRENCY}" \
             -maxmoves 200 \
-            -srand 6147500 \
+            -srand ${{ github.run_id }} \
             -resign movecount=3 score=700 twosided=true \
             -draw movenumber=40 movecount=8 score=8 \
             ${SPRT_ARGS} \
@@ -540,8 +561,8 @@ jobs:
           ELO1: ${{ github.event.inputs.sprt_elo1 || '5' }}
           THREADS: ${{ steps.system.outputs.threads }}
           HASH: ${{ steps.system.outputs.hash }}
-          CONCURRENCY: ${{ github.event.inputs.concurrency || '1' }}
-          PONDER: ${{ github.event.inputs.enable_ponder || 'true' }}
+          CONCURRENCY: "1"
+          PONDER: ${{ github.event.inputs.enable_ponder || 'false' }}
           ANE_COMPILED: ${{ steps.coreml.outputs.compiled || 'false' }}
         run: |
           CUTECHESS="$(pwd)/candidate/reference/cutechess/build/cutechess-cli"
@@ -661,7 +682,7 @@ jobs:
             -games 2 -rounds "${GAMES}" -repeat \
             -concurrency "${CONCURRENCY}" \
             -maxmoves 200 \
-            -srand 6147500 \
+            -srand ${{ github.run_id }} \
             -resign movecount=3 score=700 twosided=true \
             -draw movenumber=40 movecount=8 score=8 \
             ${SPRT_ARGS} \
@@ -688,8 +709,8 @@ jobs:
           ELO1: ${{ github.event.inputs.sprt_elo1 || '5' }}
           THREADS: ${{ steps.system.outputs.threads }}
           HASH: ${{ steps.system.outputs.hash }}
-          CONCURRENCY: ${{ github.event.inputs.concurrency || '1' }}
-          PONDER: ${{ github.event.inputs.enable_ponder || 'true' }}
+          CONCURRENCY: "1"
+          PONDER: ${{ github.event.inputs.enable_ponder || 'false' }}
         run: |
           CUTECHESS="$(pwd)/candidate/reference/cutechess/build/cutechess-cli"
           BASELINE="$(pwd)/baseline/build/metalfish"
