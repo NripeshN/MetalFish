@@ -2113,9 +2113,9 @@ bool HybridRootPawnLeverCandidate(
       candidate_effort >= 900 && candidate_mcts_policy >= 0.035f &&
       selected_mcts_q - candidate_mcts_q <= 0.09f &&
       best_mcts_q - candidate_mcts_q <= 0.09f;
-  const bool low_visit_lever =
-      low_visit_agreement_lever || defensive_low_visit_lever ||
-      defensive_agreement_lever;
+  const bool low_visit_lever = low_visit_agreement_lever ||
+                               defensive_low_visit_lever ||
+                               defensive_agreement_lever;
   if (mcts_rank <= 0 || mcts_rank > 8 ||
       (mcts_current_visits < min_current_visits && !low_visit_lever) ||
       selected_average_score - candidate_average_score > max_average_gap ||

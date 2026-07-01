@@ -1695,15 +1695,14 @@ void test_hybrid_config() {
                                              0.200f, -0.200f, -0.230f, 0.250f));
     EXPECT(tc, !HybridRootPawnLeverCandidate(-47, -77, 373, 5, 13, 1, -0.038f,
                                              0.220f, -0.038f, -0.112f, 0.050f));
-    EXPECT(tc, HybridRootPawnLeverCandidate(-205, -271, 2141, 4, 23, 1,
-                                            -0.196f, 0.258f, -0.196f, -0.219f,
-                                            0.043f));
-    EXPECT(tc, !HybridRootPawnLeverCandidate(-205, -276, 2141, 4, 23, 1,
-                                             -0.196f, 0.258f, -0.196f, -0.219f,
-                                             0.043f));
-    EXPECT(tc, !HybridRootPawnLeverCandidate(-205, -271, 2141, 4, 23, 1,
-                                             -0.196f, 0.258f, -0.196f, -0.241f,
-                                             0.043f));
+    EXPECT(tc, HybridRootPawnLeverCandidate(-205, -271, 2141, 4, 23, 1, -0.196f,
+                                            0.258f, -0.196f, -0.219f, 0.043f));
+    EXPECT(tc,
+           !HybridRootPawnLeverCandidate(-205, -276, 2141, 4, 23, 1, -0.196f,
+                                         0.258f, -0.196f, -0.219f, 0.043f));
+    EXPECT(tc,
+           !HybridRootPawnLeverCandidate(-205, -271, 2141, 4, 23, 1, -0.196f,
+                                         0.258f, -0.196f, -0.241f, 0.043f));
     EXPECT(tc, !HybridRootPawnLeverCandidate(932, 891, 303, 6, 6, 1, 0.927f,
                                              0.206f, 0.927f, 0.885f, 0.050f));
     EXPECT(tc, HybridRootPawnLeverCandidate(907, 902, 1742, 6, 3, 3, 0.918f,
@@ -2057,8 +2056,8 @@ void test_hybrid_config() {
     TestCase tc("AB root rejection blocks low-effort MCTS blunders");
 
     // gap=37, effort=2.5M: AB has enough root work to reject this MCTS move.
-    EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
-                                       -447));
+    EXPECT(tc,
+           HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649, -447));
     // Mate-score MCTS candidates are rejected when AB has meaningful effort.
     EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
                                        -32001));
