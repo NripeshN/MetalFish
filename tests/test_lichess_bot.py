@@ -2572,6 +2572,10 @@ def test_make_move_can_offer_draw_on_same_request() -> None:
             {
                 "path": "/bot/game/game/move/e2e4",
                 "params": {"offeringDraw": "true"},
+                "timeout": (
+                    lichess_bot.LICHESS_API_CONNECT_TIMEOUT_S,
+                    lichess_bot.LICHESS_MOVE_POST_TIMEOUT_S,
+                ),
             }
         ],
     )
@@ -2583,14 +2587,65 @@ def test_respond_draw_offer_uses_bot_draw_endpoint() -> None:
         text = ""
 
     bot = object.__new__(lichess_bot.LichessBot)
-    calls: list[str] = []
-    bot.api_post = lambda path, **kwargs: calls.append(path) or Response()
+    calls: list[dict] = []
+    bot.api_post = (
+        lambda path, **kwargs: calls.append({"path": path, **kwargs}) or Response()
+    )
 
     expect("draw accept succeeds", bot.respond_draw_offer("game", True))
     expect("draw decline succeeds", bot.respond_draw_offer("game", False))
     expect(
         "draw endpoint paths",
-        calls == ["/bot/game/game/draw/yes", "/bot/game/game/draw/no"],
+        calls
+        == [
+            {
+                "path": "/bot/game/game/draw/yes",
+                "timeout": (
+                    lichess_bot.LICHESS_API_CONNECT_TIMEOUT_S,
+                    lichess_bot.LICHESS_DRAW_POST_TIMEOUT_S,
+                ),
+            },
+            {
+                "path": "/bot/game/game/draw/no",
+                "timeout": (
+                    lichess_bot.LICHESS_API_CONNECT_TIMEOUT_S,
+                    lichess_bot.LICHESS_DRAW_POST_TIMEOUT_S,
+                ),
+            },
+        ],
+    )
+
+
+def test_make_move_request_error_is_bounded_failure() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    calls: list[dict] = []
+
+    def api_post(path: str, **kwargs):
+        calls.append({"path": path, **kwargs})
+        raise TimeoutError("move post hung")
+
+    bot.api_post = api_post
+
+    with redirect_stdout(io.StringIO()):
+        ok = bot.make_move("game", "e2e4")
+
+    expect("request error fails move", not ok)
+    expect(
+        "request error detail recorded",
+        "TimeoutError" in bot._last_move_failure_detail,
+    )
+    expect(
+        "move request has explicit timeout",
+        calls
+        == [
+            {
+                "path": "/bot/game/game/move/e2e4",
+                "timeout": (
+                    lichess_bot.LICHESS_API_CONNECT_TIMEOUT_S,
+                    lichess_bot.LICHESS_MOVE_POST_TIMEOUT_S,
+                ),
+            }
+        ],
     )
 
 

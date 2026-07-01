@@ -32,6 +32,8 @@ class AuditSummary:
     stale_rejects: int = 0
     draw_offer_candidates: int = 0
     draw_offer_moves: int = 0
+    draw_offers_received: int = 0
+    draw_offers_accepted: int = 0
     draw_state_samples: int = 0
     draw_claimable_turns: int = 0
     tablebase_draw_turns: int = 0
@@ -41,6 +43,10 @@ class AuditSummary:
     ponderhits: int = 0
     max_engine_ms: int = 0
     max_ponderhit_ms: int = 0
+    max_move_submit_ms: int = 0
+    stream_errors: int = 0
+    stream_failures: int = 0
+    stream_reconnects: int = 0
     issue_counts: Counter[str] = field(default_factory=Counter)
     final_status: str = ""
     final_winner: str = ""
@@ -145,6 +151,9 @@ def parse_audit(path: pathlib.Path) -> AuditSummary:
         elif event == "move_submit":
             if row.get("offering_draw"):
                 summary.draw_offer_moves += 1
+            summary.max_move_submit_ms = max(
+                summary.max_move_submit_ms, int(row.get("elapsed_ms") or 0)
+            )
             if row.get("result") == "accepted":
                 summary.accepted_moves += 1
             else:
@@ -153,6 +162,10 @@ def parse_audit(path: pathlib.Path) -> AuditSummary:
                     summary.stale_rejects += 1
                 else:
                     summary.issue_counts["move_rejected"] += 1
+        elif event == "draw_offer_received":
+            summary.draw_offers_received += 1
+            if row.get("accepted"):
+                summary.draw_offers_accepted += 1
         elif event == "book_candidate":
             summary.book_moves += 1
         elif event == "draw_state":
@@ -175,6 +188,12 @@ def parse_audit(path: pathlib.Path) -> AuditSummary:
             summary.max_ponderhit_ms = max(
                 summary.max_ponderhit_ms, int(row.get("elapsed_ms") or 0)
             )
+        elif event == "stream_error":
+            summary.stream_errors += 1
+        elif event == "stream_failed":
+            summary.stream_failures += 1
+        elif event == "stream_reconnect":
+            summary.stream_reconnects += 1
         elif event in {
             "ponderhit_failed",
             "ponderhit_illegal",
@@ -222,7 +241,15 @@ def game_summary_from_export(audit: AuditSummary, data: dict) -> GameSummary:
 
     status = str(data.get("status", ""))
     winner = str(data.get("winner", ""))
-    if status == "draw":
+    if status in {
+        "draw",
+        "stalemate",
+        "insufficientMaterialClaim",
+        "threefoldRepetition",
+        "fivefoldRepetition",
+        "fiftyMoveRule",
+        "seventyfiveMoveRule",
+    }:
         result = "draw"
     elif winner == color:
         result = "win"
@@ -436,20 +463,33 @@ def print_report(games: list[GameSummary]) -> None:
     )
     draw_candidates = sum(g.audit.draw_offer_candidates for g in games)
     draw_moves = sum(g.audit.draw_offer_moves for g in games)
+    draw_received = sum(g.audit.draw_offers_received for g in games)
+    draw_accepted = sum(g.audit.draw_offers_accepted for g in games)
     draw_samples = sum(g.audit.draw_state_samples for g in games)
     draw_claims = sum(g.audit.draw_claimable_turns for g in games)
     tb_draws = sum(g.audit.tablebase_draw_turns for g in games)
-    if draw_candidates or draw_moves or draw_samples:
+    if draw_candidates or draw_moves or draw_samples or draw_received:
         print(
             "Draw telemetry: "
             f"{draw_samples} samples, {draw_claims} claimable, "
             f"{tb_draws} TB-drawn, {draw_candidates} offer candidates, "
-            f"{draw_moves} move requests"
+            f"{draw_moves} move requests, "
+            f"{draw_received} received, {draw_accepted} accepted"
+        )
+    stream_errors = sum(g.audit.stream_errors for g in games)
+    stream_failures = sum(g.audit.stream_failures for g in games)
+    stream_reconnects = sum(g.audit.stream_reconnects for g in games)
+    if stream_errors or stream_failures or stream_reconnects:
+        print(
+            "Stream telemetry: "
+            f"{stream_errors} errors, {stream_failures} failed responses, "
+            f"{stream_reconnects} reconnects"
         )
     print(
         "Max elapsed: "
         f"search {max((g.audit.max_engine_ms for g in games), default=0)} ms, "
-        f"ponderhit {max((g.audit.max_ponderhit_ms for g in games), default=0)} ms"
+        f"ponderhit {max((g.audit.max_ponderhit_ms for g in games), default=0)} ms, "
+        f"submit {max((g.audit.max_move_submit_ms for g in games), default=0)} ms"
     )
     print(f"Issues: {dict(issues)}")
     print()
@@ -520,6 +560,8 @@ def summaries_to_json(games: list[GameSummary]) -> list[dict]:
             "stale_rejects": game.audit.stale_rejects,
             "draw_offer_candidates": game.audit.draw_offer_candidates,
             "draw_offer_moves": game.audit.draw_offer_moves,
+            "draw_offers_received": game.audit.draw_offers_received,
+            "draw_offers_accepted": game.audit.draw_offers_accepted,
             "draw_state_samples": game.audit.draw_state_samples,
             "draw_claimable_turns": game.audit.draw_claimable_turns,
             "tablebase_draw_turns": game.audit.tablebase_draw_turns,
@@ -529,6 +571,10 @@ def summaries_to_json(games: list[GameSummary]) -> list[dict]:
             "ponderhits": game.audit.ponderhits,
             "max_engine_ms": game.audit.max_engine_ms,
             "max_ponderhit_ms": game.audit.max_ponderhit_ms,
+            "max_move_submit_ms": game.audit.max_move_submit_ms,
+            "stream_errors": game.audit.stream_errors,
+            "stream_failures": game.audit.stream_failures,
+            "stream_reconnects": game.audit.stream_reconnects,
             "issues": dict(game.audit.issue_counts),
         }
         for game in games

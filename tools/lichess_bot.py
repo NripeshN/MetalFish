@@ -448,6 +448,15 @@ EVENT_STREAM_RECONNECT_DELAY_S = env_float(
 LICHESS_API_MIN_INTERVAL_S = env_float("METALFISH_LICHESS_API_MIN_INTERVAL_S", 0.35)
 EXPLORER_API_MIN_INTERVAL_S = env_float("METALFISH_EXPLORER_API_MIN_INTERVAL_S", 0.25)
 LICHESS_429_BACKOFF_S = env_float("METALFISH_LICHESS_429_BACKOFF_S", 65.0)
+LICHESS_API_CONNECT_TIMEOUT_S = max(
+    0.5, min(10.0, env_float("METALFISH_LICHESS_API_CONNECT_TIMEOUT_S", 3.0))
+)
+LICHESS_MOVE_POST_TIMEOUT_S = max(
+    0.5, min(10.0, env_float("METALFISH_LICHESS_MOVE_POST_TIMEOUT_S", 3.0))
+)
+LICHESS_DRAW_POST_TIMEOUT_S = max(
+    0.5, min(10.0, env_float("METALFISH_LICHESS_DRAW_POST_TIMEOUT_S", 3.0))
+)
 BOT_ONLINE_FETCH_LIMIT = max(
     1, min(512, env_int("METALFISH_BOT_ONLINE_FETCH_LIMIT", 512))
 )
@@ -2150,7 +2159,14 @@ class LichessBot:
 
     def respond_draw_offer(self, game_id: str, accept: bool) -> bool:
         action = "yes" if accept else "no"
-        r = self.api_post(f"/bot/game/{game_id}/draw/{action}")
+        try:
+            r = self.api_post(
+                f"/bot/game/{game_id}/draw/{action}",
+                timeout=(LICHESS_API_CONNECT_TIMEOUT_S, LICHESS_DRAW_POST_TIMEOUT_S),
+            )
+        except Exception as exc:
+            print(f"  [{game_id}] Draw {action} failed: {type(exc).__name__}: {exc}")
+            return False
         if r.status_code != 200:
             detail = r.text.strip().replace("\n", " ")[:200]
             suffix = f": {detail}" if detail else ""
@@ -2163,7 +2179,17 @@ class LichessBot:
     ) -> bool:
         self._last_move_failure_detail = ""
         kwargs = {"params": {"offeringDraw": "true"}} if offering_draw else {}
-        r = self.api_post(f"/bot/game/{game_id}/move/{move}", **kwargs)
+        kwargs["timeout"] = (
+            LICHESS_API_CONNECT_TIMEOUT_S,
+            LICHESS_MOVE_POST_TIMEOUT_S,
+        )
+        try:
+            r = self.api_post(f"/bot/game/{game_id}/move/{move}", **kwargs)
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {exc}".strip()
+            self._last_move_failure_detail = f"request_error: {detail}"[:200]
+            print(f"  [{game_id}] Move {move} failed: {detail}")
+            return False
         if r.status_code != 200:
             detail = r.text.strip().replace("\n", " ")[:200]
             suffix = f": {detail}" if detail else ""
@@ -2331,7 +2357,9 @@ class LichessBot:
         offering_draw: bool = False,
         draw_offer_reason: str | None = None,
     ) -> bool:
+        submit_start = time.time()
         if self.make_move(game_id, move, offering_draw=offering_draw):
+            submit_ms = int((time.time() - submit_start) * 1000)
             self._record_submitted_turn(game_id, moves, move)
             if offering_draw:
                 self._remember_draw_offer_sent(game_id, moves)
@@ -2340,12 +2368,14 @@ class LichessBot:
                 "move_submit",
                 move=move,
                 result="accepted",
+                elapsed_ms=submit_ms,
                 offering_draw=offering_draw,
                 draw_offer_reason=draw_offer_reason or "",
                 **self._audit_context(moves),
             )
             return True
 
+        submit_ms = int((time.time() - submit_start) * 1000)
         if self._move_failure_looks_stale():
             self._record_submitted_turn(game_id, moves)
             if self._move_failure_looks_game_over():
@@ -2363,6 +2393,7 @@ class LichessBot:
             move=move,
             result="rejected",
             detail=self._last_move_failure_detail,
+            elapsed_ms=submit_ms,
             stale=self._move_failure_looks_stale(),
             offering_draw=offering_draw,
             draw_offer_reason=draw_offer_reason or "",
