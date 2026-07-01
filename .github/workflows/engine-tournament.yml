@@ -192,7 +192,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          brew install protobuf zlib abseil zstd
+          brew install protobuf zlib abseil zstd qt@6 coreutils
           python3 -m pip install --upgrade pip
           python3 -m pip install python-chess numpy coremltools==8.1
 
@@ -261,13 +261,11 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/cutechess/cutechess.git cutechess-src
           cd cutechess-src
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DWITH_CUTE_GUI=OFF 2>/dev/null || \
-            cmake .. -DCMAKE_BUILD_TYPE=Release
-          make -j"$(sysctl -n hw.ncpu)" cutechess-cli 2>/dev/null || \
-            make -j"$(sysctl -n hw.ncpu)"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
+          cmake --build build --target cli -j"$(sysctl -n hw.ncpu)"
           echo "cutechess-cli built successfully"
-          ./cutechess-cli --version || true
+          ./build/cutechess-cli --version || true
 
       - name: Download opening book
         run: |
@@ -368,7 +366,7 @@ jobs:
             LABEL="${label_engine%%:*}"
             ENGINE="${label_engine#*:}"
             echo "--- Testing $LABEL engine ---"
-            RESPONSE=$(echo -e "uci\nisready\nquit" | timeout 15 ./$ENGINE 2>/dev/null || true)
+            RESPONSE=$(echo -e "uci\nisready\nquit" | gtimeout 15 ./$ENGINE 2>/dev/null || true)
             if echo "$RESPONSE" | grep -q "uciok"; then
               echo "OK: $LABEL responds to UCI"
             else
@@ -394,7 +392,7 @@ jobs:
             ENGINE="${REST%%:*}"
             DIR="${REST#*:}"
             echo "--- Warming $LABEL (hybrid init + 1s search) ---"
-            echo -e "uci\nsetoption name UseHybridSearch value true\nsetoption name NNWeights value ${WEIGHTS}\nsetoption name Threads value 2\nisready\nposition startpos\ngo movetime 1000\nwait\nquit" | timeout 15 ./$ENGINE 2>/dev/null || true
+            echo -e "uci\nsetoption name UseHybridSearch value true\nsetoption name NNWeights value ${WEIGHTS}\nsetoption name Threads value 2\nisready\nposition startpos\ngo movetime 1000\nwait\nquit" | gtimeout 15 ./$ENGINE 2>/dev/null || true
           done
           echo "Both engines warmed: Metal shaders compiled, BT4 weights loaded."
 
@@ -447,39 +445,42 @@ jobs:
             PONDER_FLAG="-pgnin /dev/null"  # cutechess ponder support
           fi
 
-          # Build ANE root probe options
-          ANE_OPTS_CANDIDATE=""
-          ANE_OPTS_BASELINE=""
+          # Build ANE root probe options as arrays (avoids fragile eval+quotes)
+          ANE_ARGS_CANDIDATE=()
+          ANE_ARGS_BASELINE=()
           if [ "$ANE_COMPILED" = "true" ] && [ -d "$ANE_MODEL_CANDIDATE" ]; then
-            ANE_OPTS_CANDIDATE="option.HybridANERootProbe=true"
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEConfirmMCTSOverride=true"
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEOnlyPawnEndgames=false"
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} \"option.HybridANEWeights=${ANE_WEIGHTS}\""
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} \"option.HybridANEModelPath=${ANE_MODEL_CANDIDATE}\""
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEComputeUnits=cpu-ne"
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANERootHintCount=6"
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANERootHintWaitMs=0"
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEMinBudgetMs=500"
-
-            ANE_OPTS_BASELINE="option.HybridANERootProbe=true"
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEConfirmMCTSOverride=true"
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEOnlyPawnEndgames=false"
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} \"option.HybridANEWeights=${ANE_WEIGHTS}\""
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} \"option.HybridANEModelPath=${ANE_MODEL_BASELINE}\""
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEComputeUnits=cpu-ne"
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANERootHintCount=6"
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANERootHintWaitMs=0"
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEMinBudgetMs=500"
+            ANE_ARGS_CANDIDATE=(
+              "option.HybridANERootProbe=true"
+              "option.HybridANEConfirmMCTSOverride=true"
+              "option.HybridANEOnlyPawnEndgames=false"
+              "option.HybridANEWeights=${ANE_WEIGHTS}"
+              "option.HybridANEModelPath=${ANE_MODEL_CANDIDATE}"
+              "option.HybridANEComputeUnits=cpu-ne"
+              "option.HybridANERootHintCount=6"
+              "option.HybridANERootHintWaitMs=0"
+              "option.HybridANEMinBudgetMs=500"
+            )
+            ANE_ARGS_BASELINE=(
+              "option.HybridANERootProbe=true"
+              "option.HybridANEConfirmMCTSOverride=true"
+              "option.HybridANEOnlyPawnEndgames=false"
+              "option.HybridANEWeights=${ANE_WEIGHTS}"
+              "option.HybridANEModelPath=${ANE_MODEL_BASELINE}"
+              "option.HybridANEComputeUnits=cpu-ne"
+              "option.HybridANERootHintCount=6"
+              "option.HybridANERootHintWaitMs=0"
+              "option.HybridANEMinBudgetMs=500"
+            )
             echo "ANE root probe ENABLED for hybrid tournament"
           else
             echo "ANE root probe DISABLED (model not compiled or not requested)"
           fi
 
           set +e
-          eval "$CUTECHESS" \
+          "$CUTECHESS" \
             -engine cmd="$CANDIDATE" name=Candidate proto=uci dir="$(pwd)/candidate" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
-              option.Ponder=${PONDER_OPT} \
+              "option.Ponder=${PONDER_OPT}" \
               option.MultiPV=1 \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
@@ -505,10 +506,10 @@ jobs:
               option.MCTSSmartPruningFactor=1.33 \
               option.MCTSCacheHistoryLength=0 \
               option.MCTSSolidTreeThreshold=100 \
-              ${ANE_OPTS_CANDIDATE} \
+              "${ANE_ARGS_CANDIDATE[@]}" \
             -engine cmd="$BASELINE" name=Baseline proto=uci dir="$(pwd)/baseline" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
-              option.Ponder=${PONDER_OPT} \
+              "option.Ponder=${PONDER_OPT}" \
               option.MultiPV=1 \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
@@ -534,7 +535,7 @@ jobs:
               option.MCTSSmartPruningFactor=1.33 \
               option.MCTSCacheHistoryLength=0 \
               option.MCTSSolidTreeThreshold=100 \
-              ${ANE_OPTS_BASELINE} \
+              "${ANE_ARGS_BASELINE[@]}" \
             -each tc=10+0.1 restart=on timemargin=500 \
             -games 2 -rounds "${GAMES}" -repeat \
             -concurrency "${CONCURRENCY}" \
@@ -598,36 +599,39 @@ jobs:
             PONDER_OPT="true"
           fi
 
-          # ANE root probe options
-          ANE_OPTS_CANDIDATE=""
-          ANE_OPTS_BASELINE=""
+          # ANE root probe options as arrays
+          ANE_ARGS_CANDIDATE=()
+          ANE_ARGS_BASELINE=()
           if [ "$ANE_COMPILED" = "true" ] && [ -d "$ANE_MODEL_CANDIDATE" ]; then
-            ANE_OPTS_CANDIDATE="option.HybridANERootProbe=true"
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEConfirmMCTSOverride=true"
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEOnlyPawnEndgames=false"
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} \"option.HybridANEWeights=${ANE_WEIGHTS}\""
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} \"option.HybridANEModelPath=${ANE_MODEL_CANDIDATE}\""
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEComputeUnits=cpu-ne"
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANERootHintCount=6"
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANERootHintWaitMs=0"
-            ANE_OPTS_CANDIDATE="${ANE_OPTS_CANDIDATE} option.HybridANEMinBudgetMs=500"
-
-            ANE_OPTS_BASELINE="option.HybridANERootProbe=true"
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEConfirmMCTSOverride=true"
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEOnlyPawnEndgames=false"
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} \"option.HybridANEWeights=${ANE_WEIGHTS}\""
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} \"option.HybridANEModelPath=${ANE_MODEL_BASELINE}\""
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEComputeUnits=cpu-ne"
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANERootHintCount=6"
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANERootHintWaitMs=0"
-            ANE_OPTS_BASELINE="${ANE_OPTS_BASELINE} option.HybridANEMinBudgetMs=500"
+            ANE_ARGS_CANDIDATE=(
+              "option.HybridANERootProbe=true"
+              "option.HybridANEConfirmMCTSOverride=true"
+              "option.HybridANEOnlyPawnEndgames=false"
+              "option.HybridANEWeights=${ANE_WEIGHTS}"
+              "option.HybridANEModelPath=${ANE_MODEL_CANDIDATE}"
+              "option.HybridANEComputeUnits=cpu-ne"
+              "option.HybridANERootHintCount=6"
+              "option.HybridANERootHintWaitMs=0"
+              "option.HybridANEMinBudgetMs=500"
+            )
+            ANE_ARGS_BASELINE=(
+              "option.HybridANERootProbe=true"
+              "option.HybridANEConfirmMCTSOverride=true"
+              "option.HybridANEOnlyPawnEndgames=false"
+              "option.HybridANEWeights=${ANE_WEIGHTS}"
+              "option.HybridANEModelPath=${ANE_MODEL_BASELINE}"
+              "option.HybridANEComputeUnits=cpu-ne"
+              "option.HybridANERootHintCount=6"
+              "option.HybridANERootHintWaitMs=0"
+              "option.HybridANEMinBudgetMs=500"
+            )
           fi
 
           set +e
-          eval "$CUTECHESS" \
+          "$CUTECHESS" \
             -engine cmd="$CANDIDATE" name=Candidate proto=uci dir="$(pwd)/candidate" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
-              option.Ponder=${PONDER_OPT} \
+              "option.Ponder=${PONDER_OPT}" \
               option.MultiPV=1 \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
@@ -653,10 +657,10 @@ jobs:
               option.MCTSSmartPruningFactor=1.33 \
               option.MCTSCacheHistoryLength=0 \
               option.MCTSSolidTreeThreshold=100 \
-              ${ANE_OPTS_CANDIDATE} \
+              "${ANE_ARGS_CANDIDATE[@]}" \
             -engine cmd="$BASELINE" name=Baseline proto=uci dir="$(pwd)/baseline" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
-              option.Ponder=${PONDER_OPT} \
+              "option.Ponder=${PONDER_OPT}" \
               option.MultiPV=1 \
               option.UseHybridSearch=true option.UseMCTS=false \
               "option.NNWeights=${WEIGHTS}" \
@@ -682,7 +686,7 @@ jobs:
               option.MCTSSmartPruningFactor=1.33 \
               option.MCTSCacheHistoryLength=0 \
               option.MCTSSolidTreeThreshold=100 \
-              ${ANE_OPTS_BASELINE} \
+              "${ANE_ARGS_BASELINE[@]}" \
             -each tc=60+0.6 restart=on timemargin=1000 \
             -games 2 -rounds "${GAMES}" -repeat \
             -concurrency "${CONCURRENCY}" \
@@ -745,13 +749,13 @@ jobs:
           "$CUTECHESS" \
             -engine cmd="$CANDIDATE" name=Candidate-AB proto=uci dir="$(pwd)/candidate" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
-              option.Ponder=${PONDER_OPT} \
+              "option.Ponder=${PONDER_OPT}" \
               option.MultiPV=1 \
               option.UseHybridSearch=false option.UseMCTS=false \
               "option.Move Overhead=200" \
             -engine cmd="$BASELINE" name=Baseline-AB proto=uci dir="$(pwd)/baseline" \
               "option.Threads=${THREADS}" "option.Hash=${HASH}" \
-              option.Ponder=${PONDER_OPT} \
+              "option.Ponder=${PONDER_OPT}" \
               option.MultiPV=1 \
               option.UseHybridSearch=false option.UseMCTS=false \
               "option.Move Overhead=200" \
@@ -759,7 +763,7 @@ jobs:
             -games 2 -rounds "${GAMES}" -repeat \
             -concurrency "${CONCURRENCY}" \
             -maxmoves 200 \
-            -srand 6147501 \
+            -srand ${{ github.run_id }} \
             -resign movecount=3 score=700 twosided=true \
             -draw movenumber=40 movecount=8 score=8 \
             ${SPRT_ARGS} \
