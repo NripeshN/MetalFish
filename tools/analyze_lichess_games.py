@@ -193,7 +193,8 @@ def parse_audit(path: pathlib.Path) -> AuditSummary:
             summary.max_move_submit_ms = max(
                 summary.max_move_submit_ms, int(row.get("elapsed_ms") or 0)
             )
-            if row.get("result") == "accepted":
+            result = str(row.get("result") or "")
+            if result == "accepted" or result.startswith("accepted_"):
                 summary.accepted_moves += 1
             else:
                 summary.rejected_moves += 1
