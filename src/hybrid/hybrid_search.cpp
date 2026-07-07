@@ -814,9 +814,9 @@ bool HybridMCTSVerifiedHintSupportOverride(
   const bool no_bound_short_root =
       !mcts_in_ab_upperbound && mcts_root_visits >= 120 &&
       mcts_root_visits <= 180 && mcts_best_visits >= 65 &&
-      mcts_best_visits <= 110 && visit_share >= 0.48f &&
-      visit_share <= 0.53f && mcts_in_ab_effort >= 100000 &&
-      mcts_in_ab_effort <= 1000000 && q_gap_to_ab >= 0.24f;
+      mcts_best_visits <= 110 && visit_share >= 0.48f && visit_share <= 0.53f &&
+      mcts_in_ab_effort >= 100000 && mcts_in_ab_effort <= 1000000 &&
+      q_gap_to_ab >= 0.24f;
 
   if (mcts_in_ab_rank != 2 || mcts_in_ab_score != -VALUE_INFINITE ||
       mcts_in_ab_lowerbound ||
@@ -1268,13 +1268,12 @@ bool HybridMCTSRootRejectQuietMinorMajorAttackOverride(
   const bool short_root_confirmed =
       mcts_root_visits >= 120 && mcts_root_visits <= 220 &&
       mcts_best_visits >= 65 && mcts_best_visits <= 125 &&
-      visit_share >= 0.45f && visit_share <= 0.60f &&
-      root_q_gap >= 0.17f && mcts_cp >= 220 && eval_delta >= 60 &&
-      mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 8 &&
-      mcts_in_ab_score == -VALUE_INFINITE && !mcts_in_ab_lowerbound &&
-      mcts_in_ab_effort <= 1000000 && ab_in_mcts_rank == 2 &&
-      ab_in_mcts_current_visits >= 20 && ab_in_mcts_current_visits <= 40 &&
-      q_gap_to_ab >= 0.24f;
+      visit_share >= 0.45f && visit_share <= 0.60f && root_q_gap >= 0.17f &&
+      mcts_cp >= 220 && eval_delta >= 60 && mcts_in_ab_rank >= 2 &&
+      mcts_in_ab_rank <= 8 && mcts_in_ab_score == -VALUE_INFINITE &&
+      !mcts_in_ab_lowerbound && mcts_in_ab_effort <= 1000000 &&
+      ab_in_mcts_rank == 2 && ab_in_mcts_current_visits >= 20 &&
+      ab_in_mcts_current_visits <= 40 && q_gap_to_ab >= 0.24f;
   if (short_root_confirmed)
     return true;
 
@@ -1331,9 +1330,9 @@ bool HybridMCTSVerifiedQuietMinorMajorAttackOverride(
   }
 
   if (mcts_root_visits < 120 || mcts_root_visits > 180 ||
-      mcts_best_visits < 50 || mcts_best_visits > 110 ||
-      visit_share < 0.42f || visit_share > 0.56f || root_q_gap < 0.18f ||
-      mcts_cp < 240 || eval_delta < 80) {
+      mcts_best_visits < 50 || mcts_best_visits > 110 || visit_share < 0.42f ||
+      visit_share > 0.56f || root_q_gap < 0.18f || mcts_cp < 240 ||
+      eval_delta < 80) {
     return false;
   }
 
@@ -5228,11 +5227,11 @@ Move ParallelHybridSearch::make_final_decision() {
       mcts_root_reject_kingside_pawn_push || mcts_rook_endgame_quiet_rook ||
       mcts_root_reject_quiet_queen_move ||
       mcts_root_reject_quiet_minor_major_attack ||
-      mcts_verified_quiet_minor_major_attack ||
-      mcts_mid_root_tactical_q_gap || mcts_bishop_endgame_retreat ||
-      mcts_root_reject_q_gap || mcts_clock_root_reject_q_gap ||
-      mcts_discovered_pawn_push_override || mcts_reused_root_current ||
-      mcts_root_rejects_ab || (mcts_overwhelming && eval_delta >= 250);
+      mcts_verified_quiet_minor_major_attack || mcts_mid_root_tactical_q_gap ||
+      mcts_bishop_endgame_retreat || mcts_root_reject_q_gap ||
+      mcts_clock_root_reject_q_gap || mcts_discovered_pawn_push_override ||
+      mcts_reused_root_current || mcts_root_rejects_ab ||
+      (mcts_overwhelming && eval_delta >= 250);
 
   bool choose_mcts = false;
   const char *reason = "ab_default";
