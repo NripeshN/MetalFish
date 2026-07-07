@@ -239,6 +239,11 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSAddDirichletNoise", Option(false));
   options.add("MCTSNoiseEpsilon", Option("0.0"));
   options.add("MCTSNoiseAlpha", Option("0.3"));
+  // Draw aversion for MCTS/hybrid: positive avoids draws, negative prefers
+  // them. Converted to a Q draw-score offset (contempt / 10000) at search
+  // start. Default 0.0 keeps historical (draw-neutral) behavior; only raise
+  // with Elo/regression evidence (see docs/tuning_workflow.md).
+  options.add("MCTSContempt", Option("0.0"));
 
   load_networks();
   resize_threads();

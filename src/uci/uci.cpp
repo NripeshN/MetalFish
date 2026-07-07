@@ -1065,6 +1065,7 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
       get_float_option(engine, "MCTSNoiseEpsilon", config.noise_epsilon);
   config.noise_alpha =
       get_float_option(engine, "MCTSNoiseAlpha", config.noise_alpha);
+  config.contempt = get_float_option(engine, "MCTSContempt", config.contempt);
 
   if (engine.get_options()["MCTSParityPreset"]) {
     config.add_dirichlet_noise = false;
