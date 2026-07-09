@@ -71,7 +71,7 @@ CreateRequiredAcceleratorNetwork(const WeightsFile &weights,
 #ifdef USE_METAL
   try {
     return std::make_unique<Metal::MetalNetwork>(weights, 0, 256, 256,
-                                                  config.metal_fp16);
+                                                 config.metal_fp16);
   } catch (const std::exception &e) {
     throw std::runtime_error(
         "Required Metal accelerator backend unavailable: " +
@@ -156,7 +156,7 @@ std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
   if (backend == "auto" || backend == "metal") {
     try {
       return std::make_unique<Metal::MetalNetwork>(weights, 0, 256, 256,
-                                                    config.metal_fp16);
+                                                   config.metal_fp16);
     } catch (const std::exception &e) {
       std::cerr << "Metal backend unavailable: " << e.what() << std::endl;
       if (backend == "metal") {

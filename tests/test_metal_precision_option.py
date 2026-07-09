@@ -5,7 +5,6 @@ import pathlib
 import subprocess
 import sys
 
-
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ENGINE = ROOT / "build" / "metalfish"
 WEIGHTS = ROOT / "networks" / "BT4-1024x15x32h-swa-6147500.pb"

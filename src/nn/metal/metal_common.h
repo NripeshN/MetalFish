@@ -23,11 +23,9 @@ inline bool HalfPrecisionEnabled(bool configured) {
   const char *e = std::getenv("METALFISH_METAL_FP16");
   if (!e || !e[0])
     return configured;
-  if (e[0] == '0' || e[0] == 'f' || e[0] == 'F' || e[0] == 'n' ||
-      e[0] == 'N')
+  if (e[0] == '0' || e[0] == 'f' || e[0] == 'F' || e[0] == 'n' || e[0] == 'N')
     return false;
-  if (e[0] == '1' || e[0] == 't' || e[0] == 'T' || e[0] == 'y' ||
-      e[0] == 'Y')
+  if (e[0] == '1' || e[0] == 't' || e[0] == 'T' || e[0] == 'y' || e[0] == 'Y')
     return true;
   return configured;
 }
