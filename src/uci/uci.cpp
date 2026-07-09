@@ -951,6 +951,7 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
   MCTS::SearchParams config;
   config.nn_weights_path = nn_weights;
   config.nn_backend = resolve_nn_backend(engine);
+  config.metal_fp16 = engine.get_options()["NNMetalFP16"];
   config.num_threads = num_threads;
   config.coreml_model_path =
       std::string(engine.get_options()["NNCoreMLModelPath"]);
@@ -1431,7 +1432,8 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
                                        const MCTS::SearchParams &config) {
   std::ostringstream key;
   key << nn_weights << "|" << config.nn_backend << "|"
-      << config.coreml_model_path << "|" << config.coreml_compute_units << "|"
+      << config.metal_fp16 << "|" << config.coreml_model_path << "|"
+      << config.coreml_compute_units << "|"
       << config.cuda_device << "|" << config.cuda_graph_execution << "|"
       << config.cuda_stable_execution_batch_size << "|"
       << config.cuda_deterministic_attention_softmax << "|"

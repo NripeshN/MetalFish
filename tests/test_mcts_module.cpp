@@ -642,6 +642,10 @@ void test_search_params_defaults(TestCounter &tc) {
   expect(params.cache_history_length == 0,
          "classic cache history default uses current position", tc);
   expect(params.nn_cache_size == 2000000, "NN cache default aligned", tc);
+  expect(params.metal_fp16, "Metal FP16 backend default enabled", tc);
+  params.metal_fp16 = false;
+  expect(!params.GetBackendConfig().metal_fp16,
+         "Metal precision setting reaches backend config", tc);
   expect(params.moves_left_max_effect == 0.0345f,
          "moves-left max effect default aligned", tc);
   expect(params.moves_left_scaled_factor == 1.6521f,

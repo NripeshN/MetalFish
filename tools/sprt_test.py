@@ -774,7 +774,9 @@ def default_hybrid_options(weights_path: str, threads: int) -> Dict[str, str]:
         "HybridMCTSThreads": "1",
         "HybridABThreads": str(max(1, threads - 1)),
         "HybridAutoABThreadsCap": "0",
-        "TransformerLowTimeFallbackMs": "1500",
+        # A hybrid tuning match must exercise both subsearches even at the
+        # short fixed budgets used for screening.
+        "TransformerLowTimeFallbackMs": "0",
         "TransformerMinMoveBudgetMs": "400",
         "MCTSMaxThreads": "1",
         "MCTSMinibatchSize": "0",

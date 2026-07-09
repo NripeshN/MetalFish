@@ -11,6 +11,7 @@
 #include "hybrid/classifier.h"
 #include "hybrid/hybrid_search.h"
 #include "hybrid/position_adapter.h"
+#include "hybrid/shared_tt.h"
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -232,6 +233,15 @@ void test_shared_state() {
 }
 
 void test_hybrid_config() {
+  {
+    TestCase tc("Shared TT centipawn conversion");
+    const float neutral = SharedTTCpToWinProbability(0, 230.0f);
+    const float positive = SharedTTCpToWinProbability(230, 230.0f);
+    const float negative = SharedTTCpToWinProbability(-230, 230.0f);
+    EXPECT(tc, std::abs(neutral - 0.5f) < 1e-6f);
+    EXPECT(tc, std::abs(positive - 0.7310586f) < 1e-5f);
+    EXPECT(tc, std::abs(positive + negative - 1.0f) < 1e-6f);
+  }
   {
     TestCase tc("AB root history reuse requires matching position");
     const std::string root = "8/8/1pk5/3p2p1/K2Pn1N1/4P3/8/8 b - - 17 73";

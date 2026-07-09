@@ -27,7 +27,7 @@ public:
   MetalNetworkBuilder(void);
   ~MetalNetworkBuilder(void);
 
-  std::string init(int gpu_id);
+  std::string init(int gpu_id, bool use_fp16);
 
   void build(int kInputPlanes, MultiHeadWeights &weights,
              InputEmbedding embedding, bool attn_body, bool attn_policy,

@@ -48,7 +48,7 @@ MetalNetworkBuilder::~MetalNetworkBuilder(void) {
   }
 }
 
-std::string MetalNetworkBuilder::init(int gpu_id) {
+std::string MetalNetworkBuilder::init(int gpu_id, bool use_fp16) {
   NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
 
   if ((NSUInteger)gpu_id >= [devices count]) {
@@ -64,7 +64,8 @@ std::string MetalNetworkBuilder::init(int gpu_id) {
   this->graph_id = NextGraphId();
 
   [MetalNetworkGraph graphWithDevice:devices[gpu_id]
-                               index:[NSNumber numberWithInt:this->graph_id]];
+                               index:[NSNumber numberWithInt:this->graph_id]
+                       halfPrecision:use_fp16 ? YES : NO];
 
   this->gpu_id = gpu_id;
 

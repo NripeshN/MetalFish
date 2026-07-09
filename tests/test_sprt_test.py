@@ -114,11 +114,22 @@ def test_play_game_max_moves_adjudication() -> None:
     expect("max moves adjudicates draw", result == "1/2-1/2")
 
 
+def test_hybrid_options_do_not_fall_back_to_ab() -> None:
+    options = sprt_test.default_hybrid_options("weights.pb", 8)
+    expect("hybrid mode enabled", options["UseHybridSearch"] == "true")
+    expect("pure MCTS disabled", options["UseMCTS"] == "false")
+    expect(
+        "short tuning searches retain transformer",
+        options["TransformerLowTimeFallbackMs"] == "0",
+    )
+
+
 def main() -> int:
     test_parse_last_score_cp()
     test_play_game_resign_adjudication()
     test_play_game_draw_adjudication()
     test_play_game_max_moves_adjudication()
+    test_hybrid_options_do_not_fall_back_to_ab()
     print("test_sprt_test: OK")
     return 0
 

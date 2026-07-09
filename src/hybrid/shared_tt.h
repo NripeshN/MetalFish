@@ -9,6 +9,11 @@
 namespace MetalFish {
 namespace MCTS {
 
+inline float SharedTTCpToWinProbability(int cp, float cp_scale) {
+  const float x = static_cast<float>(cp) / cp_scale;
+  return 1.0f / (1.0f + std::exp(-x));
+}
+
 class SharedTTReader {
 public:
   explicit SharedTTReader(TranspositionTable *tt, float cp_scale = 230.0f)
@@ -44,11 +49,7 @@ public:
     if (data.bound == BOUND_LOWER && cp < -500)
       return result;
 
-    // Fast logistic using natural log: 1/(1+exp(-cp/scale))
-    // Scale of 230cp matches BT4 network's internal centipawn semantics
-    // better than the classical 400cp Elo scale.
-    float x = static_cast<float>(cp) / cp_scale_;
-    float win_prob = 1.0f / (1.0f + fast_exp_neg(x));
+    const float win_prob = SharedTTCpToWinProbability(cp, cp_scale_);
 
     float draw_est = std::max(0.0f, 1.0f - 2.0f * std::abs(win_prob - 0.5f));
     float w = win_prob * (1.0f - draw_est);
@@ -64,19 +65,6 @@ public:
 private:
   TranspositionTable *tt_ = nullptr;
   float cp_scale_ = 230.0f;
-
-  static float fast_exp_neg(float x) {
-    // Pade approximant for exp(-x), accurate to ~0.1% in [-6, 6]
-    // Falls back to standard exp for extreme values
-    if (x > 6.0f)
-      return std::exp(-x);
-    if (x < -6.0f)
-      return std::exp(-x);
-    float x2 = x * x;
-    float num = 1.0f - x * 0.5f + x2 * 0.08333333f;
-    float den = 1.0f + x * 0.5f + x2 * 0.08333333f;
-    return num / den;
-  }
 };
 
 } // namespace MCTS
