@@ -43,6 +43,7 @@ networks/*.nnue
 networks/*.pb
 networks/*.pb.gz
 books/*.bin
+!books/metalfish_repertoire.bin
 books/*.book
 books/*.polyglot
 syzygy/

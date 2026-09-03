@@ -52,6 +52,7 @@ public:
 
 struct BackendConfig {
   std::string backend = "auto";
+  bool metal_fp16 = true;
   std::string coreml_model_path;
   std::string coreml_compute_units = "cpu-ne";
   int cuda_device = -1;

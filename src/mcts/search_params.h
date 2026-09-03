@@ -19,7 +19,8 @@ namespace MetalFish {
 namespace MCTS {
 
 struct SearchParams {
-  // PUCT exploration (Lc0 defaults)
+  // PUCT exploration (root broadened via policy softmax temp, not cpuct
+  // premium)
   float cpuct = 1.745f;
   float cpuct_at_root = 1.745f;
   float cpuct_base = 38739.0f;
@@ -106,6 +107,9 @@ struct SearchParams {
   float kld_gain_min = 0.00005f;
   int kld_gain_average_interval = 100;
 
+  // SharedTT depth filter: only use AB TT entries with depth >= this
+  int shared_tt_depth_threshold = 8;
+
   // NNCache. Lc0 classic defaults to current-position cache keys.
   int cache_history_length = 0;
   int nn_cache_size = 2000000;
@@ -113,6 +117,7 @@ struct SearchParams {
   // Backend
   std::string nn_weights_path;
   std::string nn_backend = "auto";
+  bool metal_fp16 = true;
   std::string coreml_model_path;
   std::string coreml_compute_units = "cpu-ne";
   int cuda_device = -1;
@@ -150,6 +155,7 @@ struct SearchParams {
   NN::BackendConfig GetBackendConfig() const {
     NN::BackendConfig config;
     config.backend = nn_backend;
+    config.metal_fp16 = metal_fp16;
     config.coreml_model_path = coreml_model_path;
     config.coreml_compute_units = coreml_compute_units;
     config.cuda_device = cuda_device;

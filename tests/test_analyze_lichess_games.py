@@ -60,8 +60,21 @@ def test_parse_audit_counts_stale_rejects_and_ponder_metrics() -> None:
                     "best": "g1f3",
                     "ponder": "b8c6",
                     "elapsed_ms": 1234,
+                    "engine_info": {"score_cp": 80},
                 },
-                {"event": "engine_search_result", "best": "d2d4", "elapsed_ms": 4321},
+                {
+                    "event": "engine_search_result",
+                    "best": "d2d4",
+                    "elapsed_ms": 4321,
+                    "engine_info": {"score_cp": -420},
+                },
+                {
+                    "event": "engine_search_result",
+                    "best": "h7h8q",
+                    "elapsed_ms": 50,
+                    "engine_info": {"score_mate": 2},
+                    "ply": 13,
+                },
                 {
                     "event": "move_submit",
                     "move": "d2d4",
@@ -79,9 +92,9 @@ def test_parse_audit_counts_stale_rejects_and_ponder_metrics() -> None:
 
     expect("game id from filename", summary.game_id == "abc12345")
     expect("color from full event", summary.color == "white")
-    expect("offline max ply inferred", summary.max_ply == 12)
+    expect("offline max ply inferred", summary.max_ply == 13)
     expect("offline speed inferred", game.speed == "blitz")
-    expect("offline plies inferred", game.plies == 12)
+    expect("offline plies inferred", game.plies == 13)
     expect("accepted moves", summary.accepted_moves == 1)
     expect("rejected moves", summary.rejected_moves == 1)
     expect("stale rejects", summary.stale_rejects == 1)
@@ -95,6 +108,13 @@ def test_parse_audit_counts_stale_rejects_and_ponder_metrics() -> None:
     expect("ponderhits", summary.ponderhits == 1)
     expect("max ponderhit", summary.max_ponderhit_ms == 1234)
     expect("max engine", summary.max_engine_ms == 4321)
+    expect("max score", summary.max_score_cp == 32000)
+    expect("max score ply", summary.max_score_ply == 13)
+    expect("max score move", summary.max_score_move == "h7h8q")
+    expect("min score", summary.min_score_cp == -420)
+    expect("min score ply", summary.min_score_ply == 0)
+    expect("min score move", summary.min_score_move == "d2d4")
+    expect("decisive score samples", summary.decisive_score_samples == 2)
     expect("issue counted", summary.issue_counts["ponder_start_rejected"] == 1)
     expect("final status", summary.final_status == "outoftime")
     expect("offline result from audit winner", game.result == "win")
@@ -241,6 +261,13 @@ def test_print_report_includes_stability_summary() -> None:
         ponder_starts=9,
         max_engine_ms=5000,
         max_ponderhit_ms=4000,
+        max_score_cp=120,
+        max_score_ply=30,
+        max_score_move="e2e4",
+        min_score_cp=-40,
+        min_score_ply=32,
+        min_score_move="e7e5",
+        decisive_score_samples=0,
     )
     game = analyzer.GameSummary(
         audit=audit,
@@ -269,6 +296,7 @@ def test_print_report_includes_stability_summary() -> None:
         in text,
     )
     expect("search reported", "3 engine searches, 7 ponderhits" in text)
+    expect("score extremes reported", "best +120 cp" in text)
     expect("game line reported", "OpponentBot" in text)
 
 

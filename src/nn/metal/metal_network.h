@@ -31,7 +31,8 @@ namespace Metal {
 class MetalNetwork : public Network {
 public:
   explicit MetalNetwork(const WeightsFile &file, int gpu_id = 0,
-                        int max_batch = 256, int batch = 256);
+                        int max_batch = 256, int batch = 256,
+                        bool use_fp16 = true);
   ~MetalNetwork() override;
 
   NetworkOutput Evaluate(const InputPlanes &input) override;
@@ -58,6 +59,7 @@ private:
   std::vector<NetworkOutputTarget> decoded_output_targets_;
   int max_batch_size_;
   int batch_size_;
+  bool half_precision_;
   std::string device_name_;
   std::mutex gpu_mutex_;
 

@@ -397,7 +397,7 @@ private:
   struct TimeManagerState {
     float nps = 20000.0f;
     bool nps_reliable = false;
-    float tree_reuse = 0.52f;
+    float tree_reuse = 0.55f;
     float timeuse = 0.70f;
     float avg_ms_per_move = 0.0f;
     float move_allocated_time_ms = 0.0f;

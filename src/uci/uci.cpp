@@ -951,6 +951,7 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
   MCTS::SearchParams config;
   config.nn_weights_path = nn_weights;
   config.nn_backend = resolve_nn_backend(engine);
+  config.metal_fp16 = engine.get_options()["NNMetalFP16"];
   config.num_threads = num_threads;
   config.coreml_model_path =
       std::string(engine.get_options()["NNCoreMLModelPath"]);
@@ -1018,6 +1019,8 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
       engine, "MCTSSmartPruningFactor", config.smart_pruning_factor);
   config.smart_pruning_minimum_batches =
       static_cast<int>(engine.get_options()["MCTSSmartPruningMinimumBatches"]);
+  config.shared_tt_depth_threshold = static_cast<int>(
+      engine.get_options()["HybridMCTSSharedTTDepthThreshold"]);
   config.kld_gain_min = get_float_option(engine, "MCTSMinimumKLDGainPerNode",
                                          config.kld_gain_min);
   config.kld_gain_average_interval =
@@ -1063,6 +1066,7 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
       get_float_option(engine, "MCTSNoiseEpsilon", config.noise_epsilon);
   config.noise_alpha =
       get_float_option(engine, "MCTSNoiseAlpha", config.noise_alpha);
+  config.contempt = get_float_option(engine, "MCTSContempt", config.contempt);
 
   if (engine.get_options()["MCTSParityPreset"]) {
     config.add_dirichlet_noise = false;
@@ -1207,6 +1211,10 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   config.ab_root_reject_mcts = engine.get_options()["HybridABRootRejectMCTS"];
   config.mcts_root_reject = engine.get_options()["HybridMCTSRootReject"];
   config.use_shared_tt = engine.get_options()["HybridMCTSUseSharedTT"];
+  config.shared_tt_cp_scale = static_cast<float>(
+      static_cast<int>(engine.get_options()["HybridMCTSSharedTTCpScale"]));
+  config.q_to_cp_scale = static_cast<float>(
+      static_cast<int>(engine.get_options()["HybridQToCpScale"]));
   config.mcts_ab_root_hints = engine.get_options()["HybridMCTSABRootHints"];
   config.mcts_ab_root_hint_delay_ms =
       static_cast<int>(engine.get_options()["HybridMCTSABRootHintDelayMs"]);
@@ -1423,9 +1431,9 @@ static int resolve_mcts_thread_count(Engine &engine, bool explicit_threads_arg,
 static std::string make_mcts_cache_key(const std::string &nn_weights,
                                        const MCTS::SearchParams &config) {
   std::ostringstream key;
-  key << nn_weights << "|" << config.nn_backend << "|"
-      << config.coreml_model_path << "|" << config.coreml_compute_units << "|"
-      << config.cuda_device << "|" << config.cuda_graph_execution << "|"
+  key << nn_weights << "|" << config.nn_backend << "|" << config.metal_fp16
+      << "|" << config.coreml_model_path << "|" << config.coreml_compute_units
+      << "|" << config.cuda_device << "|" << config.cuda_graph_execution << "|"
       << config.cuda_stable_execution_batch_size << "|"
       << config.cuda_deterministic_attention_softmax << "|"
       << config.cuda_full_buffer_clear << "|" << config.num_threads << "|"

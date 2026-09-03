@@ -1525,7 +1525,10 @@ def test_opening_book_does_not_send_bot_token_to_explorer() -> None:
 
     headers = FakeRequests.calls[0].get("headers", {})
     expect("explorer request has user agent", "User-Agent" in headers)
-    expect("explorer request has no auth", "Authorization" not in headers)
+    expect(
+        "explorer request uses token for auth",
+        headers.get("Authorization") == "Bearer secret-token",
+    )
 
 
 def test_opening_book_scores_for_side_to_move() -> None:
@@ -2569,6 +2572,10 @@ def test_make_move_can_offer_draw_on_same_request() -> None:
             {
                 "path": "/bot/game/game/move/e2e4",
                 "params": {"offeringDraw": "true"},
+                "timeout": (
+                    lichess_bot.LICHESS_API_CONNECT_TIMEOUT_S,
+                    lichess_bot.LICHESS_MOVE_POST_TIMEOUT_S,
+                ),
             }
         ],
     )
@@ -2580,51 +2587,139 @@ def test_respond_draw_offer_uses_bot_draw_endpoint() -> None:
         text = ""
 
     bot = object.__new__(lichess_bot.LichessBot)
-    calls: list[str] = []
-    bot.api_post = lambda path, **kwargs: calls.append(path) or Response()
+    calls: list[dict] = []
+    bot.api_post = (
+        lambda path, **kwargs: calls.append({"path": path, **kwargs}) or Response()
+    )
 
     expect("draw accept succeeds", bot.respond_draw_offer("game", True))
     expect("draw decline succeeds", bot.respond_draw_offer("game", False))
     expect(
         "draw endpoint paths",
-        calls == ["/bot/game/game/draw/yes", "/bot/game/game/draw/no"],
+        calls
+        == [
+            {
+                "path": "/bot/game/game/draw/yes",
+                "timeout": (
+                    lichess_bot.LICHESS_API_CONNECT_TIMEOUT_S,
+                    lichess_bot.LICHESS_DRAW_POST_TIMEOUT_S,
+                ),
+            },
+            {
+                "path": "/bot/game/game/draw/no",
+                "timeout": (
+                    lichess_bot.LICHESS_API_CONNECT_TIMEOUT_S,
+                    lichess_bot.LICHESS_DRAW_POST_TIMEOUT_S,
+                ),
+            },
+        ],
+    )
+
+
+def test_make_move_request_error_is_bounded_failure() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    calls: list[dict] = []
+
+    def api_post(path: str, **kwargs):
+        calls.append({"path": path, **kwargs})
+        raise TimeoutError("move post hung")
+
+    bot.api_post = api_post
+
+    with redirect_stdout(io.StringIO()):
+        ok = bot.make_move("game", "e2e4")
+
+    expect("request error fails move", not ok)
+    expect(
+        "request error detail recorded",
+        "TimeoutError" in bot._last_move_failure_detail,
+    )
+    expect(
+        "move request has explicit timeout",
+        calls
+        == [
+            {
+                "path": "/bot/game/game/move/e2e4",
+                "timeout": (
+                    lichess_bot.LICHESS_API_CONNECT_TIMEOUT_S,
+                    lichess_bot.LICHESS_MOVE_POST_TIMEOUT_S,
+                ),
+            }
+        ],
     )
 
 
 def test_draw_offer_reason_uses_tablebase_draw() -> None:
     bot = object.__new__(lichess_bot.LichessBot)
     board = lichess_bot.chess.Board()
+    original_mode = lichess_bot.DRAW_FIGHTING_MODE
+    try:
+        # Fighting mode (default): a dead tablebase draw is played on, not
+        # offered, so a weaker opponent still has to prove the draw.
+        lichess_bot.DRAW_FIGHTING_MODE = True
+        bot._draw_claim_available = lambda candidate: True
+        bot._tablebase_wdl = lambda candidate: 0
+        expect("fighting tb draw does not offer", bot._draw_offer_reason(board) is None)
 
-    bot._draw_claim_available = lambda candidate: True
-    bot._tablebase_wdl = lambda candidate: 0
-    expect("tb draw offers draw", bot._draw_offer_reason(board) == "tb_draw")
+        # Lenient mode: a dead tablebase draw is offered (historical behavior).
+        lichess_bot.DRAW_FIGHTING_MODE = False
+        expect(
+            "lenient tb draw offers draw", bot._draw_offer_reason(board) == "tb_draw"
+        )
 
-    bot._tablebase_wdl = lambda candidate: 2
-    expect("tb win does not offer draw", bot._draw_offer_reason(board) is None)
+        bot._tablebase_wdl = lambda candidate: 2
+        expect("tb win does not offer draw", bot._draw_offer_reason(board) is None)
 
-    bot._draw_claim_available = lambda candidate: False
-    bot._tablebase_wdl = lambda candidate: 0
-    expect(
-        "tb draw offers even without claim", bot._draw_offer_reason(board) == "tb_draw"
-    )
+        bot._draw_claim_available = lambda candidate: False
+        bot._tablebase_wdl = lambda candidate: 0
+        expect(
+            "lenient tb draw offers even without claim",
+            bot._draw_offer_reason(board) == "tb_draw",
+        )
+    finally:
+        lichess_bot.DRAW_FIGHTING_MODE = original_mode
 
 
-def test_engine_equal_low_material_can_offer_draw_late() -> None:
+def test_draw_offer_reason_fighting_only_swindles_when_losing() -> None:
     bot = object.__new__(lichess_bot.LichessBot)
     board = lichess_bot.chess.Board("8/8/8/8/8/4k3/8/4K2R w - - 0 80")
     moves = ["0000"] * lichess_bot.DRAW_OFFER_ENGINE_MIN_PLY
     bot._draw_claim_available = lambda candidate: False
     bot._tablebase_wdl = lambda candidate: None
+    original_mode = lichess_bot.DRAW_FIGHTING_MODE
+    try:
+        # Fighting mode: never offer while equal or ahead; only offer as a
+        # swindle once clearly losing.
+        lichess_bot.DRAW_FIGHTING_MODE = True
+        expect(
+            "fighting equal position does not offer",
+            bot._draw_offer_reason(board, {"score_cp": 0}, moves) is None,
+        )
+        expect(
+            "fighting advantage does not offer",
+            bot._draw_offer_reason(board, {"score_cp": 100}, moves) is None,
+        )
+        expect(
+            "fighting losing position offers swindle",
+            bot._draw_offer_reason(
+                board, {"score_cp": -lichess_bot.DRAW_OFFER_SWINDLE_CP - 10}, moves
+            )
+            == "engine_losing_swindle",
+        )
 
-    expect(
-        "late engine equal offers draw",
-        bot._draw_offer_reason(board, {"score_cp": 0}, moves)
-        == "engine_equal_low_material",
-    )
-    expect(
-        "engine advantage does not offer draw",
-        bot._draw_offer_reason(board, {"score_cp": 100}, moves) is None,
-    )
+        # Lenient mode: offer when dead-even in a low-material late position.
+        lichess_bot.DRAW_FIGHTING_MODE = False
+        expect(
+            "lenient late engine equal offers draw",
+            bot._draw_offer_reason(board, {"score_cp": 0}, moves)
+            == "engine_equal_low_material",
+        )
+        expect(
+            "lenient engine advantage does not offer draw",
+            bot._draw_offer_reason(board, {"score_cp": 100}, moves) is None,
+        )
+    finally:
+        lichess_bot.DRAW_FIGHTING_MODE = original_mode
 
 
 def test_draw_accept_reason_uses_tablebase_and_engine_score() -> None:
@@ -2632,6 +2727,7 @@ def test_draw_accept_reason_uses_tablebase_and_engine_score() -> None:
     board = lichess_bot.chess.Board()
     moves = ["0000"] * lichess_bot.DRAW_ACCEPT_ENGINE_MIN_PLY
 
+    # Dead / losing acceptances are identical in both modes.
     bot._tablebase_wdl = lambda candidate: -2
     expect(
         "accept losing tablebase draw offer",
@@ -2663,10 +2759,32 @@ def test_draw_accept_reason_uses_tablebase_and_engine_score() -> None:
         == "engine_losing",
     )
     expect(
-        "accept late equal engine draw offer",
+        "reject late slightly better engine draw offer",
         bot._draw_accept_reason(board, engine_info={"score_cp": 10}, moves=moves)
-        == "engine_not_better",
+        is None,
     )
+
+    original_mode = lichess_bot.DRAW_FIGHTING_MODE
+    try:
+        # Fighting mode (default): a playable equal position is declined so the
+        # engine keeps fighting for the win.
+        lichess_bot.DRAW_FIGHTING_MODE = True
+        expect(
+            "fighting declines late dead-even draw offer",
+            bot._draw_accept_reason(board, engine_info={"score_cp": 0}, moves=moves)
+            is None,
+        )
+
+        # Lenient mode: accept a late dead-even draw offer (historical behavior).
+        lichess_bot.DRAW_FIGHTING_MODE = False
+        expect(
+            "lenient accepts late dead-even draw offer",
+            bot._draw_accept_reason(board, engine_info={"score_cp": 0}, moves=moves)
+            == "engine_not_better",
+        )
+    finally:
+        lichess_bot.DRAW_FIGHTING_MODE = original_mode
+
     expect(
         "reject early equal engine draw offer",
         bot._draw_accept_reason(board, engine_info={"score_cp": 10}, moves=[]) is None,
@@ -2759,8 +2877,17 @@ def test_draw_offer_caps_search_and_marks_move_request() -> None:
     engine = Engine()
     state = {"wtime": 600000, "btime": 600000, "winc": 10000, "binc": 10000}
 
-    with redirect_stdout(io.StringIO()):
-        bot._try_move("game", engine, "startpos", [], "white", state)
+    # This test exercises the draw-offer search-cap + move-request plumbing,
+    # which only triggers when a draw is actually offered. Use lenient mode so
+    # the dead tablebase draw produces an offer (fighting mode intentionally
+    # plays such positions on).
+    original_mode = lichess_bot.DRAW_FIGHTING_MODE
+    try:
+        lichess_bot.DRAW_FIGHTING_MODE = False
+        with redirect_stdout(io.StringIO()):
+            bot._try_move("game", engine, "startpos", [], "white", state)
+    finally:
+        lichess_bot.DRAW_FIGHTING_MODE = original_mode
 
     expect(
         "draw offer search capped",
@@ -3426,13 +3553,137 @@ def test_transient_move_rejection_remains_retryable() -> None:
 
     bot.make_move = make_move
 
-    with redirect_stdout(io.StringIO()):
-        ok = bot._submit_move("game", [], "e2e4")
+    old_retries = lichess_bot.MOVE_SUBMIT_RETRIES
+    old_delay = lichess_bot.MOVE_SUBMIT_RETRY_DELAY_S
+    try:
+        lichess_bot.MOVE_SUBMIT_RETRIES = 2
+        lichess_bot.MOVE_SUBMIT_RETRY_DELAY_S = 0
+        with redirect_stdout(io.StringIO()):
+            ok = bot._submit_move("game", [], "e2e4")
+    finally:
+        lichess_bot.MOVE_SUBMIT_RETRIES = old_retries
+        lichess_bot.MOVE_SUBMIT_RETRY_DELAY_S = old_delay
 
     expect("transient submit failed", not ok)
-    expect("transient attempted once", submitted == ["e2e4"])
+    expect("transient exhausted retries", submitted == ["e2e4", "e2e4", "e2e4"])
     expect(
         "transient turn not recorded", not bot._already_submitted_for_turn("game", [])
+    )
+
+
+def test_transient_move_submit_retries_when_still_our_turn() -> None:
+    class Response:
+        status_code = 200
+
+        def __init__(self, board: lichess_bot.chess.Board) -> None:
+            self._board = board
+
+        def json(self) -> dict:
+            return {
+                "nowPlaying": [
+                    {
+                        "gameId": "game",
+                        "isMyTurn": True,
+                        "fen": self._board.fen(),
+                    }
+                ]
+            }
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._submitted_moves = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._last_move_failure_detail = ""
+    records: list[dict] = []
+    submitted: list[str] = []
+    board = lichess_bot.chess.Board()
+
+    def make_move(game_id: str, move: str, **kwargs) -> bool:
+        submitted.append(move)
+        if len(submitted) == 1:
+            bot._last_move_failure_detail = "request_error: ConnectionError"
+            return False
+        return True
+
+    bot.make_move = make_move
+    bot.api_get = lambda path, **kwargs: Response(board)
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+
+    old_retries = lichess_bot.MOVE_SUBMIT_RETRIES
+    old_delay = lichess_bot.MOVE_SUBMIT_RETRY_DELAY_S
+    try:
+        lichess_bot.MOVE_SUBMIT_RETRIES = 2
+        lichess_bot.MOVE_SUBMIT_RETRY_DELAY_S = 0
+        with redirect_stdout(io.StringIO()):
+            ok = bot._submit_move("game", [], "e2e4", board=board)
+    finally:
+        lichess_bot.MOVE_SUBMIT_RETRIES = old_retries
+        lichess_bot.MOVE_SUBMIT_RETRY_DELAY_S = old_delay
+
+    expect("retry submit accepted", ok)
+    expect("move submitted twice", submitted == ["e2e4", "e2e4"])
+    expect("retry check audited", records[0]["event"] == "move_submit_retry_check")
+    expect("retry state still turn", records[0]["state"] == "still_turn")
+    expect("accepted turn recorded", bot._already_submitted_for_turn("game", []))
+
+
+def test_transient_move_submit_confirms_accepted_without_duplicate() -> None:
+    class Response:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "nowPlaying": [
+                    {
+                        "gameId": "game",
+                        "isMyTurn": False,
+                        "lastMove": "e2e4",
+                    }
+                ]
+            }
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._submitted_moves = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._last_move_failure_detail = ""
+    records: list[dict] = []
+    submitted: list[str] = []
+    board = lichess_bot.chess.Board()
+
+    def make_move(game_id: str, move: str, **kwargs) -> bool:
+        submitted.append(move)
+        bot._last_move_failure_detail = (
+            "request_error: ConnectionError: RemoteDisconnected"
+        )
+        return False
+
+    bot.make_move = make_move
+    bot.api_get = lambda path, **kwargs: Response()
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+
+    old_retries = lichess_bot.MOVE_SUBMIT_RETRIES
+    old_delay = lichess_bot.MOVE_SUBMIT_RETRY_DELAY_S
+    try:
+        lichess_bot.MOVE_SUBMIT_RETRIES = 2
+        lichess_bot.MOVE_SUBMIT_RETRY_DELAY_S = 0
+        with redirect_stdout(io.StringIO()):
+            ok = bot._submit_move("game", [], "e2e4", board=board)
+    finally:
+        lichess_bot.MOVE_SUBMIT_RETRIES = old_retries
+        lichess_bot.MOVE_SUBMIT_RETRY_DELAY_S = old_delay
+
+    expect("confirmed transient submit accepted", ok)
+    expect("no duplicate move submit", submitted == ["e2e4"])
+    expect(
+        "accepted after transient audited", records[-1]["result"].startswith("accepted")
+    )
+    expect(
+        "submitted move recorded", bot._submitted_move_for_turn("game", []) == "e2e4"
     )
 
 
@@ -4955,12 +5206,14 @@ def main() -> int:
     test_incoming_challenge_waits_for_seek_lock_before_accepting()
     test_keyboard_interrupt_drains_without_resigning_active_game()
     test_transient_move_rejection_remains_retryable()
+    test_transient_move_submit_retries_when_still_our_turn()
+    test_transient_move_submit_confirms_accepted_without_duplicate()
     test_ponder_game_circuit_breaker()
     test_submit_skips_locally_completed_game_without_api_call()
     test_make_move_can_offer_draw_on_same_request()
     test_respond_draw_offer_uses_bot_draw_endpoint()
     test_draw_offer_reason_uses_tablebase_draw()
-    test_engine_equal_low_material_can_offer_draw_late()
+    test_draw_offer_reason_fighting_only_swindles_when_losing()
     test_draw_accept_reason_uses_tablebase_and_engine_score()
     test_draw_state_records_winning_tablebase_without_draw_claim()
     test_missing_syzygy_table_does_not_disable_later_probes()

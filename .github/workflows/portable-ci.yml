@@ -75,6 +75,7 @@ jobs:
           python3 -m py_compile \
             tests/paper_benchmarks.py \
             tests/test_benchmark_configs.py \
+            tests/test_sprt_test.py \
             tools/audit_cuda_gcp_resources.py \
             tools/run_tournament_live.py \
             tools/lichess_puzzle_runner.py \
@@ -105,6 +106,7 @@ jobs:
           python3 tests/test_lichess_bot.py
           python3 tests/test_lichess_puzzle_runner.py
           python3 tests/test_hybrid_regression_compare.py
+          python3 tests/test_sprt_test.py
           python3 tests/test_uci_search_result_tools.py
           python3 tools/download_engine_networks.py --bt4-only
           ./build-linux/metalfish_nn_probe \
@@ -263,6 +265,7 @@ jobs:
           python -m py_compile \
             tests/paper_benchmarks.py \
             tests/test_benchmark_configs.py \
+            tests/test_sprt_test.py \
             tools/audit_cuda_gcp_resources.py \
             tools/run_tournament_live.py \
             tools/lichess_puzzle_runner.py \
@@ -282,6 +285,7 @@ jobs:
           python tests/test_lichess_bot.py
           python tests/test_lichess_puzzle_runner.py
           python tests/test_hybrid_regression_compare.py
+          python tests/test_sprt_test.py
           python tests/test_uci_search_result_tools.py
           python tools/download_engine_networks.py --bt4-only
           ./build-windows/metalfish_nn_probe.exe \
@@ -472,6 +476,7 @@ jobs:
           python -m py_compile `
             tests/paper_benchmarks.py `
             tests/test_benchmark_configs.py `
+            tests/test_sprt_test.py `
             tools/audit_cuda_gcp_resources.py `
             tools/run_tournament_live.py `
             tools/lichess_puzzle_runner.py `
@@ -491,6 +496,7 @@ jobs:
           python tests/test_lichess_bot.py
           python tests/test_lichess_puzzle_runner.py
           python tests/test_hybrid_regression_compare.py
+          python tests/test_sprt_test.py
           python tests/test_uci_search_result_tools.py
           python tools/download_engine_networks.py --bt4-only
           .\build-windows-msvc\metalfish_nn_probe.exe `

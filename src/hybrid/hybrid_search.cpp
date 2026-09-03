@@ -186,7 +186,8 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
     }
   }
 
-  shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
+  shared_tt_reader_ = std::make_unique<SharedTTReader>(
+      &engine_->get_tt(), config_.shared_tt_cp_scale);
   mcts_search_->SetSharedTT(config_.use_shared_tt ? shared_tt_reader_.get()
                                                   : nullptr);
 
@@ -257,8 +258,7 @@ void ParallelHybridSearch::start_search(
   limits_ = limits;
   ponderhit_received_.store(false, std::memory_order_release);
   search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
-  const int time_budget_ms = calculate_time_budget();
-  time_budget_ms_.store(time_budget_ms, std::memory_order_release);
+  int time_budget_ms = calculate_time_budget();
   start_ane_root_probe();
 
   if (config_.use_position_classifier) {
@@ -269,6 +269,13 @@ void ParallelHybridSearch::start_search(
     int time_left = (us == WHITE) ? limits.time[WHITE] : limits.time[BLACK];
     int increment = (us == WHITE) ? limits.inc[WHITE] : limits.inc[BLACK];
     strategy_selector_.adjust_for_time(current_strategy_, time_left, increment);
+
+    if (time_budget_ms > 0 && limits_.movetime <= 0 &&
+        current_strategy_.time_multiplier > 1.0f) {
+      time_budget_ms =
+          std::max(200, static_cast<int>(time_budget_ms *
+                                         current_strategy_.time_multiplier));
+    }
 
     send_info_string(
         "Parallel search - Position: " +
@@ -282,6 +289,7 @@ void ParallelHybridSearch::start_search(
                         : "STRATEGIC"));
   }
 
+  time_budget_ms_.store(time_budget_ms, std::memory_order_release);
   send_info_string("Time budget: " + std::to_string(time_budget_ms) + "ms");
 
   mcts_thread_done_.store(false, std::memory_order_release);
@@ -443,7 +451,8 @@ void ParallelHybridSearch::new_game() {
   if (mcts_search_) {
     mcts_search_->NewGame();
     if (engine_) {
-      shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
+      shared_tt_reader_ = std::make_unique<SharedTTReader>(
+          &engine_->get_tt(), config_.shared_tt_cp_scale);
       mcts_search_->SetSharedTT(config_.use_shared_tt ? shared_tt_reader_.get()
                                                       : nullptr);
     } else {
@@ -955,18 +964,19 @@ bool HybridMCTSCompactClearPreferenceOverride(
 bool HybridMCTSCrossRootConfidenceOverride(
     bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
     uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
-    int eval_delta, int ab_average_score, int mcts_in_ab_rank,
+    int eval_delta, int ab_score, int ab_average_score, int mcts_in_ab_rank,
     int mcts_in_ab_score, int mcts_average_score, uint64_t mcts_effort,
     int ab_in_mcts_rank, uint32_t ab_in_mcts_visits, float ab_in_mcts_q,
     float mcts_q) {
   if (!fixed_budget || !mcts_strong || mcts_total_nodes < 250 ||
       mcts_visits < 170 || visit_share < 0.62f || root_q_gap < 0.12f ||
-      mcts_cp < 170 || eval_delta < 40) {
+      mcts_cp < 170 || eval_delta < 30) {
     return false;
   }
 
   if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 4 ||
-      mcts_in_ab_score != -VALUE_INFINITE || mcts_effort < 100000) {
+      mcts_in_ab_score != -VALUE_INFINITE || mcts_effort < 1000 ||
+      ab_score < -300) {
     return false;
   }
 
@@ -978,7 +988,7 @@ bool HybridMCTSCrossRootConfidenceOverride(
   const bool ab_rank2_or_3_rejected_by_mcts =
       ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 3 && ab_in_mcts_visits <= 48 &&
       mcts_visits >= 6 * std::max<uint32_t>(1, ab_in_mcts_visits) &&
-      root_q_gap >= 0.12f && visit_share >= 0.64f && eval_delta >= 40 &&
+      root_q_gap >= 0.12f && visit_share >= 0.64f && eval_delta >= 30 &&
       mcts_q_edge >= 0.18f;
   if ((!ab_ranked_low_by_mcts && !ab_rank2_or_3_rejected_by_mcts) ||
       ab_in_mcts_visits == 0)
@@ -2077,7 +2087,16 @@ bool HybridRootPawnLeverCandidate(
   const bool high_policy_lever =
       selected_mcts_rank > 0 && candidate_mcts_policy >= 0.25f &&
       candidate_mcts_policy >= selected_mcts_policy * 1.15f;
-  const int max_average_gap = high_policy_lever ? 80 : 60;
+  const bool defensive_agreement_lever =
+      !high_policy_lever && selected_average_score <= -150 &&
+      selected_mcts_rank == 1 && mcts_rank >= 4 && mcts_rank <= 5 &&
+      mcts_current_visits >= 16 &&
+      selected_average_score - candidate_average_score <= 70 &&
+      candidate_effort >= 1500 && candidate_mcts_policy >= 0.035f &&
+      selected_mcts_q - candidate_mcts_q <= 0.04f &&
+      best_mcts_q - candidate_mcts_q <= 0.04f;
+  const int max_average_gap =
+      high_policy_lever ? 80 : (defensive_agreement_lever ? 70 : 60);
   const uint32_t min_current_visits = mcts_rank >= 5 ? 7 : 8;
   const bool low_visit_agreement_lever =
       !high_policy_lever && selected_mcts_rank > 0 && selected_mcts_rank <= 3 &&
@@ -2094,8 +2113,9 @@ bool HybridRootPawnLeverCandidate(
       candidate_effort >= 900 && candidate_mcts_policy >= 0.035f &&
       selected_mcts_q - candidate_mcts_q <= 0.09f &&
       best_mcts_q - candidate_mcts_q <= 0.09f;
-  const bool low_visit_lever =
-      low_visit_agreement_lever || defensive_low_visit_lever;
+  const bool low_visit_lever = low_visit_agreement_lever ||
+                               defensive_low_visit_lever ||
+                               defensive_agreement_lever;
   if (mcts_rank <= 0 || mcts_rank > 8 ||
       (mcts_current_visits < min_current_visits && !low_visit_lever) ||
       selected_average_score - candidate_average_score > max_average_gap ||
@@ -4832,7 +4852,7 @@ Move ParallelHybridSearch::make_final_decision() {
     return ab_best;
   }
 
-  const int mcts_cp = QToNnueScore(mcts_q);
+  const int mcts_cp = QToNnueScore(mcts_q, config_.q_to_cp_scale);
   const int ab_depth =
       ab_state_.completed_depth.load(std::memory_order_relaxed);
   const float absolute_visit_share =
@@ -4972,7 +4992,7 @@ Move ParallelHybridSearch::make_final_decision() {
       HybridMCTSCrossRootConfidenceOverride(
           mcts_decision_budget, mcts_strong, mcts_confidence_total_nodes,
           mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
-          ab_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
+          ab_score, ab_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
           mcts_in_ab.average_score, mcts_in_ab.effort, ab_in_mcts.rank,
           ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
   const bool mcts_root_confidence_reject_override =

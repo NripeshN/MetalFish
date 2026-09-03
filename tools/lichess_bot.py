@@ -306,25 +306,38 @@ DRAW_OFFER_SEARCH_CAP_MS = max(
     0, min(30_000, env_int("METALFISH_DRAW_OFFER_SEARCH_CAP_MS", 1500))
 )
 DRAW_ACCEPT_ENGINE_MAX_CP = max(
-    0, min(300, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MAX_CP", 25))
+    0, min(300, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MAX_CP", 0))
 )
 DRAW_ACCEPT_ENGINE_LOSING_CP = -max(
-    50, min(1000, env_int("METALFISH_DRAW_ACCEPT_ENGINE_LOSING_CP", 150))
+    50, min(1000, env_int("METALFISH_DRAW_ACCEPT_ENGINE_LOSING_CP", 200))
 )
 DRAW_ACCEPT_ENGINE_MIN_PLY = max(
-    0, min(200, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MIN_PLY", 60))
+    0, min(200, env_int("METALFISH_DRAW_ACCEPT_ENGINE_MIN_PLY", 80))
 )
 DRAW_OFFER_ENGINE_MAX_CP = max(
-    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_CP", 12))
+    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_CP", 0))
 )
 DRAW_OFFER_ENGINE_MIN_PLY = max(
-    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MIN_PLY", 80))
+    0, min(200, env_int("METALFISH_DRAW_OFFER_ENGINE_MIN_PLY", 120))
 )
 DRAW_OFFER_ENGINE_MAX_PIECES = max(
-    2, min(32, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_PIECES", 12))
+    2, min(32, env_int("METALFISH_DRAW_OFFER_ENGINE_MAX_PIECES", 8))
 )
 DRAW_OFFER_COOLDOWN_PLIES = max(
-    0, min(100, env_int("METALFISH_DRAW_OFFER_COOLDOWN_PLIES", 12))
+    0, min(100, env_int("METALFISH_DRAW_OFFER_COOLDOWN_PLIES", 20))
+)
+# Fighting mode: refuse draws in playable positions and never proactively offer
+# a draw while equal-or-better. Game analysis showed the bot drew ~87% of games,
+# almost all from genuinely equal positions, so contentment with equality was
+# the dominant Elo cap. When fighting, draws are only accepted when the engine
+# is clearly losing or the position is dead (insufficient material / forced
+# rule / tablebase draw or loss), and draws are only offered as a swindle when
+# the engine is already losing in a low-material late position.
+DRAW_FIGHTING_MODE = env_bool_string("METALFISH_DRAW_FIGHTING", True) == "true"
+# When fighting, only offer a draw once the engine eval is at least this many
+# centipawns in our disfavour (a practical swindle try, never while equal/ahead).
+DRAW_OFFER_SWINDLE_CP = max(
+    0, min(1000, env_int("METALFISH_DRAW_OFFER_SWINDLE_CP", 75))
 )
 
 
@@ -448,6 +461,20 @@ EVENT_STREAM_RECONNECT_DELAY_S = env_float(
 LICHESS_API_MIN_INTERVAL_S = env_float("METALFISH_LICHESS_API_MIN_INTERVAL_S", 0.35)
 EXPLORER_API_MIN_INTERVAL_S = env_float("METALFISH_EXPLORER_API_MIN_INTERVAL_S", 0.25)
 LICHESS_429_BACKOFF_S = env_float("METALFISH_LICHESS_429_BACKOFF_S", 65.0)
+LICHESS_API_CONNECT_TIMEOUT_S = max(
+    0.5, min(10.0, env_float("METALFISH_LICHESS_API_CONNECT_TIMEOUT_S", 3.0))
+)
+LICHESS_MOVE_POST_TIMEOUT_S = max(
+    0.5, min(10.0, env_float("METALFISH_LICHESS_MOVE_POST_TIMEOUT_S", 3.0))
+)
+LICHESS_DRAW_POST_TIMEOUT_S = max(
+    0.5, min(10.0, env_float("METALFISH_LICHESS_DRAW_POST_TIMEOUT_S", 3.0))
+)
+MOVE_SUBMIT_TRANSIENT_STATUSES = {408, 429, 500, 502, 503, 504}
+MOVE_SUBMIT_RETRIES = max(0, min(5, env_int("METALFISH_MOVE_SUBMIT_RETRIES", 2)))
+MOVE_SUBMIT_RETRY_DELAY_S = max(
+    0.0, min(2.0, env_float("METALFISH_MOVE_SUBMIT_RETRY_DELAY_S", 0.2))
+)
 BOT_ONLINE_FETCH_LIMIT = max(
     1, min(512, env_int("METALFISH_BOT_ONLINE_FETCH_LIMIT", 512))
 )
@@ -719,6 +746,7 @@ BASE_ENGINE_OPTIONS = {
     "HybridABRootRejectMCTS": HYBRID_AB_ROOT_REJECT_MCTS,
     "HybridMCTSRootReject": HYBRID_MCTS_ROOT_REJECT,
     "HybridMCTSUseSharedTT": HYBRID_MCTS_SHARED_TT,
+    "HybridMCTSSharedTTCpScale": "230",
     "HybridMCTSABRootHints": HYBRID_MCTS_AB_ROOT_HINTS,
     "HybridMCTSABRootHintDelayMs": str(HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS),
     "HybridMCTSABRootHintCount": str(HYBRID_MCTS_AB_ROOT_HINT_COUNT),
@@ -1041,6 +1069,7 @@ def print_config_check(args) -> None:
     if LICHESS_AUDIT_ENABLED:
         print(f"  Seek audit: {LICHESS_SEEK_AUDIT_PATH}")
     print(f"  Ponder: {args.ponder}")
+    print(f"  Draw policy: {'fighting' if DRAW_FIGHTING_MODE else 'lenient'}")
 
 
 class BotInstanceLock:
@@ -1770,6 +1799,9 @@ def configured_book_paths() -> list[pathlib.Path]:
         candidates = []
         for pattern in ("*.bin", "*.book", "*.polyglot"):
             candidates.extend(sorted(DEFAULT_BOOK_DIR.glob(pattern)))
+        primary = [p for p in candidates if "metalfish_repertoire" in p.name]
+        rest = [p for p in candidates if "metalfish_repertoire" not in p.name]
+        candidates = primary + rest
     return [path for path in candidates if path.is_file()]
 
 
@@ -1788,7 +1820,10 @@ class OpeningBook:
         self.timeout = timeout
         self.allow_online = allow_online
         self.cache_path = cache_path
-        self.http = SerializedHttpClient(min_interval_s=EXPLORER_API_MIN_INTERVAL_S)
+        self.http = SerializedHttpClient(
+            min_interval_s=EXPLORER_API_MIN_INTERVAL_S,
+            auth_token=api_key if api_key else None,
+        )
         self._cache: dict[str, str] = self._load_cache()
         self._miss_cache: set[str] = set()
         self._readers: list[chess.polyglot.MemoryMappedReader] = []
@@ -1873,20 +1908,27 @@ class OpeningBook:
             board = chess.Board(fen)
         except ValueError:
             return None
-        weights: dict[str, int] = {}
         for reader in self._readers:
             try:
                 entries = list(reader.find_all(board))
             except Exception:
                 continue
+            weights: dict[str, int] = {}
             for entry in entries:
                 move_attr = entry.move
                 move = move_attr() if callable(move_attr) else move_attr
                 if move in board.legal_moves:
                     weights[move.uci()] = weights.get(move.uci(), 0) + entry.weight
-        if not weights:
-            return None
-        return max(weights.items(), key=lambda item: (item[1], item[0]))[0]
+            if not weights:
+                continue
+            max_weight = max(weights.values())
+            tied = [uci for uci, w in weights.items() if w == max_weight]
+            if len(tied) == 1:
+                return tied[0]
+            if len(self._readers) > 1 and reader is self._readers[0]:
+                continue
+            return max(weights.items(), key=lambda item: (item[1], item[0]))[0]
+        return None
 
     def _query_masters(self, fen: str) -> str | None:
         try:
@@ -1911,8 +1953,8 @@ class OpeningBook:
                 f"{EXPLORER_API}/lichess",
                 params={
                     "fen": fen,
-                    "ratings": "2200,2500",
-                    "speeds": "blitz,rapid,classical",
+                    "ratings": "2500",
+                    "speeds": "rapid,classical",
                     "topGames": 0,
                     "recentGames": 0,
                 },
@@ -1930,18 +1972,26 @@ class OpeningBook:
             return None
         fen_parts = fen.split()
         black_to_move = len(fen_parts) > 1 and fen_parts[1] == "b"
-        best, best_score = None, -1.0
+        candidates: list[tuple[float, str]] = []
         for m in moves:
             games = m.get("white", 0) + m.get("draws", 0) + m.get("black", 0)
             if games < self.min_games:
                 continue
             wins = m.get("black" if black_to_move else "white", 0)
-            wins += m.get("draws", 0) * 0.5
-            score = (wins / games) * (games**0.3) if games > 0 else 0
-            if score > best_score:
-                best_score = score
-                best = m.get("uci")
-        return best
+            losses = m.get("white" if black_to_move else "black", 0)
+            draws = m.get("draws", 0)
+            win_rate = (wins + draws * 0.5) / games if games > 0 else 0
+            if win_rate < 0.45:
+                continue
+            loss_rate = losses / games if games > 0 else 1
+            if loss_rate > 0.40:
+                continue
+            score = win_rate * (games**0.25)
+            candidates.append((score, m.get("uci", "")))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: -x[0])
+        return candidates[0][1]
 
 
 class LichessBot:
@@ -2002,6 +2052,7 @@ class LichessBot:
         self._draw_offers_sent: dict[str, int] = {}
         self._last_resource_profile: dict[str, float | int] | None = None
         self._last_move_failure_detail = ""
+        self._last_move_failure_status_code: int | None = None
         self._online_bots_cache: tuple[float, list[dict]] | None = None
         self._playing_status_cache: dict[str, tuple[float, bool | None]] = {}
         self._last_game_stream_status: int | None = None
@@ -2128,7 +2179,14 @@ class LichessBot:
 
     def respond_draw_offer(self, game_id: str, accept: bool) -> bool:
         action = "yes" if accept else "no"
-        r = self.api_post(f"/bot/game/{game_id}/draw/{action}")
+        try:
+            r = self.api_post(
+                f"/bot/game/{game_id}/draw/{action}",
+                timeout=(LICHESS_API_CONNECT_TIMEOUT_S, LICHESS_DRAW_POST_TIMEOUT_S),
+            )
+        except Exception as exc:
+            print(f"  [{game_id}] Draw {action} failed: {type(exc).__name__}: {exc}")
+            return False
         if r.status_code != 200:
             detail = r.text.strip().replace("\n", " ")[:200]
             suffix = f": {detail}" if detail else ""
@@ -2140,11 +2198,23 @@ class LichessBot:
         self, game_id: str, move: str, *, offering_draw: bool = False
     ) -> bool:
         self._last_move_failure_detail = ""
+        self._last_move_failure_status_code = None
         kwargs = {"params": {"offeringDraw": "true"}} if offering_draw else {}
-        r = self.api_post(f"/bot/game/{game_id}/move/{move}", **kwargs)
+        kwargs["timeout"] = (
+            LICHESS_API_CONNECT_TIMEOUT_S,
+            LICHESS_MOVE_POST_TIMEOUT_S,
+        )
+        try:
+            r = self.api_post(f"/bot/game/{game_id}/move/{move}", **kwargs)
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {exc}".strip()
+            self._last_move_failure_detail = f"request_error: {detail}"[:200]
+            print(f"  [{game_id}] Move {move} failed: {detail}")
+            return False
         if r.status_code != 200:
             detail = r.text.strip().replace("\n", " ")[:200]
             suffix = f": {detail}" if detail else ""
+            self._last_move_failure_status_code = int(r.status_code)
             self._last_move_failure_detail = f"{r.status_code}{suffix}"
             print(f"  [{game_id}] Move {move} failed: {r.status_code}{suffix}")
             return False
@@ -2294,11 +2364,92 @@ class LichessBot:
                 "cannot move",
                 "no piece",
                 "illegal move",
+                "invalid move",
+                "not possible",
             )
         )
 
     def _move_failure_looks_game_over(self) -> bool:
         return "game already over" in self._last_move_failure_detail.lower()
+
+    def _move_failure_looks_transient(self) -> bool:
+        detail = self._last_move_failure_detail.lower()
+        status = getattr(self, "_last_move_failure_status_code", None)
+        if status in MOVE_SUBMIT_TRANSIENT_STATUSES:
+            return True
+        match = re.match(r"\s*(\d{3})", detail)
+        if match and int(match.group(1)) in MOVE_SUBMIT_TRANSIENT_STATUSES:
+            return True
+        return any(
+            marker in detail
+            for marker in (
+                "request_error",
+                "connectionerror",
+                "connection aborted",
+                "remotedisconnected",
+                "read timed out",
+                "timeout",
+                "temporarily unavailable",
+                "service unavailable",
+                "bad gateway",
+                "gateway timeout",
+            )
+        )
+
+    def _playing_entry_for_game(self, game_id: str) -> dict | None:
+        try:
+            r = self.api_get("/account/playing", timeout=10)
+            if r.status_code != 200:
+                return None
+            data = r.json()
+        except Exception:
+            return None
+        games = data.get("nowPlaying", []) if isinstance(data, dict) else []
+        if not isinstance(games, list):
+            return None
+        for game in games:
+            if not isinstance(game, dict):
+                continue
+            for key in ("gameId", "id", "fullId"):
+                if self._same_game_id(game.get(key), game_id):
+                    return game
+        return {}
+
+    def _move_submit_state_after_transient_failure(
+        self, game_id: str, moves: list[str], move: str, board: chess.Board
+    ) -> str:
+        entry = self._playing_entry_for_game(game_id)
+        if entry is None:
+            return "unknown"
+        if not entry:
+            self._mark_game_completed(game_id)
+            cache = getattr(self, "_playing_status_cache", {})
+            cache[game_id] = (time.time() + PLAYING_STATUS_CACHE_TTL_S, False)
+            self._playing_status_cache = cache
+            return "inactive"
+
+        if str(entry.get("lastMove") or "") == move:
+            return "accepted"
+        is_my_turn = entry.get("isMyTurn")
+        if is_my_turn is False:
+            return "accepted"
+
+        fen = entry.get("fen")
+        if isinstance(fen, str) and fen:
+            if fen == board.fen():
+                return "still_turn" if is_my_turn is not False else "accepted"
+            try:
+                api_board = chess.Board(fen)
+                if api_board.board_fen() != board.board_fen():
+                    return "accepted"
+                if api_board.turn != board.turn:
+                    return "accepted"
+            except ValueError:
+                return "unknown"
+
+        if is_my_turn is True:
+            return "still_turn"
+        return "unknown"
 
     def _submit_move(
         self,
@@ -2306,46 +2457,127 @@ class LichessBot:
         moves: list[str],
         move: str,
         *,
+        board: chess.Board | None = None,
         offering_draw: bool = False,
         draw_offer_reason: str | None = None,
     ) -> bool:
-        if self.make_move(game_id, move, offering_draw=offering_draw):
-            self._record_submitted_turn(game_id, moves, move)
-            if offering_draw:
-                self._remember_draw_offer_sent(game_id, moves)
+        submit_start = time.time()
+        max_attempts = 1 + MOVE_SUBMIT_RETRIES
+        for attempt in range(1, max_attempts + 1):
+            if self.make_move(game_id, move, offering_draw=offering_draw):
+                submit_ms = int((time.time() - submit_start) * 1000)
+                self._record_submitted_turn(game_id, moves, move)
+                if offering_draw:
+                    self._remember_draw_offer_sent(game_id, moves)
+                self._audit(
+                    game_id,
+                    "move_submit",
+                    move=move,
+                    result="accepted",
+                    elapsed_ms=submit_ms,
+                    attempts=attempt,
+                    offering_draw=offering_draw,
+                    draw_offer_reason=draw_offer_reason or "",
+                    **self._audit_context(moves),
+                )
+                return True
+
+            submit_ms = int((time.time() - submit_start) * 1000)
+            stale = self._move_failure_looks_stale()
+            transient = self._move_failure_looks_transient() and not stale
+
+            if stale:
+                self._record_submitted_turn(game_id, moves)
+                if self._move_failure_looks_game_over():
+                    self._mark_game_completed(game_id)
+                    cache = getattr(self, "_playing_status_cache", {})
+                    cache[game_id] = (time.time() + PLAYING_STATUS_CACHE_TTL_S, False)
+                    self._playing_status_cache = cache
+                print(
+                    f"  [{game_id}] Suppressing retries for stale turn after "
+                    f"rejected move {move}"
+                )
+                self._audit(
+                    game_id,
+                    "move_submit",
+                    move=move,
+                    result="rejected",
+                    detail=self._last_move_failure_detail,
+                    elapsed_ms=submit_ms,
+                    attempts=attempt,
+                    stale=True,
+                    offering_draw=offering_draw,
+                    draw_offer_reason=draw_offer_reason or "",
+                    **self._audit_context(moves),
+                )
+                return False
+
+            if transient and board is not None:
+                state = self._move_submit_state_after_transient_failure(
+                    game_id, moves, move, board
+                )
+                self._audit(
+                    game_id,
+                    "move_submit_retry_check",
+                    move=move,
+                    attempt=attempt,
+                    detail=self._last_move_failure_detail,
+                    state=state,
+                    elapsed_ms=submit_ms,
+                    **self._audit_context(moves),
+                )
+                if state in {"accepted", "inactive"}:
+                    self._record_submitted_turn(game_id, moves, move)
+                    if offering_draw:
+                        self._remember_draw_offer_sent(game_id, moves)
+                    self._audit(
+                        game_id,
+                        "move_submit",
+                        move=move,
+                        result="accepted_after_transient_failure",
+                        detail=self._last_move_failure_detail,
+                        elapsed_ms=submit_ms,
+                        attempts=attempt,
+                        offering_draw=offering_draw,
+                        draw_offer_reason=draw_offer_reason or "",
+                        **self._audit_context(moves),
+                    )
+                    return True
+
+            if transient and attempt < max_attempts:
+                delay = MOVE_SUBMIT_RETRY_DELAY_S * attempt
+                print(
+                    f"  [{game_id}] Retrying move {move} after transient submit "
+                    f"failure ({attempt}/{max_attempts - 1})"
+                )
+                self._audit(
+                    game_id,
+                    "move_submit_retry",
+                    move=move,
+                    attempt=attempt,
+                    detail=self._last_move_failure_detail,
+                    delay_s=round(delay, 3),
+                    **self._audit_context(moves),
+                )
+                if delay > 0:
+                    time.sleep(delay)
+                continue
+
             self._audit(
                 game_id,
                 "move_submit",
                 move=move,
-                result="accepted",
+                result="rejected",
+                detail=self._last_move_failure_detail,
+                elapsed_ms=submit_ms,
+                attempts=attempt,
+                stale=False,
+                transient=transient,
                 offering_draw=offering_draw,
                 draw_offer_reason=draw_offer_reason or "",
                 **self._audit_context(moves),
             )
-            return True
-
-        if self._move_failure_looks_stale():
-            self._record_submitted_turn(game_id, moves)
-            if self._move_failure_looks_game_over():
-                self._mark_game_completed(game_id)
-                cache = getattr(self, "_playing_status_cache", {})
-                cache[game_id] = (time.time() + PLAYING_STATUS_CACHE_TTL_S, False)
-                self._playing_status_cache = cache
-            print(
-                f"  [{game_id}] Suppressing retries for stale turn after "
-                f"rejected move {move}"
-            )
-        self._audit(
-            game_id,
-            "move_submit",
-            move=move,
-            result="rejected",
-            detail=self._last_move_failure_detail,
-            stale=self._move_failure_looks_stale(),
-            offering_draw=offering_draw,
-            draw_offer_reason=draw_offer_reason or "",
-            **self._audit_context(moves),
-        )
+            return False
         return False
 
     def _pre_submit_active_check_needed(self, board: chess.Board) -> bool:
@@ -2416,7 +2648,9 @@ class LichessBot:
     ) -> str | None:
         wdl = self._tablebase_wdl(board)
         if wdl == 0:
-            return "tb_draw"
+            # Dead-drawn by tablebase. A fighting engine keeps playing rather
+            # than signalling contentment (a weaker opponent may still err).
+            return None if DRAW_FIGHTING_MODE else "tb_draw"
         if wdl is not None:
             return None
 
@@ -2427,6 +2661,12 @@ class LichessBot:
 
         score_cp = self._engine_score_cp(engine_info)
         if score_cp is None:
+            return None
+        if DRAW_FIGHTING_MODE:
+            # Only offer as a swindle when already losing; never while
+            # equal-or-ahead (we would rather play on for the win).
+            if score_cp <= -DRAW_OFFER_SWINDLE_CP:
+                return "engine_losing_swindle"
             return None
         if abs(score_cp) <= DRAW_OFFER_ENGINE_MAX_CP:
             return "engine_equal_low_material"
@@ -2467,6 +2707,11 @@ class LichessBot:
             return None
         if score_cp <= DRAW_ACCEPT_ENGINE_LOSING_CP:
             return "engine_losing"
+        if DRAW_FIGHTING_MODE:
+            # Playable position (equal or only marginally worse): decline the
+            # draw and fight on. This is the primary lever against the ~87%
+            # draw rate seen in the Lichess game corpus.
+            return None
         if moves is not None and len(moves) >= DRAW_ACCEPT_ENGINE_MIN_PLY:
             if score_cp <= DRAW_ACCEPT_ENGINE_MAX_CP:
                 return "engine_not_better"
@@ -2637,6 +2882,7 @@ class LichessBot:
             game_id,
             moves,
             move,
+            board=board,
             offering_draw=offering_draw,
             draw_offer_reason=draw_offer_reason,
         )
@@ -4840,6 +5086,10 @@ class LichessBot:
                     **self._audit_context(moves),
                 )
                 parsed = self._parse_legal_move(game_id, book_move, board, "book")
+                if parsed is not None and not self._verify_book_move(
+                    engine, initial_fen, moves, board, parsed, game_id
+                ):
+                    parsed = None
                 if parsed is not None:
                     if self._submit_move_if_active(
                         game_id,
@@ -5173,6 +5423,45 @@ class LichessBot:
         if not isinstance(binc, int):
             binc = 0
         return wtime, btime, winc, binc
+
+    def _verify_book_move(
+        self,
+        engine,
+        initial_fen: str,
+        moves: list[str],
+        board: chess.Board,
+        move: chess.Move,
+        game_id: str,
+    ) -> bool:
+        if not engine.alive():
+            return True
+        try:
+            engine.set_position(initial_fen, moves)
+            best, _ = engine.go(movetime=200, timeout=5)
+            if best is None:
+                return True
+            info = engine.search_diagnostics()
+            score_cp = info.get("score_cp")
+            if score_cp is None:
+                return True
+            score_cp = int(score_cp)
+            if score_cp < -50:
+                self._audit(
+                    game_id,
+                    "book_rejected",
+                    move=move.uci(),
+                    engine_best=best,
+                    score=score_cp,
+                    fen=board.fen(),
+                )
+                print(
+                    f"  [{game_id}] Book move {move.uci()} rejected"
+                    f" (engine prefers {best} at {score_cp}cp)"
+                )
+                return False
+        except Exception:
+            pass
+        return True
 
     def _should_query_book(
         self, board: chess.Board, my_color: str, wtime: int, btime: int
@@ -5629,6 +5918,7 @@ class LichessBot:
             f"  Repeat:   "
             f"{'avoid same bot/speed' if self.args.avoid_repeat_format else 'allowed'}"
         )
+        print(f"  Draws:    {'fighting' if DRAW_FIGHTING_MODE else 'lenient'}")
         print(f"  Max games: {self.args.max_games}")
         if self.args.quit_after_games:
             print(f"  Quit after: {self.args.quit_after_games} completed game(s)")
