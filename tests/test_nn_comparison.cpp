@@ -5,6 +5,7 @@
   Neural-network and encoder smoke test for parity workflows.
 */
 
+#include "core/attacks.h"
 #include "core/bitboard.h"
 #include "core/movegen.h"
 #include "core/position.h"
@@ -1600,7 +1601,7 @@ bool benchmark_nn_batch_optional() {
 } // namespace
 
 int main() {
-  Bitboards::init();
+  Attacks::init();
   Position::init();
   NN::InitPolicyTables();
 

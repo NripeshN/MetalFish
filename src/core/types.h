@@ -30,7 +30,6 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <type_traits>
 
 #if defined(_MSC_VER)
 // Disable some silly and noisy warnings from MSVC compiler
@@ -55,8 +54,8 @@
 #endif
 
 // Enforce minimum Clang version
-#if defined(__clang__) && (__clang_major__ < 10)
-#error "MetalFish requires Clang 10.0 or later for correct compilation"
+#if defined(__clang__) && (__clang_major__ < 11)
+#error "MetalFish requires Clang 11.0 or later for correct compilation"
 #endif
 
 #define ASSERT_ALIGNED(ptr, alignment)                                         \
@@ -67,7 +66,7 @@
 #define IS_64BIT
 #endif
 
-#if defined(USE_POPCNT) && defined(_MSC_VER)
+#if defined(_MSC_VER)
 #include <nmmintrin.h> // Microsoft header for _mm_popcnt_u64()
 #endif
 
@@ -78,8 +77,7 @@
 #if defined(USE_PEXT)
 #include <immintrin.h> // Header for _pext_u64() intrinsic
 #define pext(b, m) _pext_u64(b, m)
-#else
-#define pext(b, m) 0
+#define pdep(b, m) _pdep_u64(b, m)
 #endif
 
 namespace MetalFish {
@@ -102,15 +100,15 @@ constexpr bool Is64Bit = true;
 constexpr bool Is64Bit = false;
 #endif
 
-using Key = uint64_t;
-using Bitboard = uint64_t;
+using Key = u64;
+using Bitboard = u64;
 
 constexpr int MAX_MOVES = 256;
 constexpr int MAX_PLY = 246;
 
-enum Color : int8_t { WHITE, BLACK, COLOR_NB = 2 };
+enum Color : u8 { WHITE, BLACK, COLOR_NB = 2 };
 
-enum CastlingRights : int8_t {
+enum CastlingRights : u8 {
   NO_CASTLING,
   WHITE_OO,
   WHITE_OOO = WHITE_OO << 1,
@@ -126,7 +124,7 @@ enum CastlingRights : int8_t {
   CASTLING_RIGHT_NB = 16
 };
 
-enum Bound : int8_t {
+enum Bound : u8 {
   BOUND_NONE,
   BOUND_UPPER,
   BOUND_LOWER,
@@ -168,6 +166,24 @@ constexpr bool is_decisive(Value value) {
   return is_win(value) || is_loss(value);
 }
 
+constexpr bool is_mate(Value value) {
+  assert(is_valid(value));
+  return value >= VALUE_MATE_IN_MAX_PLY;
+}
+
+constexpr bool is_mated(Value value) {
+  assert(is_valid(value));
+  return value <= VALUE_MATED_IN_MAX_PLY;
+}
+
+constexpr bool is_mate_or_mated(Value value) {
+  return is_mate(value) || is_mated(value);
+}
+
+constexpr Value mate_in(int ply) { return VALUE_MATE - ply; }
+
+constexpr Value mated_in(int ply) { return -VALUE_MATE + ply; }
+
 // In the code, we make the assumption that these values
 // are such that non_pawn_material() can be used to uniquely
 // identify the material on the board.
@@ -178,13 +194,13 @@ constexpr Value RookValue = 1276;
 constexpr Value QueenValue = 2538;
 
 // clang-format off
-enum PieceType : std::int8_t {
+enum PieceType : u8 {
     NO_PIECE_TYPE, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
     ALL_PIECES = 0,
     PIECE_TYPE_NB = 8
 };
 
-enum Piece : std::int8_t {
+enum Piece : u8 {
     NO_PIECE,
     W_PAWN = PAWN,     W_KNIGHT, W_BISHOP, W_ROOK, W_QUEEN, W_KING,
     B_PAWN = PAWN + 8, B_KNIGHT, B_BISHOP, B_ROOK, B_QUEEN, B_KING,
@@ -209,14 +225,14 @@ using Depth = int;
 constexpr Depth DEPTH_QS = 0;
 // For transposition table entries where no searching at all was done
 // (whether regular or qsearch) we use DEPTH_UNSEARCHED, which should thus
-// compare lower than any quiescence or regular depth. DEPTH_ENTRY_OFFSET
-// is used only for the transposition table entry occupancy check (see tt.cpp),
-// and should thus be lower than DEPTH_UNSEARCHED.
+// compare lower than any quiescence or regular depth. DEPTH_NONE is used
+// for the transposition table entry occupancy check (see tt.cpp), and
+// should thus be lower than DEPTH_UNSEARCHED.
 constexpr Depth DEPTH_UNSEARCHED = -2;
-constexpr Depth DEPTH_ENTRY_OFFSET = -3;
+constexpr Depth DEPTH_NONE = -3;
 
 // clang-format off
-enum Square : int8_t {
+enum Square : u8 {
     SQ_A1, SQ_B1, SQ_C1, SQ_D1, SQ_E1, SQ_F1, SQ_G1, SQ_H1,
     SQ_A2, SQ_B2, SQ_C2, SQ_D2, SQ_E2, SQ_F2, SQ_G2, SQ_H2,
     SQ_A3, SQ_B3, SQ_C3, SQ_D3, SQ_E3, SQ_F3, SQ_G3, SQ_H3,
@@ -232,7 +248,7 @@ enum Square : int8_t {
 };
 // clang-format on
 
-enum Direction : int8_t {
+enum Direction : i8 {
   NORTH = 8,
   EAST = 1,
   SOUTH = -NORTH,
@@ -244,7 +260,7 @@ enum Direction : int8_t {
   NORTH_WEST = NORTH + WEST
 };
 
-enum File : int8_t {
+enum File : u8 {
   FILE_A,
   FILE_B,
   FILE_C,
@@ -256,7 +272,7 @@ enum File : int8_t {
   FILE_NB
 };
 
-enum Rank : int8_t {
+enum Rank : u8 {
   RANK_1,
   RANK_2,
   RANK_3,
@@ -288,10 +304,10 @@ struct DirtyThreat {
   static constexpr int PcOffset = 20;
 
   DirtyThreat() { /* don't initialize data */ }
-  DirtyThreat(uint32_t raw) : data(raw) {}
+  DirtyThreat(u32 raw) : data(raw) {}
   DirtyThreat(Piece pc, Piece threatened_pc, Square pc_sq, Square threatened_sq,
               bool add) {
-    data = (uint32_t(add) << 31) | (pc << PcOffset) |
+    data = (u32(add) << 31) | (pc << PcOffset) |
            (threatened_pc << ThreatenedPcOffset) |
            (threatened_sq << ThreatenedSqOffset) | (pc_sq << PcSqOffset);
   }
@@ -307,10 +323,10 @@ struct DirtyThreat {
     return static_cast<Square>(data >> PcSqOffset & 0xff);
   }
   bool add() const { return data >> 31; }
-  uint32_t raw() const { return data; }
+  u32 raw() const { return data; }
 
 private:
-  uint32_t data;
+  u32 data;
 };
 
 // A piece can be involved in at most 8 outgoing attacks and 16 incoming
@@ -325,10 +341,17 @@ using DirtyThreatList = ValueList<DirtyThreat, 96>;
 
 struct DirtyThreats {
   DirtyThreatList list;
-  Color us;
-  Square prevKsq, ksq;
+};
 
-  Bitboard threatenedSqs, threateningSqs;
+struct DirtyPawnPairs {
+  Bitboard before[COLOR_NB];
+  Bitboard after[COLOR_NB];
+};
+
+struct Dirties {
+  DirtyPiece dirtyPiece;
+  DirtyThreats dirtyThreats;
+  DirtyPawnPairs dirtyPawnPairs;
 };
 
 #define ENABLE_INCR_OPERATORS_ON(T)                                            \
@@ -349,6 +372,7 @@ constexpr Direction operator*(int i, Direction d) {
   return Direction(i * int(d));
 }
 
+// Additional operators to add a Direction to a Square
 constexpr Square operator+(Square s, Direction d) {
   return Square(int(s) + int(d));
 }
@@ -358,21 +382,21 @@ constexpr Square operator-(Square s, Direction d) {
 constexpr Square &operator+=(Square &s, Direction d) { return s = s + d; }
 constexpr Square &operator-=(Square &s, Direction d) { return s = s - d; }
 
+// Toggle color
 constexpr Color operator~(Color c) { return Color(c ^ BLACK); }
 
+// Swap A1 <-> A8
 constexpr Square flip_rank(Square s) { return Square(s ^ SQ_A8); }
 
+// Swap A1 <-> H1
 constexpr Square flip_file(Square s) { return Square(s ^ SQ_H1); }
 
+// Swap color of piece B_KNIGHT <-> W_KNIGHT
 constexpr Piece operator~(Piece pc) { return Piece(pc ^ 8); }
 
 constexpr CastlingRights operator&(Color c, CastlingRights cr) {
   return CastlingRights((c == WHITE ? WHITE_CASTLING : BLACK_CASTLING) & cr);
 }
-
-constexpr Value mate_in(int ply) { return VALUE_MATE - ply; }
-
-constexpr Value mated_in(int ply) { return -VALUE_MATE + ply; }
 
 constexpr Square make_square(File f, Rank r) { return Square((r << 3) + f); }
 
@@ -406,11 +430,11 @@ constexpr Rank relative_rank(Color c, Square s) {
 constexpr Direction pawn_push(Color c) { return c == WHITE ? NORTH : SOUTH; }
 
 // Based on a congruential pseudo-random number generator
-constexpr Key make_key(uint64_t seed) {
+constexpr Key make_key(u64 seed) {
   return seed * 6364136223846793005ULL + 1442695040888963407ULL;
 }
 
-enum MoveType {
+enum MoveType : u16 {
   NORMAL,
   PROMOTION = 1 << 14,
   EN_PASSANT = 2 << 14,
@@ -433,7 +457,7 @@ enum MoveType {
 class Move {
 public:
   Move() = default;
-  constexpr explicit Move(std::uint16_t d) : data(d) {}
+  constexpr explicit Move(u16 d) : data(d) {}
 
   constexpr Move(Square from, Square to) : data((from << 6) + to) {}
 
@@ -470,22 +494,18 @@ public:
 
   constexpr explicit operator bool() const { return data != 0; }
 
-  constexpr std::uint16_t raw() const { return data; }
+  constexpr u16 raw() const { return data; }
 
   struct MoveHash {
-    std::size_t operator()(const Move &m) const { return make_key(m.data); }
+    usize operator()(const Move &m) const { return make_key(m.data); }
   };
 
+  static constexpr int FromSqShift = 6;
+  static constexpr int ToSqShift = 0;
+
 protected:
-  std::uint16_t data;
+  u16 data;
 };
-
-template <typename T, typename... Ts> struct is_all_same {
-  static constexpr bool value = (std::is_same_v<T, Ts> && ...);
-};
-
-template <typename... Ts>
-constexpr auto is_all_same_v = is_all_same<Ts...>::value;
 
 } // namespace MetalFish
 

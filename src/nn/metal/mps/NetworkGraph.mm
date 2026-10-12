@@ -93,12 +93,14 @@ static const NSInteger kMinSubBatchSize = 20;
 }
 
 + (void)graphWithDevice:(id<MTLDevice> __nonnull)device
-                  index:(NSNumber *_Nonnull)index {
+                  index:(NSNumber *_Nonnull)index
+          halfPrecision:(BOOL)halfPrecision {
   NSMutableDictionary *graphs = [MetalNetworkGraph getGraphs];
 
   @synchronized(self) {
     if (graphs[index] == nil) {
-      graphs[index] = [[MetalNetworkGraph alloc] initWithDevice:device];
+      graphs[index] = [[MetalNetworkGraph alloc] initWithDevice:device
+                                                  halfPrecision:halfPrecision];
     }
   }
 }
@@ -111,7 +113,8 @@ static const NSInteger kMinSubBatchSize = 20;
   }
 }
 
-- (nonnull instancetype)initWithDevice:(id<MTLDevice> __nonnull)device {
+- (nonnull instancetype)initWithDevice:(id<MTLDevice> __nonnull)device
+                         halfPrecision:(BOOL)halfPrecision {
   self = [super init];
   _device = [MPSGraphDevice deviceWithMTLDevice:device];
   _queue = [device newCommandQueue];
@@ -122,9 +125,7 @@ static const NSInteger kMinSubBatchSize = 20;
       [NSMutableDictionary dictionaryWithCapacity:kMaxInflightBuffers];
 
   _retainedWeightData = [[NSMutableArray alloc] init];
-  _computeType = MetalFish::NN::Metal::HalfPrecisionEnabled()
-                     ? MPSDataTypeFloat16
-                     : MPSDataTypeFloat32;
+  _computeType = halfPrecision ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
 
   return self;
 }

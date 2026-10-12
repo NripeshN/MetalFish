@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-#include "../src/core/bitboard.h"
+#include "../src/core/attacks.h"
 #include "../src/core/position.h"
 
 bool test_core();
@@ -27,7 +27,7 @@ bool test_mcts_all();
 bool test_hybrid_module();
 
 int main(int argc, char *argv[]) {
-  MetalFish::Bitboards::init();
+  MetalFish::Attacks::init();
   MetalFish::Position::init();
 
   std::cout << "=== MetalFish Test Suite ===" << std::endl;

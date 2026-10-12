@@ -50,8 +50,7 @@ SSH_PUB_KEY="${METALFISH_GCP_SSH_PUB_KEY:-${SSH_KEY}.pub}"
 PACKAGE_ZIP="${METALFISH_WINDOWS_CUDA_PACKAGE:-}"
 WEIGHTS="${METALFISH_BT4_WEIGHTS:-${ROOT_DIR}/networks/BT4-1024x15x32h-swa-6147500.pb}"
 LEGACY_WEIGHTS="${METALFISH_LEGACY_NN_WEIGHTS:-${ROOT_DIR}/networks/legacy-42850.pb.gz}"
-NNUE_BIG="${METALFISH_NNUE_BIG:-${ROOT_DIR}/networks/nn-c288c895ea92.nnue}"
-NNUE_SMALL="${METALFISH_NNUE_SMALL:-${ROOT_DIR}/networks/nn-37f18f62d772.nnue}"
+NNUE_BIG="${METALFISH_NNUE_BIG:-${ROOT_DIR}/networks/nn-1a298aa575a0.nnue}"
 UCI_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_UCI_TIMEOUT:-420}"
 PROBE_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_PROBE_TIMEOUT:-420}"
 COMPARISON_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_COMPARISON_TIMEOUT:-900}"
@@ -754,7 +753,6 @@ python3 tools/check_cuda_package_artifacts.py \
 require_file "${WEIGHTS}" "BT4 weights"
 require_file "${LEGACY_WEIGHTS}" "legacy 42850 weights"
 require_file "${NNUE_BIG}" "large NNUE"
-require_file "${NNUE_SMALL}" "small NNUE"
 ensure_ssh_key
 require_file "${SSH_PUB_KEY}" "SSH public key"
 
@@ -922,8 +920,7 @@ done
 copy_to_remote "${PACKAGE_ZIP}" "C:/metalfish/metalfish-windows-cuda.zip"
 copy_to_remote "${WEIGHTS}" "C:/metalfish/networks/BT4-1024x15x32h-swa-6147500.pb"
 copy_to_remote "${LEGACY_WEIGHTS}" "C:/metalfish/networks/legacy-42850.pb.gz"
-copy_to_remote "${NNUE_BIG}" "C:/metalfish/networks/nn-c288c895ea92.nnue"
-copy_to_remote "${NNUE_SMALL}" "C:/metalfish/networks/nn-37f18f62d772.nnue"
+copy_to_remote "${NNUE_BIG}" "C:/metalfish/networks/nn-1a298aa575a0.nnue"
 python3 - <<'PY' >"${RUN_DIR}/probe-positions.json"
 import json
 from tools.run_nn_backend_probe_suite import DEFAULT_POSITIONS
@@ -1873,8 +1870,7 @@ function Invoke-UciPonderSmoke {
 
 \$Bt4 = Join-Path \$Networks "BT4-1024x15x32h-swa-6147500.pb"
 \$Legacy = Join-Path \$Networks "legacy-42850.pb.gz"
-\$NnueBig = Join-Path \$Networks "nn-c288c895ea92.nnue"
-\$NnueSmall = Join-Path \$Networks "nn-37f18f62d772.nnue"
+\$NnueBig = Join-Path \$Networks "nn-1a298aa575a0.nnue"
 \$Bk07Fen = "1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -"
 \$KiwipeteFen = "r3k2r/p1ppqpb1/bn2pnp1/2P5/1p2P3/2N2N2/PP1PBPPP/R2QK2R w KQkq - 0 1"
 \$AfterE4Fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
@@ -1926,7 +1922,6 @@ Invoke-UciSmoke -Name "cuda-mcts" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
@@ -1947,7 +1942,6 @@ Invoke-UciSmoke -Name "cuda-timed-mcts" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
@@ -1970,7 +1964,6 @@ Invoke-UciSmoke -Name "cuda-timed-mcts" -Commands @(
 
 Invoke-UciPonderSmoke -Name "cuda-ponder-mcts" -Options @(
   "EvalFile value \$NnueBig",
-  "EvalFileSmall value \$NnueSmall",
   "NNBackend value cuda",
   "NNWeights value \$Bt4",
   "NNCudaDevice value -1",
@@ -1993,7 +1986,6 @@ Invoke-UciSmoke -Name "cuda-auto-mcts" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name NNBackend value auto",
   "setoption name NNBackendRequireAccelerator value true",
   "setoption name NNWeights value \$Bt4",
@@ -2015,7 +2007,6 @@ Invoke-UciSmoke -Name "cuda-accelerator-mcts" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name NNBackend value accelerator",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
@@ -2036,7 +2027,6 @@ Invoke-UciSmoke -Name "cuda-bk07-mcts" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
@@ -2062,7 +2052,6 @@ Invoke-UciSmoke -Name "cuda-kiwipete-mcts" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
@@ -2088,7 +2077,6 @@ Invoke-UciSmoke -Name "cuda-after-e4-mcts" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
@@ -2114,7 +2102,6 @@ Invoke-UciSmoke -Name "cuda-promotion-mcts" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
@@ -2140,7 +2127,6 @@ Invoke-UciSmoke -Name "cuda-en-passant-mcts" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
@@ -2166,7 +2152,6 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name Threads value 3",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
@@ -2194,7 +2179,6 @@ Invoke-UciSmoke -Name "hybrid-cuda-kiwipete" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name Threads value 3",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
@@ -2222,7 +2206,6 @@ Invoke-UciSmoke -Name "hybrid-cuda-after-e4" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name Threads value 3",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
@@ -2250,7 +2233,6 @@ Invoke-UciSmoke -Name "hybrid-cuda-promotion" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name Threads value 3",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
@@ -2278,7 +2260,6 @@ Invoke-UciSmoke -Name "hybrid-cuda-en-passant" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name Threads value 3",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
@@ -2306,7 +2287,6 @@ Invoke-UciSmoke -Name "hybrid-cuda-clock-start" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name Threads value 3",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
@@ -2335,7 +2315,6 @@ Invoke-UciSmoke -Name "hybrid-cuda-clock-safety" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name Threads value 3",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
@@ -2359,7 +2338,6 @@ Invoke-UciSmoke -Name "hybrid-auto" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name Threads value 3",
   "setoption name NNBackend value auto",
   "setoption name NNBackendRequireAccelerator value true",
@@ -2386,7 +2364,6 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "uci",
   "isready",
   "setoption name EvalFile value \$NnueBig",
-  "setoption name EvalFileSmall value \$NnueSmall",
   "setoption name Threads value 3",
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
@@ -2419,7 +2396,6 @@ if ("${CUDA_PROFILE}" -ne "" -and "${CUDA_PROFILE}" -ne "0") {
     "uci",
     "isready",
     "setoption name EvalFile value \$NnueBig",
-    "setoption name EvalFileSmall value \$NnueSmall",
     "setoption name Threads value 3",
     "setoption name NNBackend value cuda",
     "setoption name NNWeights value \$Bt4",

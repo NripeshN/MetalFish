@@ -41,9 +41,8 @@
 
   float *__nullable _globalSmolgenWeights;
 
-  // Compute precision for the transformer body. FP32 by default; set to
-  // MPSDataTypeFloat16 (via METALFISH_METAL_FP16) to run weights/activations in
-  // half precision. Inputs are fed and outputs decoded as FP32 regardless.
+  // Compute precision for the transformer body. Inputs and decoded outputs
+  // remain FP32 regardless of the configured body precision.
   MPSDataType _computeType;
   // Keeps host-converted FP16 weight buffers alive for the graph's lifetime.
   NSMutableArray<NSData *> *__nullable _retainedWeightData;
@@ -52,11 +51,13 @@
 + (MetalNetworkGraph *_Nullable)getGraphAt:(NSNumber *_Nonnull)index;
 
 + (void)graphWithDevice:(id<MTLDevice> __nonnull)device
-                  index:(NSNumber *_Nonnull)index;
+                  index:(NSNumber *_Nonnull)index
+          halfPrecision:(BOOL)halfPrecision;
 
 + (void)removeGraphAt:(NSNumber *_Nonnull)index;
 
-- (nonnull instancetype)initWithDevice:(id<MTLDevice> __nonnull)device;
+- (nonnull instancetype)initWithDevice:(id<MTLDevice> __nonnull)device
+                         halfPrecision:(BOOL)halfPrecision;
 
 - (nonnull MPSGraphTensor *)
     inputPlaceholderWithInputChannels:(NSUInteger)channels

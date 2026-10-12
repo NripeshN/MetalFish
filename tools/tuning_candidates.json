@@ -1,0 +1,49 @@
+{
+  "description": "Fighting-engine tuning. Game analysis of 1024 Lichess games showed MetalFish draws ~87% of games, almost all from genuinely equal (<=50cp) positions, capping its Elo. MCTSContempt applies a draw-score penalty in the MCTS Q-backup (draw_score = -contempt/10000) so the engine avoids drawish lines and keeps winning chances. Each candidate plays a colour-balanced self-play match against the draw-neutral baseline (MCTSContempt=0). Positive Elo with a lower CI bound above 0 means the setting is a real gain.",
+  "elo0": 0.0,
+  "elo1": 5.0,
+  "candidates": [
+    {
+      "label": "contempt-100",
+      "options": {
+        "MCTSContempt": "100"
+      },
+      "note": "Very mild draw aversion (~3cp penalty on fully-drawn nodes)."
+    },
+    {
+      "label": "contempt-200",
+      "options": {
+        "MCTSContempt": "200"
+      },
+      "note": "Mild draw aversion."
+    },
+    {
+      "label": "contempt-350",
+      "options": {
+        "MCTSContempt": "350"
+      },
+      "note": "Moderate draw aversion; near the historical 'contempt 300' commit."
+    },
+    {
+      "label": "contempt-500",
+      "options": {
+        "MCTSContempt": "500"
+      },
+      "note": "Strong draw aversion (~15cp penalty on fully-drawn nodes)."
+    },
+    {
+      "label": "contempt-750",
+      "options": {
+        "MCTSContempt": "750"
+      },
+      "note": "Aggressive draw aversion; watch for increased losses vs stronger play."
+    },
+    {
+      "label": "contempt-1000",
+      "options": {
+        "MCTSContempt": "1000"
+      },
+      "note": "Maximum-tested draw aversion (~30cp penalty); upper end of the sweep."
+    }
+  ]
+}

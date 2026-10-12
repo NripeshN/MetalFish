@@ -23,8 +23,9 @@ namespace NN {
 namespace Metal {
 
 MetalNetwork::MetalNetwork(const WeightsFile &file, int gpu_id, int max_batch,
-                           int batch)
-    : max_batch_size_(max_batch), batch_size_(batch) {
+                           int batch, bool use_fp16)
+    : max_batch_size_(max_batch), batch_size_(batch),
+      half_precision_(HalfPrecisionEnabled(use_fp16)) {
   const auto descriptor = DescribeNetworkFormat(file);
   wdl_ = descriptor.wdl;
   moves_left_ = descriptor.moves_left;
@@ -36,7 +37,7 @@ MetalNetwork::MetalNetwork(const WeightsFile &file, int gpu_id, int max_batch,
   MultiHeadWeights weights(file.weights());
 
   builder_ = std::make_unique<MetalNetworkBuilder>();
-  device_name_ = builder_->init(gpu_id);
+  device_name_ = builder_->init(gpu_id, half_precision_);
 
   Activations activations;
   activations.default_activation = descriptor.activations.default_activation;
@@ -165,7 +166,7 @@ std::string MetalNetwork::GetNetworkInfo() const {
       << "\n";
   oss << "Value head: " << (wdl_ ? "WDL" : "scalar") << "\n";
   oss << "Moves left: " << (moves_left_ ? "yes" : "no") << "\n";
-  oss << "Precision: " << (HalfPrecisionEnabled() ? "FP16" : "FP32");
+  oss << "Precision: " << (half_precision_ ? "FP16" : "FP32");
   return oss.str();
 }
 

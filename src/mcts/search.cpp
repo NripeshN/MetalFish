@@ -6,6 +6,7 @@
 */
 
 #include "search.h"
+#include "../core/attacks.h"
 #include "../hybrid/shared_tt.h"
 #include "core.h"
 
@@ -31,6 +32,8 @@
 #endif
 
 namespace MetalFish {
+
+using namespace Attacks;
 namespace MCTS {
 
 constexpr size_t kNodeSizeBudget =
@@ -1865,7 +1868,8 @@ void Search::RunIteration(SearchWorkerCtx &ctx) {
   float value = 0.0f, draw = 0.0f, moves_left_val = 30.0f;
 
   if (shared_tt_ && leaf->NumEdges() == 0) {
-    auto tt_result = shared_tt_->Probe(ctx.pos, 8);
+    auto tt_result =
+        shared_tt_->Probe(ctx.pos, params_.shared_tt_depth_threshold);
     if (tt_result.found) {
       {
         std::unique_lock<std::shared_mutex> lock(tree_structure_mutex_);
@@ -2101,7 +2105,8 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx) {
     }
 
     if (shared_tt_ && leaf->NumEdges() == 0) {
-      auto tt_result = shared_tt_->Probe(ctx.pos, 8);
+      auto tt_result =
+          shared_tt_->Probe(ctx.pos, params_.shared_tt_depth_threshold);
       if (tt_result.found) {
         {
           std::unique_lock<std::shared_mutex> lock(tree_structure_mutex_);

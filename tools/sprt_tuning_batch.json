@@ -1,0 +1,201 @@
+{
+  "description": "MetalFish SPRT tuning batch - parameter optimization candidates",
+  "notes": "Run with: python3 tools/sprt_test.py --batch tools/sprt_tuning_batch.json --movetime 1000",
+  "tests": [
+    {
+      "label": "SharedTT enabled (scale 230)",
+      "options": {
+        "HybridMCTSUseSharedTT": "true",
+        "HybridMCTSSharedTTCpScale": "230"
+      },
+      "elo0": 0,
+      "elo1": 10
+    },
+    {
+      "label": "SharedTT scale 180",
+      "options": {
+        "HybridMCTSUseSharedTT": "true",
+        "HybridMCTSSharedTTCpScale": "180"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "SharedTT scale 290",
+      "options": {
+        "HybridMCTSUseSharedTT": "true",
+        "HybridMCTSSharedTTCpScale": "290"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "Contempt 600",
+      "options": {
+        "MCTSContempt": "600"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "Contempt 700",
+      "options": {
+        "MCTSContempt": "700"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "Contempt 400",
+      "options": {
+        "MCTSContempt": "400"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "ABPolicyWeight 0.10",
+      "options": {
+        "HybridABPolicyWeight": "0.10"
+      },
+      "elo0": 0,
+      "elo1": 10
+    },
+    {
+      "label": "ABPolicyWeight 0.15",
+      "options": {
+        "HybridABPolicyWeight": "0.15"
+      },
+      "elo0": 0,
+      "elo1": 10
+    },
+    {
+      "label": "SmartPruning 1.45",
+      "options": {
+        "MCTSSmartPruningFactor": "1.45"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "SmartPruning 1.60",
+      "options": {
+        "MCTSSmartPruningFactor": "1.60"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "RootPolicySoftmaxTemp 1.30",
+      "options": {
+        "MCTSRootPolicySoftmaxTemp": "1.30"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "RootPolicySoftmaxTemp 1.20 (sharper)",
+      "options": {
+        "MCTSRootPolicySoftmaxTemp": "1.20"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "KLD hybrid 0.00002",
+      "options": {
+        "HybridMCTSMinimumKLDGainPerNode": "0.00002"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "CPUCT root 1.90",
+      "options": {
+        "MCTSCPuctAtRoot": "1.90"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "CPUCT root 2.10",
+      "options": {
+        "MCTSCPuctAtRoot": "2.10"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "FPU reduction root 0.10",
+      "options": {
+        "MCTSFpuReductionAtRoot": "0.10"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "TreeReuse initial 0.60",
+      "options": {
+        "MCTSTreeReuseDiscount": "0.60"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "ABCandidateVerifyMs 400",
+      "options": {
+        "HybridABCandidateVerifyMs": "400"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "QToCpScale 250 (closer to SharedTT 230)",
+      "options": {
+        "HybridQToCpScale": "250"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "QToCpScale 350 (inflate MCTS cp)",
+      "options": {
+        "HybridQToCpScale": "350"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "SharedTT depth threshold 6 (more entries)",
+      "options": {
+        "HybridMCTSSharedTTDepthThreshold": "6"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "SharedTT depth threshold 10 (higher quality)",
+      "options": {
+        "HybridMCTSSharedTTDepthThreshold": "10"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "SharedTT depth threshold 12 (deep only)",
+      "options": {
+        "HybridMCTSSharedTTDepthThreshold": "12"
+      },
+      "elo0": -5,
+      "elo1": 5
+    },
+    {
+      "label": "MCTS root reject enabled",
+      "options": {
+        "HybridMCTSRootReject": "true"
+      },
+      "elo0": 0,
+      "elo1": 10
+    }
+  ]
+}

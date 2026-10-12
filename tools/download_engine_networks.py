@@ -15,12 +15,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 NNUE_URLS = {
-    "nn-c288c895ea92.nnue": "https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue",
-    "nn-37f18f62d772.nnue": "https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue",
+    "nn-1a298aa575a0.nnue": "https://tests.stockfishchess.org/api/nn/nn-1a298aa575a0.nnue",
 }
 NNUE_URL_ENV = {
-    "nn-c288c895ea92.nnue": "METALFISH_NNUE_BIG_URL",
-    "nn-37f18f62d772.nnue": "METALFISH_NNUE_SMALL_URL",
+    "nn-1a298aa575a0.nnue": "METALFISH_NNUE_BIG_URL",
 }
 
 BT4_FILENAME = "BT4-1024x15x32h-swa-6147500.pb"

@@ -1,0 +1,667 @@
+{
+  "version": 1,
+  "generated": "2026-10-07",
+  "notes": [
+    "Cells are consumed by tools/paper/run_cell.py (to be written, see 03_codebase_changes.md C7).",
+    "All MetalFish arms use the same frozen binary. Hybrid arms set HybridMCTSThreads/HybridABThreads explicitly so the split is uniform across thread budgets.",
+    "Never use st= (fixed time per move). Threads must be >= 3 for any hybrid arm. Options must be separate option.NAME=VALUE tokens.",
+    "est_hours assume 0.8 min/game at 10+0.1, 1.9 at 30+0.3, 3.7 at 60+0.6, concurrency 1, incl. engine restarts.",
+    "RQ2c (hybrid oversubscription) requires engine option HybridOversubscribe (added 2026-10-12).",
+    "All MetalFish arms get option 'Move Overhead'=defaults.move_overhead_ms (50 ms) unless the cell overrides it; a 12 ms overrun forfeit was observed at 10+0.1 with the 10 ms default."
+  ],
+  "defaults": {
+    "manager": "reference/fastchess/fastchess",
+    "book": "reference/books/unzipped/UHO_Lichess_4852_v1.epd",
+    "book_format": "epd",
+    "book_order": "random",
+    "seed": 20261007,
+    "concurrency": 1,
+    "games_per_round": 2,
+    "repeat": true,
+    "recover": true,
+    "draw": "movenumber=34 movecount=8 score=20",
+    "resign": "movecount=3 score=600 twosided=true",
+    "maxmoves": 200,
+    "hash_mb": 2048,
+    "report": "penta=true",
+    "ratinginterval": 50,
+    "blocks": 4,
+    "move_overhead_ms": 50
+  },
+  "engines": {
+    "AB": {
+      "cmd": "build/metalfish",
+      "options": {
+        "UseHybridSearch": "false",
+        "UseMCTS": "false"
+      }
+    },
+    "Hybrid": {
+      "cmd": "build/metalfish",
+      "options": {
+        "UseHybridSearch": "true",
+        "UseMCTS": "false",
+        "NNWeights": "${REPO}/networks/BT4-1024x15x32h-swa-6147500.pb",
+        "HybridMCTSThreads": "1",
+        "HybridTrace": "true"
+      }
+    },
+    "HybridMin": {
+      "inherits": "Hybrid",
+      "options": {
+        "HybridArbitration": "minimal"
+      }
+    },
+    "MCTS1": {
+      "cmd": "build/metalfish",
+      "options": {
+        "UseHybridSearch": "false",
+        "UseMCTS": "true",
+        "NNWeights": "${REPO}/networks/BT4-1024x15x32h-swa-6147500.pb",
+        "MCTSMaxThreads": "1",
+        "MCTSMinibatchSize": "1",
+        "TransformerLowTimeFallbackMs": "0"
+      }
+    },
+    "SF19": {
+      "cmd": "reference/stockfish-sf19/src/stockfish",
+      "options": {}
+    },
+    "SFdev": {
+      "cmd": "reference/stockfish/src/stockfish",
+      "options": {}
+    },
+    "Lc0mb1": {
+      "cmd": "/opt/homebrew/bin/lc0",
+      "args": [
+        "--backend=metal",
+        "--weights=${REPO}/networks/BT4-1024x15x32h-swa-6147500.pb"
+      ],
+      "options": {
+        "Threads": "1",
+        "MinibatchSize": "1"
+      }
+    },
+    "Lc0def": {
+      "cmd": "/opt/homebrew/bin/lc0",
+      "args": [
+        "--backend=metal",
+        "--weights=${REPO}/networks/BT4-1024x15x32h-swa-6147500.pb"
+      ],
+      "options": {}
+    },
+    "Berserk14": {
+      "cmd": "reference/berserk/src/berserk",
+      "options": {},
+      "note": "rebuild from release 14 before use"
+    },
+    "Patricia51": {
+      "cmd": "reference/Patricia/engine/patricia",
+      "options": {},
+      "note": "rebuild from release 5.1 before use"
+    }
+  },
+  "cells": [
+    {
+      "id": "RQ1a",
+      "rq": "RQ1",
+      "priority": "MUST",
+      "confirmatory": true,
+      "tc": "30+0.3",
+      "pairs": 1000,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 8,
+        "options": {
+          "HybridABThreads": "6"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "est_hours": 63
+    },
+    {
+      "id": "RQ1b",
+      "rq": "RQ1",
+      "priority": "SHOULD",
+      "tc": "60+0.6",
+      "pairs": 500,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 8,
+        "options": {
+          "HybridABThreads": "6"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "est_hours": 62
+    },
+    {
+      "id": "RQ1c",
+      "rq": "RQ1",
+      "priority": "SHOULD",
+      "tc": "10+0.1",
+      "pairs": 1000,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 8,
+        "options": {
+          "HybridABThreads": "6"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "est_hours": 27,
+      "note": "fallback regime; GPU-active fraction is the covariate"
+    },
+    {
+      "id": "RQ1c-on",
+      "rq": "RQ1",
+      "priority": "COULD",
+      "tc": "10+0.1",
+      "pairs": 1000,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 8,
+        "options": {
+          "HybridABThreads": "6",
+          "TransformerMinMoveBudgetMs": "0",
+          "TransformerLowTimeFallbackMs": "0"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "est_hours": 27,
+      "note": "always-on ablation; report time losses"
+    },
+    {
+      "id": "RQ1d",
+      "rq": "RQ1",
+      "priority": "COULD",
+      "tc": "30+0.3",
+      "pairs": 500,
+      "book": "reference/books/8moves_v3.pgn",
+      "book_format": "pgn",
+      "a": {
+        "engine": "Hybrid",
+        "threads": 8,
+        "options": {
+          "HybridABThreads": "6"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "est_hours": 32,
+      "note": "balanced-book control (draw death)"
+    },
+    {
+      "id": "RQ2a",
+      "rq": "RQ2",
+      "priority": "MUST",
+      "tc": "30+0.3",
+      "pairs": 500,
+      "a": {
+        "engine": "AB",
+        "threads": 6
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "est_hours": 32
+    },
+    {
+      "id": "RQ2b",
+      "rq": "RQ2",
+      "priority": "MUST",
+      "tc": "30+0.3",
+      "pairs": 500,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 8,
+        "options": {
+          "HybridABThreads": "6"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 6
+      },
+      "est_hours": 32
+    },
+    {
+      "id": "RQ2c",
+      "rq": "RQ2",
+      "priority": "SHOULD",
+      "tc": "30+0.3",
+      "pairs": 500,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 8,
+        "options": {
+          "HybridOversubscribe": "true"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "est_hours": 32,
+      "note": "oversubscribed hybrid: AB keeps all 8 threads, MCTS worker extra; requires HybridOversubscribe option"
+    },
+    {
+      "id": "RQ3-T4",
+      "rq": "RQ3",
+      "priority": "SHOULD",
+      "tc": "30+0.3",
+      "pairs": 400,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 4,
+        "options": {
+          "HybridABThreads": "2"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 4
+      },
+      "est_hours": 25
+    },
+    {
+      "id": "RQ3-T6",
+      "rq": "RQ3",
+      "priority": "SHOULD",
+      "tc": "30+0.3",
+      "pairs": 400,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 6,
+        "options": {
+          "HybridABThreads": "4"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 6
+      },
+      "est_hours": 25
+    },
+    {
+      "id": "RQ3-T12",
+      "rq": "RQ3",
+      "priority": "COULD",
+      "tc": "30+0.3",
+      "pairs": 400,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 12,
+        "options": {
+          "HybridABThreads": "10"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 12
+      },
+      "est_hours": 25,
+      "note": "includes efficiency cores"
+    },
+    {
+      "id": "RQ4-mb4",
+      "rq": "RQ4",
+      "priority": "SHOULD",
+      "tc": "30+0.3",
+      "pairs": 400,
+      "requires": "C12",
+      "a": {
+        "engine": "Hybrid",
+        "threads": 8,
+        "options": {
+          "HybridABThreads": "6",
+          "MCTSMinibatchSize": "4"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "est_hours": 25
+    },
+    {
+      "id": "RQ4-mb16",
+      "rq": "RQ4",
+      "priority": "SHOULD",
+      "tc": "30+0.3",
+      "pairs": 400,
+      "requires": "C12",
+      "a": {
+        "engine": "Hybrid",
+        "threads": 8,
+        "options": {
+          "HybridABThreads": "6",
+          "MCTSMinibatchSize": "16"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "est_hours": 25
+    },
+    {
+      "id": "RQ4-2w",
+      "rq": "RQ4",
+      "priority": "COULD",
+      "tc": "30+0.3",
+      "pairs": 400,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 8,
+        "options": {
+          "HybridMCTSThreads": "2",
+          "HybridABThreads": "5",
+          "MCTSMaxThreads": "2"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "est_hours": 25
+    },
+    {
+      "id": "RQ5a",
+      "rq": "RQ5",
+      "priority": "SHOULD",
+      "tc": "30+0.3",
+      "pairs": 300,
+      "a": {
+        "engine": "MCTS1",
+        "threads": 1
+      },
+      "b": {
+        "engine": "Lc0mb1",
+        "threads": 1
+      },
+      "est_hours": 19
+    },
+    {
+      "id": "RQ5b",
+      "rq": "RQ5",
+      "priority": "COULD",
+      "tc": "30+0.3",
+      "pairs": 300,
+      "a": {
+        "engine": "MCTS1",
+        "threads": 1
+      },
+      "b": {
+        "engine": "Lc0def",
+        "threads": null
+      },
+      "est_hours": 19
+    },
+    {
+      "id": "RQ5c",
+      "rq": "RQ5",
+      "priority": "MUST",
+      "tc": "30+0.3",
+      "pairs": 500,
+      "a": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "b": {
+        "engine": "SF19",
+        "threads": 8
+      },
+      "est_hours": 32
+    },
+    {
+      "id": "RQ5d",
+      "rq": "RQ5",
+      "priority": "SHOULD",
+      "tc": "30+0.3",
+      "pairs": 300,
+      "a": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "b": {
+        "engine": "SFdev",
+        "threads": 8
+      },
+      "est_hours": 19
+    },
+    {
+      "id": "RQ6c",
+      "rq": "RQ6",
+      "priority": "SHOULD",
+      "tc": "30+0.3",
+      "pairs": 500,
+      "requires": "C11",
+      "a": {
+        "engine": "HybridMin",
+        "threads": 8,
+        "options": {
+          "HybridABThreads": "6"
+        }
+      },
+      "b": {
+        "engine": "Hybrid",
+        "threads": 8,
+        "options": {
+          "HybridABThreads": "6"
+        }
+      },
+      "est_hours": 32
+    },
+    {
+      "id": "RQ6d",
+      "rq": "RQ6",
+      "priority": "COULD",
+      "tc": "30+0.3",
+      "pairs": 500,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 8,
+        "options": {
+          "HybridABThreads": "6",
+          "HybridMCTSABRootHints": "false",
+          "HybridABCandidateVerifyMs": "0"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "est_hours": 32
+    },
+    {
+      "id": "RQ8",
+      "rq": "RQ8",
+      "priority": "SHOULD",
+      "tc": "30+0.3",
+      "pairs": 100,
+      "type": "gauntlet",
+      "metalfish": [
+        {
+          "engine": "AB",
+          "threads": 8
+        },
+        {
+          "engine": "Hybrid",
+          "threads": 8,
+          "options": {
+            "HybridABThreads": "6"
+          }
+        },
+        {
+          "engine": "MCTS1",
+          "threads": 1
+        }
+      ],
+      "opponents": [
+        {
+          "engine": "SF19",
+          "threads": 8
+        },
+        {
+          "engine": "Lc0def",
+          "threads": null
+        },
+        {
+          "engine": "Berserk14",
+          "threads": 8
+        }
+      ],
+      "rating": "ordo -a 0 -A \"SF19\" -s 1000",
+      "est_hours": 57
+    }
+  ],
+  "non_game_tasks": [
+    {
+      "id": "RQ6b",
+      "priority": "MUST",
+      "type": "oracle",
+      "positions": 600,
+      "source_cells": [
+        "RQ1a",
+        "RQ1b"
+      ],
+      "judges": [
+        {
+          "engine": "SF19",
+          "threads": 8,
+          "movetime_ms": 60000,
+          "multipv": 2,
+          "syzygy": "syzygy/"
+        },
+        {
+          "engine": "Lc0def",
+          "nodes": 30000
+        }
+      ],
+      "est_hours": 20
+    },
+    {
+      "id": "RQ7",
+      "priority": "SHOULD",
+      "type": "suites",
+      "engines": [
+        {
+          "engine": "AB",
+          "threads": 8
+        },
+        {
+          "engine": "Hybrid",
+          "threads": 8,
+          "options": {
+            "HybridABThreads": "6",
+            "TransformerLowTimeFallbackMs": "0",
+            "TransformerMinMoveBudgetMs": "0"
+          }
+        },
+        {
+          "engine": "MCTS1",
+          "threads": 1
+        },
+        {
+          "engine": "SF19",
+          "threads": 8
+        },
+        {
+          "engine": "Lc0def",
+          "threads": null
+        }
+      ],
+      "suites": [
+        {
+          "name": "STS_v3",
+          "file": "reference/testsuites/STS-Rating/STS1-STS15_LAN_v3.epd",
+          "movetime_ms": 2000
+        },
+        {
+          "name": "ERET",
+          "file": "reference/testsuites/eret/eret.epd",
+          "movetime_ms": 15000
+        },
+        {
+          "name": "Arasan2023",
+          "file": "reference/testsuites/arasan/arasan2023.epd",
+          "movetime_ms": 30000
+        },
+        {
+          "name": "WAC",
+          "file": "reference/testsuites/arasan/wacnew.epd",
+          "movetime_ms": 1000
+        },
+        {
+          "name": "LichessPuzzles",
+          "file": "reference/lichess_puzzles/lichess_db_puzzle.csv",
+          "sample": 1000,
+          "seeds": [
+            1,
+            2,
+            3
+          ],
+          "rating_range": [
+            1200,
+            2800
+          ],
+          "min_popularity": 70,
+          "movetime_ms": 1000
+        }
+      ],
+      "est_hours": 28
+    },
+    {
+      "id": "M1",
+      "priority": "MUST",
+      "type": "microbench",
+      "tool": "tools/paper/nn_latency_sweep.py",
+      "batches": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64
+      ],
+      "precisions": [
+        "fp16",
+        "fp32"
+      ],
+      "est_hours": 1
+    },
+    {
+      "id": "M2",
+      "priority": "MUST",
+      "type": "microbench",
+      "tool": "tools/paper/ab_scaling.py",
+      "threads": [
+        1,
+        2,
+        4,
+        6,
+        8,
+        12
+      ],
+      "repeats": 5,
+      "est_hours": 2
+    }
+  ]
+}

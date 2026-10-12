@@ -223,11 +223,10 @@ if ($BuildTests -eq "ON") {
 }
 
 $NetworksDir = Join-Path $SourceDir "networks"
-$NnueBigPath = Join-Path $NetworksDir "nn-c288c895ea92.nnue"
-$NnueSmallPath = Join-Path $NetworksDir "nn-37f18f62d772.nnue"
+$NnueBigPath = Join-Path $NetworksDir "nn-1a298aa575a0.nnue"
 $Bt4Path = Join-Path $NetworksDir "BT4-1024x15x32h-swa-6147500.pb"
 $LegacyPath = Join-Path $NetworksDir "legacy-42850.pb.gz"
-if (-not ((Test-Path $NnueBigPath) -and (Test-Path $NnueSmallPath))) {
+if (-not (Test-Path $NnueBigPath)) {
   Write-Host "Downloading NNUE files for CUDA-linked AB UCI smoke"
   & $Python (Join-Path $SourceDir "tools\download_engine_networks.py") `
     --dest $NetworksDir `
@@ -315,7 +314,6 @@ Write-Host "Running CUDA-linked AB UCI smoke"
   --engine $EnginePath `
   --timeout 45 `
   --setoption "EvalFile=$NnueBigPath" `
-  --setoption "EvalFileSmall=$NnueSmallPath" `
   --setoption "UseMCTS=false" `
   --setoption "UseHybridSearch=false" `
   --setoption "Threads=1" `
@@ -472,7 +470,6 @@ try {
     --engine $PackagedEngine `
     --timeout 45 `
     --setoption "EvalFile=$NnueBigPath" `
-    --setoption "EvalFileSmall=$NnueSmallPath" `
     --setoption "UseMCTS=false" `
     --setoption "UseHybridSearch=false" `
     --setoption "Threads=1" `
