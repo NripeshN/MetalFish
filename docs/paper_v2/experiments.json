@@ -5,7 +5,8 @@
     "Cells are consumed by tools/paper/run_cell.py (to be written, see 03_codebase_changes.md C7).",
     "All MetalFish arms use the same frozen binary. Hybrid arms set HybridMCTSThreads/HybridABThreads explicitly so the split is uniform across thread budgets.",
     "Never use st= (fixed time per move). Threads must be >= 3 for any hybrid arm. Options must be separate option.NAME=VALUE tokens.",
-    "est_hours assume 0.8 min/game at 10+0.1, 1.9 at 30+0.3, 3.7 at 60+0.6, concurrency 1, incl. engine restarts."
+    "est_hours assume 0.8 min/game at 10+0.1, 1.9 at 30+0.3, 3.7 at 60+0.6, concurrency 1, incl. engine restarts.",
+    "RQ2c (hybrid oversubscription) requires engine option HybridOversubscribe (added 2026-10-12)."
   ],
   "defaults": {
     "manager": "reference/fastchess/fastchess",
@@ -236,6 +237,26 @@
         "threads": 6
       },
       "est_hours": 32
+    },
+    {
+      "id": "RQ2c",
+      "rq": "RQ2",
+      "priority": "SHOULD",
+      "tc": "30+0.3",
+      "pairs": 500,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 8,
+        "options": {
+          "HybridOversubscribe": "true"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 8
+      },
+      "est_hours": 32,
+      "note": "oversubscribed hybrid: AB keeps all 8 threads, MCTS worker extra; requires HybridOversubscribe option"
     },
     {
       "id": "RQ3-T4",

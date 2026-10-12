@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- New `HybridOversubscribe` option (default off): alpha-beta keeps the full
+  `Threads` budget in hybrid mode and the MCTS worker runs as an extra thread.
+  Off by default pending game validation.
 - Alpha-beta core rebased from Stockfish dev-20260106 (c27c1747) onto
   Stockfish 19 (`sf_19`, edb0d9db): SFNNv16 network with pawn-pair features
   (`nn-1a298aa575a0.nnue`), the small net is gone, and `bench` reproduces the

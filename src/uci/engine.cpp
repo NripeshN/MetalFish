@@ -154,6 +154,9 @@ Engine::Engine(std::optional<std::filesystem::path> path)
   options.add("HybridMCTSThreads", Option(0, 0, MaxThreads));
   options.add("HybridABThreads", Option(0, 0, MaxThreads));
   options.add("HybridAutoABThreadsCap", Option(0, 0, MaxThreads));
+  // true = alpha-beta keeps the full Threads budget and the MCTS worker runs as
+  // an extra thread (it mostly waits on GPU inference).
+  options.add("HybridOversubscribe", Option(false));
   options.add("HybridABPolicyWeight", Option("0.0"));
   options.add("HybridMCTSMinimumKLDGainPerNode", Option("0.0"));
   options.add("HybridABRootRejectMCTS", Option(true));

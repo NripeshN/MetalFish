@@ -1182,6 +1182,8 @@ compute_hybrid_thread_split(Engine &engine,
       static_cast<int>(engine.get_options()["HybridABThreads"]);
   const int auto_ab_cap =
       static_cast<int>(engine.get_options()["HybridAutoABThreadsCap"]);
+  const bool oversubscribe =
+      static_cast<bool>(engine.get_options()["HybridOversubscribe"]);
   // UCI Threads should describe search workers. The hybrid coordinator is a
   // lightweight sleeping monitor, so keep it outside the AB+MCTS worker budget
   // instead of stealing a core from the engines on Apple Silicon.
@@ -1196,6 +1198,10 @@ compute_hybrid_thread_split(Engine &engine,
   int ab_threads = 0;
   if (ab_override > 0) {
     ab_threads = std::clamp(ab_override, 1, available);
+  } else if (oversubscribe) {
+    // Alpha-beta keeps the whole UCI thread budget; the MCTS worker is an
+    // extra thread that spends most of its time blocked on GPU inference.
+    ab_threads = available;
   } else {
     if (is_fixed_budget_hybrid_search(limits)) {
       ab_threads = std::max(1, available - mcts_threads);
@@ -1208,7 +1214,7 @@ compute_hybrid_thread_split(Engine &engine,
     }
   }
 
-  while (mcts_threads + ab_threads > available) {
+  while (!oversubscribe && mcts_threads + ab_threads > available) {
     if (ab_threads > 1)
       --ab_threads;
     else if (mcts_threads > 1)
