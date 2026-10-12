@@ -238,7 +238,7 @@ def fmt(stats: Dict) -> str:
         f"Wins: {stats['wins']}, Losses: {stats['losses']}, Draws: {stats['draws']}, Points: {stats['score']*stats['games']:.1f} ({100*stats['score']:.2f} %)\n"
         f"Ptnml(0-2): {stats['ptnml_0_2']}, WL/DD Ratio: {stats['wl_dd_ratio']:.2f}\n"
         f"Trinomial Elo +/- {stats['trinomial']['elo_pm']:.2f} (pentanomial/trinomial variance ratio "
-        f"{stats['variance_ratio_penta_over_tri']:.2f}); terminations: {stats['terminations']}"
+        f"{(stats['variance_ratio_penta_over_tri'] or float('nan')):.2f}); terminations: {stats['terminations']}"
     )
 
 

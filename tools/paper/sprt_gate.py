@@ -145,6 +145,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     (out / "fastchess_cmd.txt").write_text(shlex.join(cmd) + "\n")
     if args.dry_run:
         return 0
+    for label, exe, eargs, opts in (
+        ("cand", cand, args.cand_arg, cand_opts),
+        ("base", base, args.base_arg, base_opts),
+    ):
+        err = run_cell.preflight(exe, eargs, opts)
+        if err:
+            print(f"ABORT: {label} failed preflight: {err}", file=sys.stderr)
+            return 3
     manifest = {
         "name": args.name,
         "started": dt.datetime.now().astimezone().isoformat(),

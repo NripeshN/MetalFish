@@ -78,6 +78,58 @@ def uci_id(cmd: str, args: List[str]) -> str:
     return "<unknown>"
 
 
+def preflight(
+    cmd: str, args: List[str], options: Dict[str, str], timeout: int = 180
+) -> str:
+    """Start the engine, apply options, search depth 6, and require a bestmove. Returns '' on
+    success or the error text. Prevents matches where one side silently disconnects."""
+    script = (
+        "uci\n"
+        + "".join(f"setoption name {k} value {v}\n" for k, v in options.items())
+        + "isready\nposition startpos\ngo depth 6\n"
+    )
+    try:
+        p = subprocess.Popen(
+            [cmd, *args],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        p.stdin.write(script)
+        p.stdin.flush()
+        import select
+
+        out, deadline, got = [], time.time() + timeout, False
+        while time.time() < deadline:
+            r, _, _ = select.select([p.stdout], [], [], 1.0)
+            if not r:
+                if p.poll() is not None:
+                    break
+                continue
+            line = p.stdout.readline()
+            if not line:
+                break
+            out.append(line)
+            if line.startswith("bestmove"):
+                got = True
+                break
+        try:
+            p.stdin.write("quit\n")
+            p.stdin.flush()
+        except Exception:  # noqa: BLE001
+            pass
+        p.wait(timeout=10)
+    except Exception as exc:  # noqa: BLE001
+        return f"preflight failed to run {cmd}: {exc}"
+    errors = [l.strip() for l in out if "ERROR" in l or "error" in l.lower()]
+    if not got:
+        return f"preflight: no bestmove from {cmd} (options {options}); output tail: {''.join(out[-6:])}"
+    if errors:
+        return f"preflight: engine reported errors: {errors[:3]}"
+    return ""
+
+
 def resolve_engine(engines: Dict, name: str) -> Dict:
     e = dict(engines[name])
     if "inherits" in e:
@@ -335,6 +387,21 @@ def main(argv: Optional[List[str]] = None) -> int:
             fh.write(f"# block {b}\n{shlex.join(cmd)}\n")
         if args.dry_run:
             continue
+        for key in ("a", "b"):
+            spec = resolve_engine(engines, cell[key]["engine"])
+            exe = subst(spec["cmd"])
+            exe = exe if os.path.isabs(exe) else str(REPO / exe)
+            opts = {**spec.get("options", {}), **cell[key].get("options", {})}
+            if cell[key].get("threads") is not None:
+                opts["Threads"] = str(cell[key]["threads"])
+            err = preflight(
+                exe,
+                [subst(a) for a in spec.get("args", [])],
+                {k: subst(str(v)) for k, v in opts.items()},
+            )
+            if err:
+                print(f"ABORT: arm {key} failed preflight: {err}", file=sys.stderr)
+                return 3
         write_manifest(cell, defaults, engines, out, cmd, pairs, b, args.tag)
         therm = start_thermal_logger(out)
         t0 = time.time()

@@ -94,6 +94,9 @@ jobs:
           python3 tools/download_engine_networks.py
           mkdir -p ../baseline/networks
           rsync -a networks/ ../baseline/networks/
+          # The baseline may embed a different NNUE set than the candidate
+          # (e.g. after a Stockfish rebase); fetch whatever its own manifest lists.
+          (cd ../baseline && python3 tools/download_engine_networks.py)
 
       - name: Patch baseline for Apple Clang 21+ dotprod compatibility
         run: |
