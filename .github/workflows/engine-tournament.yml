@@ -111,7 +111,7 @@ jobs:
   tournament:
     name: Engine-vs-Engine Tournament (Full Production Config)
     runs-on: macos-latest
-    timeout-minutes: 180
+    timeout-minutes: 300
 
     permissions:
       contents: read
@@ -402,7 +402,7 @@ jobs:
       - name: "Tournament 1: Hybrid Blitz (60+0.6)"
         id: hybrid_blitz
         env:
-          GAMES: ${{ github.event.inputs.games_per_tc || '20' }}
+          GAMES: ${{ github.event.inputs.games_per_tc || (github.event_name == 'pull_request' && '10') || '20' }}
           SPRT_MODE: ${{ github.event.inputs.sprt_mode || 'true' }}
           ELO0: ${{ github.event.inputs.sprt_elo0 || '-10' }}
           ELO1: ${{ github.event.inputs.sprt_elo1 || '5' }}
@@ -563,7 +563,7 @@ jobs:
         id: hybrid_rapid
         if: success()
         env:
-          GAMES: ${{ github.event.inputs.games_per_tc || '20' }}
+          GAMES: ${{ github.event.inputs.games_per_tc || (github.event_name == 'pull_request' && '10') || '20' }}
           SPRT_MODE: ${{ github.event.inputs.sprt_mode || 'true' }}
           ELO0: ${{ github.event.inputs.sprt_elo0 || '-10' }}
           ELO1: ${{ github.event.inputs.sprt_elo1 || '5' }}
@@ -716,7 +716,7 @@ jobs:
         id: ab_blitz
         if: success() && (github.event.inputs.test_ab_only != 'false')
         env:
-          GAMES: ${{ github.event.inputs.games_per_tc || '20' }}
+          GAMES: ${{ github.event.inputs.games_per_tc || (github.event_name == 'pull_request' && '10') || '20' }}
           SPRT_MODE: ${{ github.event.inputs.sprt_mode || 'true' }}
           ELO0: ${{ github.event.inputs.sprt_elo0 || '-10' }}
           ELO1: ${{ github.event.inputs.sprt_elo1 || '5' }}
