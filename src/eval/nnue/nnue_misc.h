@@ -8,10 +8,12 @@
 #ifndef NNUE_MISC_H_INCLUDED
 #define NNUE_MISC_H_INCLUDED
 
-#include <cstddef>
-#include <memory>
+#include <filesystem>
+#include <optional>
 #include <string>
+#include <string_view>
 
+#include "../evaluate.h"
 #include "core/misc.h"
 #include "core/types.h"
 #include "nnue_architecture.h"
@@ -22,15 +24,16 @@ class Position;
 
 namespace Eval::NNUE {
 
-// EvalFile uses fixed string types because it's part of the network structure
-// which must be trivial.
+// NNUE file metadata uses fixed string types so it stays trivially copyable and
+// cheap to move around between the engine and the network loader.
 struct EvalFile {
-  // Default net name
-  FixedString<256> defaultName;
+  // Default net name, will use one of the EvalFileDefaultName* macros defined
+  // in evaluate.h
+  constexpr static std::string_view defaultName = EvalFileDefaultName;
   // Selected net name, either via uci option or default
-  FixedString<256> current;
+  std::optional<std::filesystem::path> current;
   // Net description extracted from the net file
-  FixedString<256> netDescription;
+  std::string netDescription;
 };
 
 struct NnueEvalTrace {
@@ -38,27 +41,16 @@ struct NnueEvalTrace {
 
   Value psqt[LayerStacks];
   Value positional[LayerStacks];
-  std::size_t correctBucket;
+  usize correctBucket;
 };
 
-struct Networks;
+class Network;
 struct AccumulatorCaches;
 
-std::string trace(Position &pos, const Networks &networks,
+std::string trace(Position &pos, const Network &network,
                   AccumulatorCaches &caches);
 
 } // namespace Eval::NNUE
 } // namespace MetalFish
-
-template <> struct std::hash<MetalFish::Eval::NNUE::EvalFile> {
-  std::size_t
-  operator()(const MetalFish::Eval::NNUE::EvalFile &evalFile) const noexcept {
-    std::size_t h = 0;
-    MetalFish::hash_combine(h, evalFile.defaultName);
-    MetalFish::hash_combine(h, evalFile.current);
-    MetalFish::hash_combine(h, evalFile.netDescription);
-    return h;
-  }
-};
 
 #endif // #ifndef NNUE_MISC_H_INCLUDED

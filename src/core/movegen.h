@@ -9,8 +9,8 @@
 #define MOVEGEN_H_INCLUDED
 
 #include <algorithm> // IWYU pragma: keep
-#include <cstddef>
 
+#include "core/misc.h"
 #include "core/types.h"
 
 namespace MetalFish {
@@ -43,7 +43,7 @@ template <GenType T> struct MoveList {
   explicit MoveList(const Position &pos) : last(generate<T>(pos, moveList)) {}
   const Move *begin() const { return moveList; }
   const Move *end() const { return last; }
-  size_t size() const { return last - moveList; }
+  usize size() const { return last - moveList; }
   bool contains(Move move) const {
     return std::find(begin(), end(), move) != end();
   }

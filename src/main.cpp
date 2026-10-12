@@ -8,12 +8,13 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <utility>
 
 #ifdef __APPLE__
 #include <pthread/qos.h>
 #endif
 
-#include "core/bitboard.h"
+#include "core/attacks.h"
 #include "core/misc.h"
 #include "core/position.h"
 #include "eval/gpu_backend.h"
@@ -48,7 +49,7 @@ int main(int argc, char *argv[]) {
   pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
 #endif
 
-  Bitboards::init();
+  Attacks::init();
   Position::init();
 
   // Register cleanup function with atexit
@@ -57,7 +58,8 @@ int main(int argc, char *argv[]) {
 
   {
     // Scope the UCIEngine to ensure it's destroyed before GPU cleanup
-    auto uci = std::make_unique<UCIEngine>(argc, argv);
+    auto cli = CommandLine(argc, argv);
+    auto uci = std::make_unique<UCIEngine>(std::move(cli));
 
     uci->loop();
 

@@ -6,6 +6,7 @@
 */
 
 #include "search.h"
+#include "../core/attacks.h"
 #include "../hybrid/shared_tt.h"
 #include "core.h"
 
@@ -31,6 +32,8 @@
 #endif
 
 namespace MetalFish {
+
+using namespace Attacks;
 namespace MCTS {
 
 constexpr size_t kNodeSizeBudget =

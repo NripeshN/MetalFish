@@ -5,6 +5,7 @@
   Search Tests - History Tables, Limits, Time Management, Values
 */
 
+#include "core/attacks.h"
 #include "core/bitboard.h"
 #include "core/movegen.h"
 #include "core/position.h"
@@ -298,7 +299,7 @@ void test_values() {
 bool test_search_module() {
   std::cout << "\n=== Search Tests ===" << std::endl;
 
-  Bitboards::init();
+  Attacks::init();
   Position::init();
 
   g_tests_passed = 0;

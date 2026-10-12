@@ -8,14 +8,14 @@
 #ifndef TIMEMAN_H_INCLUDED
 #define TIMEMAN_H_INCLUDED
 
-#include <cstdint>
+#include <limits>
 
 #include "core/misc.h"
 
 namespace MetalFish {
 
 class OptionsMap;
-enum Color : int8_t;
+enum Color : u8;
 
 namespace Search {
 struct LimitsType;
@@ -36,15 +36,18 @@ public:
   TimePoint elapsed_time() const { return now() - startTime; };
 
   void clear();
-  void advance_nodes_time(std::int64_t nodes);
+  void advance_nodes_time(i64 nodes);
 
 private:
-  TimePoint startTime;
-  TimePoint optimumTime;
-  TimePoint maximumTime;
+  static constexpr TimePoint NoBound =
+      std::numeric_limits<TimePoint>::max() / 2;
 
-  std::int64_t availableNodes = -1;
-  bool useNodesTime = false;
+  TimePoint startTime;
+  TimePoint optimumTime = NoBound;
+  TimePoint maximumTime = NoBound;
+
+  i64 availableNodes = -1;   // When in 'nodes as time' mode
+  bool useNodesTime = false; // True if we are in 'nodes as time' mode
 };
 
 } // namespace MetalFish

@@ -14,8 +14,11 @@
 #include <iosfwd>
 #include <memory>
 #include <new>
+#include <optional>
+#include <stdexcept>
 #include <string>
 
+#include "core/attacks.h"
 #include "core/bitboard.h"
 #include "core/types.h"
 
@@ -58,6 +61,13 @@ struct StateInfo {
 // elements are not invalidated upon list resizing.
 using StateListPtr = std::unique_ptr<std::deque<StateInfo>>;
 
+// This error should be used whenever a position is suspected to be unsupported
+// by the engine. In particular positions that may cause hard errors like
+// segmentation fault.
+struct PositionSetError : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
 // Position class stores information regarding the board representation as
 // pieces, side to move, hash keys, castling info, etc. Important methods are
 // do_move() and undo_move(), used by the search to update node info when
@@ -70,12 +80,16 @@ public:
   Position(const Position &) = delete;
   Position &operator=(const Position &) = delete;
 
-  Position &set(const std::string &fenStr, bool isChess960, StateInfo *si);
-  Position &set(const std::string &code, Color c, StateInfo *si);
+  // FEN string input/output
+  std::optional<PositionSetError> set(const std::string &fenStr,
+                                      bool isChess960, StateInfo *si);
+  std::optional<PositionSetError> set(const std::string &code, Color c,
+                                      StateInfo *si);
   void copy_from(const Position &src, StateInfo *si);
   std::string fen() const;
 
-  Bitboard pieces() const;
+  // Position representation
+  Bitboard pieces() const; // All pieces
   template <typename... PieceTypes> Bitboard pieces(PieceTypes... pts) const;
   Bitboard pieces(Color c) const;
   template <typename... PieceTypes>
@@ -88,21 +102,25 @@ public:
   template <PieceType Pt> int count() const;
   template <PieceType Pt> Square square(Color c) const;
 
+  // Castling
   bool can_castle(CastlingRights cr) const;
   bool castling_impeded(CastlingRights cr) const;
   Square castling_rook_square(CastlingRights cr) const;
 
+  // Checking
   Bitboard checkers() const;
   Bitboard blockers_for_king(Color c) const;
   Bitboard check_squares(PieceType pt) const;
   Bitboard pinners(Color c) const;
 
+  // Attacks to/from a given square
   Bitboard attackers_to(Square s) const;
   Bitboard attackers_to(Square s, Bitboard occupied) const;
   bool attackers_to_exist(Square s, Bitboard occupied, Color c) const;
   void update_slider_blockers(Color c) const;
   template <PieceType Pt> Bitboard attacks_by(Color c) const;
 
+  // Properties of moves
   bool legal(Move m) const;
   bool pseudo_legal(const Move m) const;
   bool capture(Move m) const;
@@ -111,23 +129,27 @@ public:
   Piece moved_piece(Move m) const;
   Piece captured_piece() const;
 
+  // Doing and undoing moves
   void do_move(Move m, StateInfo &newSt, const TranspositionTable *tt);
-  void do_move(Move m, StateInfo &newSt, bool givesCheck, DirtyPiece &dp,
-               DirtyThreats &dts, const TranspositionTable *tt,
-               const SharedHistories *worker);
+  void do_move(Move m, StateInfo &newSt, bool givesCheck, Dirties &dirties,
+               const TranspositionTable *tt, const SharedHistories *worker);
   void undo_move(Move m);
-  void do_null_move(StateInfo &newSt, const TranspositionTable &tt);
+  void do_null_move(StateInfo &newSt);
   void undo_null_move();
 
+  // Static Exchange Evaluation
   bool see_ge(Move m, int threshold = 0) const;
 
+  // Accessing hash keys
   Key key() const;
   Key raw_key() const;
+  Key prefetch_key(Move m) const;
   Key material_key() const;
   Key pawn_key() const;
   Key minor_piece_key() const;
   Key non_pawn_key(Color c) const;
 
+  // Other properties of the position
   Color side_to_move() const;
   int game_ply() const;
   bool is_chess960() const;
@@ -135,14 +157,16 @@ public:
   bool is_repetition(int ply) const;
   bool upcoming_repetition(int ply) const;
   bool has_repeated() const;
-  int repetition_distance() const;
   int rule50_count() const;
+  int repetition_distance() const;
   Value non_pawn_material(Color c) const;
   Value non_pawn_material() const;
+  bool dtz_is_dtm() const; // Pawnless && (3-men || 4-men-minors-only)
 
+  // Position consistency check, for debugging
   bool pos_is_ok() const;
   bool material_key_is_ok() const;
-  void flip();
+  std::optional<PositionSetError> flip();
 
   StateInfo *state() const;
 
@@ -151,21 +175,25 @@ public:
   void swap_piece(Square s, Piece pc, DirtyThreats *const dts = nullptr);
 
 private:
+  // Initialization helpers (used while setting up a position)
   void set_castling_right(Color c, Square rfrom);
   Key compute_material_key() const;
   void set_state() const;
   void set_check_info() const;
 
-  template <bool PutPiece, bool ComputeRay = true>
-  void update_piece_threats(Piece pc, Square s, DirtyThreats *const dts,
+  // Other helpers
+  template <bool ComputeRay = true>
+  void update_piece_threats(Piece pc, bool putPiece, Square s,
+                            DirtyThreats *const dts,
                             Bitboard noRaysContaining = -1ULL) const;
   void move_piece(Square from, Square to, DirtyThreats *const dts = nullptr);
   template <bool Do>
   void do_castling(Color us, Square from, Square &to, Square &rfrom,
                    Square &rto, DirtyThreats *const dts = nullptr,
                    DirtyPiece *const dp = nullptr);
-  Key adjust_key50(Key k) const;
+  template <bool AfterMove = false> Key adjust_key50(Key k) const;
 
+  // Data members
   std::array<Piece, SQUARE_NB> board;
   std::array<Bitboard, PIECE_TYPE_NB> byTypeBB;
   std::array<Bitboard, COLOR_NB> byColorBB;
@@ -178,8 +206,7 @@ private:
   int gamePly;
   Color sideToMove;
   bool chess960;
-  DirtyPiece scratch_dp;
-  DirtyThreats scratch_dts;
+  Dirties scratchDirties;
 };
 
 std::ostream &operator<<(std::ostream &os, const Position &pos);
@@ -259,7 +286,7 @@ template <PieceType Pt> inline Bitboard Position::attacks_by(Color c) const {
     Bitboard threats = 0;
     Bitboard attackers = pieces(c, Pt);
     while (attackers)
-      threats |= attacks_bb<Pt>(pop_lsb(attackers), pieces());
+      threats |= Attacks::attacks_bb<Pt>(pop_lsb(attackers), pieces());
     return threats;
   }
 }
@@ -280,8 +307,10 @@ inline Key Position::key() const { return adjust_key50(st->key); }
 
 inline Key Position::raw_key() const { return st->key; }
 
-inline Key Position::adjust_key50(Key k) const {
-  return st->rule50 < 14 ? k : k ^ make_key((st->rule50 - 14) / 8);
+template <bool AfterMove> inline Key Position::adjust_key50(Key k) const {
+  return st->rule50 < 14 - AfterMove
+             ? k
+             : k ^ make_key((st->rule50 - (14 - AfterMove)) / 8);
 }
 
 inline Key Position::pawn_key() const { return st->pawnKey; }
@@ -308,10 +337,20 @@ inline int Position::repetition_distance() const { return st->repetition; }
 
 inline bool Position::is_chess960() const { return chess960; }
 
+inline bool Position::dtz_is_dtm() const {
+  return !count<PAWN>() && (count<ALL_PIECES>() == 3 ||
+                            (count<ALL_PIECES>() == 4 && !pieces(QUEEN, ROOK)));
+}
+
 inline bool Position::capture(Move m) const {
   assert(m.is_ok());
-  return (!empty(m.to_sq()) && m.type_of() != CASTLING) ||
-         m.type_of() == EN_PASSANT;
+
+  const MoveType mt = m.type_of();
+
+  if (mt == NORMAL || mt == PROMOTION)
+    return !empty(m.to_sq());
+
+  return mt == EN_PASSANT;
 }
 
 // Returns true if a move is generated from the capture stage, having also
@@ -319,7 +358,16 @@ inline bool Position::capture(Move m) const {
 // generation is needed to avoid the generation of duplicate moves.
 inline bool Position::capture_stage(Move m) const {
   assert(m.is_ok());
-  return capture(m) || m.promotion_type() == QUEEN;
+
+  const MoveType mt = m.type_of();
+
+  if (mt == NORMAL)
+    return !empty(m.to_sq());
+
+  if (mt == PROMOTION)
+    return !empty(m.to_sq()) || m.promotion_type() == QUEEN;
+
+  return mt == EN_PASSANT;
 }
 
 inline Piece Position::captured_piece() const { return st->capturedPiece; }
@@ -332,14 +380,14 @@ inline void Position::put_piece(Piece pc, Square s, DirtyThreats *const dts) {
   pieceCount[make_piece(color_of(pc), ALL_PIECES)]++;
 
   if (dts)
-    update_piece_threats<true>(pc, s, dts);
+    update_piece_threats(pc, true, s, dts);
 }
 
 inline void Position::remove_piece(Square s, DirtyThreats *const dts) {
   Piece pc = board[s];
 
   if (dts)
-    update_piece_threats<false>(pc, s, dts);
+    update_piece_threats(pc, false, s, dts);
 
   byTypeBB[ALL_PIECES] ^= s;
   byTypeBB[type_of(pc)] ^= s;
@@ -355,7 +403,7 @@ inline void Position::move_piece(Square from, Square to,
   Bitboard fromTo = from | to;
 
   if (dts)
-    update_piece_threats<false>(pc, from, dts, fromTo);
+    update_piece_threats(pc, false, from, dts, fromTo);
 
   byTypeBB[ALL_PIECES] ^= fromTo;
   byTypeBB[type_of(pc)] ^= fromTo;
@@ -364,7 +412,7 @@ inline void Position::move_piece(Square from, Square to,
   board[to] = pc;
 
   if (dts)
-    update_piece_threats<true>(pc, to, dts, fromTo);
+    update_piece_threats(pc, true, to, dts, fromTo);
 }
 
 inline void Position::swap_piece(Square s, Piece pc, DirtyThreats *const dts) {
@@ -373,18 +421,19 @@ inline void Position::swap_piece(Square s, Piece pc, DirtyThreats *const dts) {
   remove_piece(s);
 
   if (dts)
-    update_piece_threats<false, false>(old, s, dts);
+    update_piece_threats<false>(old, false, s, dts);
 
   put_piece(pc, s);
 
   if (dts)
-    update_piece_threats<true, false>(pc, s, dts);
+    update_piece_threats<false>(pc, true, s, dts);
 }
 
 inline void Position::do_move(Move m, StateInfo &newSt,
                               const TranspositionTable *tt = nullptr) {
-  new (&scratch_dts) DirtyThreats;
-  do_move(m, newSt, gives_check(m), scratch_dp, scratch_dts, tt, nullptr);
+  new (&scratchDirties.dirtyThreats) DirtyThreats;
+  new (&scratchDirties.dirtyPawnPairs) DirtyPawnPairs;
+  do_move(m, newSt, gives_check(m), scratchDirties, tt, nullptr);
 }
 
 inline StateInfo *Position::state() const { return st; }

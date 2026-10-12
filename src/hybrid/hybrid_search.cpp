@@ -6,6 +6,7 @@
 */
 
 #include "hybrid_search.h"
+#include "../core/attacks.h"
 #include "../core/misc.h"
 #include "../core/movegen.h"
 #include "../eval/evaluate.h"
@@ -26,6 +27,8 @@
 #endif
 
 namespace MetalFish {
+
+using namespace Attacks;
 namespace MCTS {
 
 #ifdef __APPLE__

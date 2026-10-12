@@ -5,6 +5,7 @@
   Core Tests - Types, Bitboard, Position, Move Generation
 */
 
+#include "core/attacks.h"
 #include "core/bitboard.h"
 #include "core/movegen.h"
 #include "core/position.h"
@@ -17,6 +18,7 @@
 #include <vector>
 
 using namespace MetalFish;
+using namespace MetalFish::Attacks;
 
 namespace {
 
@@ -146,12 +148,12 @@ void test_bitboard() {
   }
   {
     TestCase tc("Bitboard shifts");
-    EXPECT(tc, shift<NORTH>(square_bb(SQ_E4)) == square_bb(SQ_E5));
-    EXPECT(tc, shift<SOUTH>(square_bb(SQ_E4)) == square_bb(SQ_E3));
-    EXPECT(tc, shift<EAST>(square_bb(SQ_E4)) == square_bb(SQ_F4));
-    EXPECT(tc, shift<WEST>(square_bb(SQ_E4)) == square_bb(SQ_D4));
-    EXPECT(tc, shift<NORTH_EAST>(square_bb(SQ_E4)) == square_bb(SQ_F5));
-    EXPECT(tc, shift<EAST>(square_bb(SQ_H4)) == 0);
+    EXPECT(tc, shift(square_bb(SQ_E4), NORTH) == square_bb(SQ_E5));
+    EXPECT(tc, shift(square_bb(SQ_E4), SOUTH) == square_bb(SQ_E3));
+    EXPECT(tc, shift(square_bb(SQ_E4), EAST) == square_bb(SQ_F4));
+    EXPECT(tc, shift(square_bb(SQ_E4), WEST) == square_bb(SQ_D4));
+    EXPECT(tc, shift(square_bb(SQ_E4), NORTH_EAST) == square_bb(SQ_F5));
+    EXPECT(tc, shift(square_bb(SQ_H4), EAST) == 0);
   }
   {
     TestCase tc("Piece attacks");
@@ -469,7 +471,7 @@ void test_movegen() {
 bool test_core() {
   std::cout << "\n=== Core Tests ===" << std::endl;
 
-  Bitboards::init();
+  Attacks::init();
   Position::init();
 
   g_tests_passed = 0;
