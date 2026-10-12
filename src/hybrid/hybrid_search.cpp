@@ -4124,7 +4124,8 @@ void ParallelHybridSearch::coordinator_thread_main() {
   const Move mcts_best = mcts_state_.get_best_move();
   const int info_score =
       final_move == mcts_best && final_move != ab_best
-          ? QToNnueScore(mcts_state_.best_q.load(std::memory_order_relaxed))
+          ? QToNnueScore(mcts_state_.best_q.load(std::memory_order_relaxed),
+                         config_.q_to_cp_scale)
           : ab_state_.best_score.load(std::memory_order_relaxed);
   send_info(info_depth, info_score, total_nodes,
             static_cast<int>(stats_.total_time_ms), final_pv_, "hybrid-final");
