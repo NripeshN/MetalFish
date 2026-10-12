@@ -85,7 +85,12 @@ def preflight(
     cmd: str, args: List[str], options: Dict[str, str], timeout: int = 180
 ) -> str:
     """Start the engine, apply options, search depth 6, and require a bestmove. Returns '' on
-    success or the error text. Prevents matches where one side silently disconnects."""
+    success or the error text. Prevents matches where one side silently disconnects.
+    A reader thread feeds a queue (select() on a buffered text pipe can strand lines).
+    """
+    import queue
+    import threading
+
     script = (
         "uci\n"
         + "".join(f"setoption name {k} value {v}\n" for k, v in options.items())
@@ -98,33 +103,47 @@ def preflight(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,
         )
-        p.stdin.write(script)
-        p.stdin.flush()
-        import select
-
-        out, deadline, got = [], time.time() + timeout, False
-        while time.time() < deadline:
-            r, _, _ = select.select([p.stdout], [], [], 1.0)
-            if not r:
-                if p.poll() is not None:
-                    break
-                continue
-            line = p.stdout.readline()
-            if not line:
-                break
-            out.append(line)
-            if line.startswith("bestmove"):
-                got = True
-                break
-        try:
-            p.stdin.write("quit\n")
-            p.stdin.flush()
-        except Exception:  # noqa: BLE001
-            pass
-        p.wait(timeout=10)
     except Exception as exc:  # noqa: BLE001
         return f"preflight failed to run {cmd}: {exc}"
+    q: "queue.Queue[Optional[str]]" = queue.Queue()
+
+    def pump() -> None:
+        try:
+            for line in p.stdout:  # type: ignore[union-attr]
+                q.put(line)
+        finally:
+            q.put(None)
+
+    threading.Thread(target=pump, daemon=True).start()
+    try:
+        p.stdin.write(script)  # type: ignore[union-attr]
+        p.stdin.flush()  # type: ignore[union-attr]
+    except Exception as exc:  # noqa: BLE001
+        return f"preflight: could not write to {cmd}: {exc}"
+    out: List[str] = []
+    got = False
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            line = q.get(timeout=1.0)
+        except queue.Empty:
+            if p.poll() is not None:
+                break
+            continue
+        if line is None:
+            break
+        out.append(line)
+        if line.startswith("bestmove"):
+            got = True
+            break
+    try:
+        p.stdin.write("quit\n")  # type: ignore[union-attr]
+        p.stdin.flush()  # type: ignore[union-attr]
+        p.wait(timeout=15)
+    except Exception:  # noqa: BLE001
+        p.kill()
     errors = [l.strip() for l in out if "ERROR" in l or "error" in l.lower()]
     if not got:
         return f"preflight: no bestmove from {cmd} (options {options}); output tail: {''.join(out[-6:])}"

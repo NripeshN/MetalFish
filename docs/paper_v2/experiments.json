@@ -427,12 +427,13 @@
         "engine": "SF19",
         "threads": 8
       },
-      "est_hours": 32
+      "est_hours": 32,
+      "note": "parity check of the Stockfish 19 port against Stockfish 19 at equal settings"
     },
     {
       "id": "RQ5d",
       "rq": "RQ5",
-      "priority": "SHOULD",
+      "priority": "COULD",
       "tc": "30+0.3",
       "pairs": 300,
       "a": {
@@ -443,7 +444,8 @@
         "engine": "SFdev",
         "threads": 8
       },
-      "est_hours": 19
+      "est_hours": 19,
+      "note": "historical: how far the published v1.0.0 AB (Stockfish dev-20260103 base) trails; AB is now a Stockfish 19 port"
     },
     {
       "id": "RQ6c",
