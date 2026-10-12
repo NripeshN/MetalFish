@@ -40,6 +40,9 @@ from typing import Dict, List, Optional
 REPO = pathlib.Path(__file__).resolve().parents[2]
 MANIFEST_PATH = REPO / "docs" / "paper_v2" / "experiments.json"
 RESULTS_ROOT = REPO / "results" / "paper_v2"
+DEFAULT_MOVE_OVERHEAD_MS = (
+    50  # overridden from experiments.json defaults.move_overhead_ms
+)
 
 
 def sha256(path: pathlib.Path) -> Optional[str]:
@@ -160,6 +163,12 @@ def engine_args(
         opts["Threads"] = str(arm["threads"])
     if "Hash" not in opts and not spec["cmd"].endswith("lc0"):
         opts["Hash"] = str(hash_mb)
+    if (
+        "Move Overhead" not in opts
+        and spec["cmd"].endswith("metalfish")
+        and DEFAULT_MOVE_OVERHEAD_MS
+    ):
+        opts["Move Overhead"] = str(DEFAULT_MOVE_OVERHEAD_MS)
     for k, v in opts.items():
         parts.append(f"option.{k}={subst(str(v))}")
     return parts
@@ -354,6 +363,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     spec = json.load(open(args.manifest))
     defaults, engines = spec["defaults"], spec["engines"]
+    global DEFAULT_MOVE_OVERHEAD_MS
+    DEFAULT_MOVE_OVERHEAD_MS = int(
+        defaults.get("move_overhead_ms", DEFAULT_MOVE_OVERHEAD_MS)
+    )
     cells = {c["id"]: c for c in spec["cells"]}
     if args.cell_id not in cells:
         print(

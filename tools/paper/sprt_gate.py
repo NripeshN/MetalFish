@@ -55,6 +55,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--base-threads", type=int)
     ap.add_argument("--hash", type=int, default=1024)
     ap.add_argument(
+        "--move-overhead",
+        type=int,
+        default=50,
+        help="Move Overhead (ms) for MetalFish arms",
+    )
+    ap.add_argument(
         "--option", action="append", default=[], help="NAME=VALUE for both arms"
     )
     ap.add_argument("--cand-option", action="append", default=[])
@@ -87,6 +93,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     base_opts.setdefault("Threads", str(args.base_threads or args.threads))
     cand_opts.setdefault("Hash", str(args.hash))
     base_opts.setdefault("Hash", str(args.hash))
+    for opts, exe in ((cand_opts, args.cand), (base_opts, args.base)):
+        if exe.endswith("metalfish") or "metalfish" in pathlib.Path(exe).name:
+            opts.setdefault("Move Overhead", str(args.move_overhead))
     cand = str(pathlib.Path(args.cand).resolve())
     base = str(pathlib.Path(args.base).resolve())
     book = args.book if os.path.isabs(args.book) else str(REPO / args.book)
@@ -183,16 +192,30 @@ def main(argv: Optional[List[str]] = None) -> int:
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
     therm = run_cell.start_thermal_logger(out)
+    lines: List[str] = []
     try:
-        proc = subprocess.run(cmd, cwd=str(REPO), capture_output=True, text=True)
+        # Stream fastchess output to disk as it arrives so progress is visible mid-run.
+        with open(out / "fastchess_output.txt", "w") as log:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(REPO),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                log.write(line)
+                log.flush()
+                lines.append(line.rstrip("\n"))
+            proc.wait()
     finally:
         therm.terminate()
-    (out / "fastchess_output.txt").write_text(proc.stdout + "\n" + proc.stderr)
-    tail = "\n".join(proc.stdout.splitlines()[-14:])
+    tail = "\n".join(lines[-14:])
     print(tail)
     stats = penta_stats.compute(penta_stats.read_games(str(out / "games.pgn")), "cand")
     verdict = "unknown"
-    for line in proc.stdout.splitlines():
+    for line in lines:
         if "SPRT" in line and ("H1" in line or "H0" in line):
             verdict = line.strip()
     summary = {

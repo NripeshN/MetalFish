@@ -6,7 +6,8 @@
     "All MetalFish arms use the same frozen binary. Hybrid arms set HybridMCTSThreads/HybridABThreads explicitly so the split is uniform across thread budgets.",
     "Never use st= (fixed time per move). Threads must be >= 3 for any hybrid arm. Options must be separate option.NAME=VALUE tokens.",
     "est_hours assume 0.8 min/game at 10+0.1, 1.9 at 30+0.3, 3.7 at 60+0.6, concurrency 1, incl. engine restarts.",
-    "RQ2c (hybrid oversubscription) requires engine option HybridOversubscribe (added 2026-10-12)."
+    "RQ2c (hybrid oversubscription) requires engine option HybridOversubscribe (added 2026-10-12).",
+    "All MetalFish arms get option 'Move Overhead'=defaults.move_overhead_ms (50 ms) unless the cell overrides it; a 12 ms overrun forfeit was observed at 10+0.1 with the 10 ms default."
   ],
   "defaults": {
     "manager": "reference/fastchess/fastchess",
@@ -24,7 +25,8 @@
     "hash_mb": 2048,
     "report": "penta=true",
     "ratinginterval": 50,
-    "blocks": 4
+    "blocks": 4,
+    "move_overhead_ms": 50
   },
   "engines": {
     "AB": {

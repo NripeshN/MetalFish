@@ -24,7 +24,7 @@ cap is reported with its CI and the author decides.
 
 | # | Lever | Expected | Status |
 | --- | --- | --- | --- |
-| L1 | **Stockfish 19 port** of the AB core (SFNNv16 net, search updates). | +30 to +50 Elo vs the Jan-2026 base | In progress (worktree agent); bench parity 2,497,913 required |
+| L1 | **Stockfish 19 port** of the AB core (SFNNv16 net, search updates). | +30 to +50 Elo vs the Jan-2026 base | **ADOPTED 2026-10-12.** Bench parity 2,497,913 confirmed; gate `sf19port_vs_preport_ab_10p01_v2`: AB(SF19 port) vs AB(pre-port), 10+0.1, 8 threads, UHO_Lichess: **+62.0 ± 28.2 Elo** (nElo +132, LOS 1.000, 136 games, Ptnml [0,6,33,28,1]); stopped early once conclusive. One 12 ms time forfeit by the candidate at move 173 → runners now set `Move Overhead=50` for fast TCs. |
 | L2 | **PGO build** (`cmake/pgo.cmake`, `tools/build_pgo.sh`): clang instrumentation, training = AB bench + short MCTS/hybrid searches. | +3 to +8 Elo (5–10% NPS) | **Measured 2026-10-12 on the pre-port tree: no gain** (bench 1 thread, depth 13, best of 3: LTO 1.284 Mnps vs LTO+PGO 1.263 Mnps; identical node counts). The LTO `-mcpu=native` build already matches Stockfish 19's own PGO build (1.306 Mnps). Module kept, off by default; re-check once on the ported tree, then drop the lever. |
 | L3 | **Thread policy**: 8 performance cores vs 12 (incl. 4 efficiency cores). | ±5 Elo, direction unknown (E-cores can hurt per-thread latency) | **Bench measured 2026-10-12 (pre-port tree, depth 15, median of 3):** 1 thread 1.37 Mnps, 4: 5.80, 8: 7.54, 12: 10.72 Mnps (+42% over 8). Game gate AB(12) vs AB(8) at 30+0.3 pending. |
 | L4 | **Hash**: 2048 vs 8192 MB at 30+0.3 and 60+0.6 (32 GB unified memory). | +0 to +5 Elo at longer TC | SPRT [0, 5] |
