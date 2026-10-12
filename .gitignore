@@ -75,3 +75,6 @@ tournament.log
 puzzles/
 
 CLAUDE.md
+
+# Harness-managed agent worktrees
+.claude/worktrees/

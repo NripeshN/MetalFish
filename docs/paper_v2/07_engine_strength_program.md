@@ -1,0 +1,50 @@
+# 07 — Strongest-engine programme (measured, gated)
+
+Goal set by the author on 2026-10-12: make MetalFish as strong as possible on the hardware
+available (Apple Silicon first, CUDA where it can be built), then write the arXiv preprint
+from verified measurements. Every change below is accepted only if it passes a game-based
+gate on this machine; nothing is accepted on tactical suites or intuition.
+
+## Gate
+
+`tools/paper/sprt_gate.py` (fastchess, UHO_Lichess_4852_v1 openings, pentanomial, concurrency 1
+for anything that uses the GPU, Fishtest adjudication rules):
+
+| Change class | Time control | Threads | SPRT bounds (model=normalized) | Notes |
+| --- | --- | --- | --- | --- |
+| Search/eval code (e.g. Stockfish 19 port) | 10+0.1 then 30+0.3 confirm | 8 | [0, 10] then [0, 5] | Expect a large gain; STC first to fail fast |
+| Build/flags (PGO, -mcpu, thread pinning) | 10+0.1 | 8 | [0, 5] | Pure speed changes; also report bench NPS |
+| Resource policy (12 vs 8 threads, Hash size) | 30+0.3 | as tested | [0, 5] | Both arms same binary |
+| Hybrid runtime changes (oversubscription, arbitration) | 30+0.3 | 8 | [-3, 3] non-regression, then [0, 5] | GPU active fraction reported |
+
+A change that passes H1 is adopted; a change that hits H0 is rejected; a run that reaches the
+cap is reported with its CI and the author decides.
+
+## Levers, ordered by expected value
+
+| # | Lever | Expected | Status |
+| --- | --- | --- | --- |
+| L1 | **Stockfish 19 port** of the AB core (SFNNv16 net, search updates). | +30 to +50 Elo vs the Jan-2026 base | In progress (worktree agent); bench parity 2,497,913 required |
+| L2 | **PGO build** (`cmake/pgo.cmake`, `tools/build_pgo.sh`): clang instrumentation, training = AB bench + short MCTS/hybrid searches. | +3 to +8 Elo (5–10% NPS) | **Measured 2026-10-12 on the pre-port tree: no gain** (bench 1 thread, depth 13, best of 3: LTO 1.284 Mnps vs LTO+PGO 1.263 Mnps; identical node counts). The LTO `-mcpu=native` build already matches Stockfish 19's own PGO build (1.306 Mnps). Module kept, off by default; re-check once on the ported tree, then drop the lever. |
+| L3 | **Thread policy**: 8 performance cores vs 12 (incl. 4 efficiency cores). | ±5 Elo, direction unknown (E-cores can hurt per-thread latency) | Measure with `microbench.py ab` and an SPRT at 30+0.3 |
+| L4 | **Hash**: 2048 vs 8192 MB at 30+0.3 and 60+0.6 (32 GB unified memory). | +0 to +5 Elo at longer TC | SPRT [0, 5] |
+| L5 | **Hybrid oversubscription**: let AB keep all `Threads` and run the MCTS worker as an extra thread (today `HybridABThreads` is clamped so AB loses one or two threads; `compute_hybrid_thread_split` in `src/uci/uci.cpp`). Rationale: the GPU-bound worker sleeps most of the time, so the hybrid may keep AB(8) strength while adding the GPU signal. | Removes the measured thread cost (RQ2a), so hybrid ≥ AB becomes possible | Needs a small option (`HybridOversubscribe`) after the port lands; gate [-3, 3] then [0, 5] |
+| L6 | **Hybrid arbitration**: keep only what RQ6 shows to help (`HybridArbitration=minimal` ablation). | 0 to +10 Elo if the ladder is net-negative | After RQ6c |
+| L7 | **MCTS component quality**: if RQ5a shows Lc0's search is stronger than ours at matched settings, either port the missing Lc0 features or run Lc0 as an out-of-process GPU component. | Only matters if L5 makes the GPU signal count | After RQ5a |
+| L8 | **Syzygy 6-piece tablebases** (≈150 GB). | +5 to +15 Elo at long TC only | Deferred: disk and download cost; not part of the paper's primary cells |
+| L9 | **CUDA path**: the SF19 port carries over automatically; the CUDA MCTS backend is parity-gated in CI only. | Same AB gain on NVIDIA hosts | Compile gate must stay green; no local measurement possible |
+
+## Order of work
+
+1. L1 (port) → bench parity, unit/perft/UCI/hybrid smokes → SPRT vs the pre-port binary at 10+0.1 [0, 10].
+2. L2 (PGO) on the ported tree → bench NPS; SPRT vs non-PGO [0, 5] at 10+0.1.
+3. L3/L4 resource policy → decide the shipped defaults for the paper's "fair-resource" cells.
+4. Freeze the AB/build; run the paper's MUST cells (RQ1a, RQ2, RQ5c, RQ6b, M1–M6).
+5. L5/L6 hybrid changes, each gated; if adopted, the hybrid cells are re-run on the adopted
+   configuration (the paper reports both the shipped v1.0 hybrid and the final one).
+
+## Bookkeeping
+
+Each gate run writes `results/paper_v2/sprt/<name>/` with the manifest (binary hashes, options,
+hardware), PGN, fastchess output and `summary.json`; the adopted/rejected decision is recorded in
+the table above with the run name. Adopted changes land on `main` through the normal PR flow.

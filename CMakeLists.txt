@@ -333,6 +333,7 @@ set(SOURCES
     ${NN_SOURCES})
 
 add_executable(metalfish ${SOURCES})
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/pgo.cmake)
 
 if(METALFISH_IPO_SUPPORTED)
   set_property(TARGET metalfish PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE
