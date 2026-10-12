@@ -769,6 +769,13 @@ namespace MetalFish {
 
 std::string UCIEngine::square(Square square) { return SquareString(square); }
 
+// The probe links only the core and transformer sources. Stockfish 19's
+// engine.h instantiates SystemWideSharedConstant<Eval::NNUE::Network>, whose
+// constructor calls Network::get_content_hash() (defined in the NNUE sources
+// that this tool does not link), so provide the same kind of stub as the TT and
+// tablebase entries below.
+usize Eval::NNUE::Network::get_content_hash() const { return 0; }
+
 TTEntry *TranspositionTable::first_entry(const Key) const { return nullptr; }
 
 namespace Tablebases {

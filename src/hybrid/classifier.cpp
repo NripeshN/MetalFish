@@ -251,21 +251,23 @@ int PositionClassifier::count_passed_pawns(const Position &pos, Color c) const {
     Bitboard front_span;
     if (c == WHITE) {
       front_span = 0ULL;
-      for (Rank rr = Rank(r + 1); rr <= RANK_8; ++rr) {
+      // Rank is an unsigned enum (Stockfish 19), so iterate with a signed
+      // index: a descending Rank loop would wrap instead of terminating.
+      for (int rr = int(r) + 1; rr <= int(RANK_8); ++rr) {
         if (f > FILE_A)
-          front_span |= make_square(File(f - 1), rr);
-        front_span |= make_square(f, rr);
+          front_span |= make_square(File(f - 1), Rank(rr));
+        front_span |= make_square(f, Rank(rr));
         if (f < FILE_H)
-          front_span |= make_square(File(f + 1), rr);
+          front_span |= make_square(File(f + 1), Rank(rr));
       }
     } else {
       front_span = 0ULL;
-      for (Rank rr = Rank(r - 1); rr >= RANK_1; --rr) {
+      for (int rr = int(r) - 1; rr >= int(RANK_1); --rr) {
         if (f > FILE_A)
-          front_span |= make_square(File(f - 1), rr);
-        front_span |= make_square(f, rr);
+          front_span |= make_square(File(f - 1), Rank(rr));
+        front_span |= make_square(f, Rank(rr));
         if (f < FILE_H)
-          front_span |= make_square(File(f + 1), rr);
+          front_span |= make_square(File(f + 1), Rank(rr));
       }
     }
 
