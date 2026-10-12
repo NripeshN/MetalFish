@@ -3764,10 +3764,7 @@ void ParallelHybridSearch::run_ab_search() {
   if (should_stop())
     return;
 
-  const int original_threads =
-      static_cast<int>(engine_->get_options()["Threads"]);
   const int requested_ab_threads = std::max(1, config_.ab_threads);
-  const bool needs_thread_resize = (requested_ab_threads != original_threads);
   const int original_multipv =
       static_cast<int>(engine_->get_options()["MultiPV"]);
   const bool needs_multipv_reset = original_multipv != 1;
@@ -3777,9 +3774,13 @@ void ParallelHybridSearch::run_ab_search() {
     engine_->get_options().setoption(ss);
   };
 
-  if (needs_thread_resize) {
-    set_engine_option("Threads", requested_ab_threads);
-  }
+  // Size the alpha-beta worker pool for the hybrid's share only when it
+  // actually changes (once per game in practice). Rebuilding the pool
+  // discards every per-thread search history, so it must not happen on each
+  // move; the pool keeps this size until a plain alpha-beta search asks for
+  // the full Threads value again (see UCIEngine::go).
+  if (static_cast<int>(engine_->get_threads().size()) != requested_ab_threads)
+    engine_->resize_threads(requested_ab_threads);
   if (needs_multipv_reset) {
     set_engine_option("MultiPV", 1);
   }
@@ -3943,9 +3944,6 @@ void ParallelHybridSearch::run_ab_search() {
 
   if (needs_multipv_reset) {
     set_engine_option("MultiPV", original_multipv);
-  }
-  if (needs_thread_resize) {
-    set_engine_option("Threads", original_threads);
   }
 }
 

@@ -364,10 +364,11 @@ bool Engine::set_numa_config_from_option(const std::string &o) {
   return true;
 }
 
-void Engine::resize_threads() {
+void Engine::resize_threads(int requested) {
   threads.wait_for_search_finished();
   threads.set(numaContext.get_numa_config(),
-              {options, threads, tt, sharedHists, network}, updateContext);
+              {options, threads, tt, sharedHists, network}, updateContext,
+              requested > 0 ? usize(requested) : 0);
 
   // Thread-count changes do not require rebuilding the TT. Preserving it is
   // important for hybrid search, which temporarily resizes the AB worker pool

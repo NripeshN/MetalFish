@@ -72,7 +72,9 @@ public:
   // modifiers
 
   bool set_numa_config_from_option(const std::string &o);
-  void resize_threads();
+  // requested = 0 sizes the pool from the Threads option; a positive value
+  // sizes it explicitly (used by the hybrid search for its alpha-beta share).
+  void resize_threads(int requested = 0);
   void set_tt_size(usize mb);
   void set_ponderhit(bool);
   void search_clear();

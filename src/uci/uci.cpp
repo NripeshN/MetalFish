@@ -310,8 +310,15 @@ void UCIEngine::go(std::istringstream &is) {
 
   if (limits.perft)
     perft(limits);
-  else
+  else {
+    // A preceding hybrid search may have left the alpha-beta pool at its
+    // sub-budget size; plain alpha-beta searches use the full Threads value.
+    const auto requested =
+        static_cast<usize>(std::max(1, int(engine.get_options()["Threads"])));
+    if (engine.get_threads().size() != requested)
+      engine.resize_threads();
     engine.go(limits);
+  }
 }
 
 void UCIEngine::bench(std::istream &args) {

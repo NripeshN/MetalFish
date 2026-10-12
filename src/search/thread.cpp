@@ -157,9 +157,10 @@ static usize next_power_of_two(u64 count) {
 // Creates/destroys threads to match the requested number.
 // Created and launched threads will immediately go to sleep in idle_loop.
 // Upon resizing, threads are recreated to allow for binding if necessary.
-void ThreadPool::set(
-    const NumaConfig &numaConfig, Search::SharedState sharedState,
-    const Search::SearchManager::UpdateContext &updateContext) {
+void ThreadPool::set(const NumaConfig &numaConfig,
+                     Search::SharedState sharedState,
+                     const Search::SearchManager::UpdateContext &updateContext,
+                     usize requestedOverride) {
 
   if (threads.size() > 0) // destroy any existing thread(s)
   {
@@ -170,7 +171,9 @@ void ThreadPool::set(
     boundThreadToNumaNode.clear();
   }
 
-  const usize requested = sharedState.options["Threads"];
+  const usize requested = requestedOverride > 0
+                              ? requestedOverride
+                              : usize(int(sharedState.options["Threads"]));
 
   if (requested > 0) // create new thread(s)
   {
