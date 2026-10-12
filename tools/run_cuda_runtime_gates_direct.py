@@ -303,7 +303,6 @@ def run_linux_gate(
         "METALFISH_BT4_WEIGHTS",
         "METALFISH_LEGACY_NN_WEIGHTS",
         "METALFISH_NNUE_BIG",
-        "METALFISH_NNUE_SMALL",
     ):
         env.pop(key, None)
     if args.linux_zones:
