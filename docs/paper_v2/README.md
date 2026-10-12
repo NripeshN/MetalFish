@@ -54,3 +54,15 @@ under equal hardware budgets, an explanation of the result (throughput ceiling o
 batch-1 inference on MPSGraph, arbitration/oracle analysis), and an honest
 correction of the earlier claims. The protocol in `02_evaluation_protocol.md` is
 designed so the paper is publishable whichever way the measurements come out.
+
+## Status log
+
+- **2026-10-12** — Scope re-set by the author: merge PR #66, make the engine as strong as
+  possible, then produce an arXiv preprint from verified data. Done today: AB core ported to
+  Stockfish 19 (bench parity 2,497,913; gate +62 ± 28 Elo at 10+0.1); PGO measured (no gain,
+  dropped); 12-thread gate +6 ± 16 (inconclusive, 8 P-cores kept); `HybridOversubscribe`
+  option added (AB keeps all threads) with its gate running; measurement tooling in
+  `tools/paper/` (runner, pentanomial stats validated against fastchess, trace parser, oracle
+  probe, suite runner, microbenchmarks, SPRT gate); CI fixes for the rebase (baseline nets,
+  Windows include order, unsigned-enum loop, probe link stub, PR-sized tournament, path
+  filters). See `07_engine_strength_program.md` for gate results.

@@ -25,6 +25,7 @@ import pathlib
 import shlex
 import subprocess
 import sys
+import time
 from typing import Dict, List, Optional
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -159,6 +160,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         ("base", base, args.base_arg, base_opts),
     ):
         err = run_cell.preflight(exe, eargs, opts)
+        if err:  # one retry: a previous match's engines may still be winding down
+            print(f"preflight retry for {label}: {err[:160]}", file=sys.stderr)
+            time.sleep(20)
+            err = run_cell.preflight(exe, eargs, opts)
         if err:
             print(f"ABORT: {label} failed preflight: {err}", file=sys.stderr)
             return 3

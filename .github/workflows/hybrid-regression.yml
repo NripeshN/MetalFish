@@ -4,6 +4,13 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
+    # Game-based gates only matter when the engine itself can change.
+    paths:
+      - "src/**"
+      - "CMakeLists.txt"
+      - "cmake/**"
+      - "tools/download_engine_networks.py"
+      - ".github/workflows/hybrid-regression.yml"
   workflow_dispatch:
     inputs:
       repeat:
