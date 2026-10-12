@@ -30,8 +30,10 @@
 #define NOMINMAX
 #endif
 #include <direct.h>
-#include <shellapi.h>
+// clang-format off
 #include <windows.h>
+#include <shellapi.h>  // must follow windows.h
+// clang-format on
 #endif
 
 #include "core/types.h"
