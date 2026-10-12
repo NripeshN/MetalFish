@@ -8,26 +8,28 @@
 #ifndef UCIOPTION_H_INCLUDED
 #define UCIOPTION_H_INCLUDED
 
-#include <cstddef>
 #include <functional>
 #include <iosfwd>
 #include <map>
 #include <optional>
 #include <string>
 
-namespace MetalFish {
+#include "core/misc.h"
 
+namespace MetalFish {
+// Define a custom comparator, because the UCI options should be
+// case-insensitive
 struct CaseInsensitiveLess {
   bool operator()(const std::string &, const std::string &) const;
 };
 
 class OptionsMap;
 
+// The Option class implements each option as specified by the UCI protocol
 class Option {
 public:
   using OnChange = std::function<std::optional<std::string>(const Option &)>;
 
-  Option(const OptionsMap *);
   Option(OnChange = nullptr);
   Option(bool v, OnChange = nullptr);
   Option(const char *v, OnChange = nullptr);
@@ -50,8 +52,8 @@ private:
   friend class Tune;
 
   std::string defaultValue, currentValue, type;
-  int min, max;
-  size_t idx;
+  int min = 0, max = 0;
+  usize idx = 0;
   OnChange on_change;
   const OptionsMap *parent = nullptr;
 };
@@ -74,7 +76,7 @@ public:
 
   void add(const std::string &, const Option &option);
 
-  std::size_t count(const std::string &) const;
+  usize count(const std::string &) const;
 
 private:
   friend class Engine;
@@ -82,6 +84,7 @@ private:
 
   friend std::ostream &operator<<(std::ostream &, const OptionsMap &);
 
+  // The options container is defined as a std::map
   using OptionsStore = std::map<std::string, Option, CaseInsensitiveLess>;
 
   OptionsStore options_map;

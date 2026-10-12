@@ -10,18 +10,17 @@
 
 #include <atomic>
 #include <condition_variable>
-#include <cstddef>
-#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <vector>
 
 #include "core/memory.h"
+#include "core/misc.h"
 #include "core/numa.h"
 #include "core/position.h"
 #include "search/search.h"
-#include "search/thread_win32_osx.h"
+#include "search/thread_native.h"
 
 namespace MetalFish {
 
@@ -60,8 +59,8 @@ private:
 // the search is finished, it goes back to idle_loop() waiting for a new signal.
 class Thread {
 public:
-  Thread(Search::SharedState &, std::unique_ptr<Search::ISearchManager>, size_t,
-         size_t, size_t, OptionalThreadToNumaNodeBinder);
+  Thread(Search::SharedState &, std::unique_ptr<Search::ISearchManager>, usize,
+         usize, usize, OptionalThreadToNumaNodeBinder);
   virtual ~Thread();
 
   void idle_loop();
@@ -78,7 +77,7 @@ public:
   // outside user, so renaming of this function is left for whenever that
   // happens.
   void wait_for_search_finished();
-  size_t id() const { return idx; }
+  usize id() const { return idx; }
 
   LargePagePtr<Search::Worker> worker;
   std::function<void()> jobFunc;
@@ -86,8 +85,8 @@ public:
 private:
   std::mutex mutex;
   std::condition_variable cv;
-  size_t idx, idxInNuma, totalNuma, nthreads;
-  bool exit = false, searching = true;
+  usize idx, idxInNuma, totalNuma, nthreads;
+  bool exit = false, searching = true; // Set before starting std::thread
   NativeThread stdThread;
   NumaReplicatedAccessToken numaAccessToken;
 };
@@ -100,8 +99,10 @@ public:
   ThreadPool() {}
 
   ~ThreadPool() {
+    // destroy any existing thread(s)
     if (threads.size() > 0) {
       main_thread()->wait_for_search_finished();
+
       threads.clear();
     }
   }
@@ -114,26 +115,28 @@ public:
 
   void start_thinking(const OptionsMap &, Position &, StateListPtr &,
                       Search::LimitsType);
-  void run_on_thread(size_t threadId, std::function<void()> f);
-  void wait_on_thread(size_t threadId);
-  size_t num_threads() const;
+  void run_on_thread(usize threadId, std::function<void()> f);
+  void wait_on_thread(usize threadId);
+  usize num_threads() const;
   void clear();
   void set(const NumaConfig &numaConfig, Search::SharedState,
            const Search::SearchManager::UpdateContext &);
 
   Search::SearchManager *main_manager();
   Thread *main_thread() const { return threads.front().get(); }
-  uint64_t nodes_searched() const;
-  uint64_t tb_hits() const;
+  u64 nodes_searched() const;
+  u64 tb_hits() const;
   Thread *get_best_thread() const;
   void start_searching();
   void wait_for_search_finished() const;
 
-  std::vector<size_t> get_bound_thread_count_by_numa_node() const;
+  std::vector<usize> get_bound_thread_to_numa_node() const;
+  std::vector<usize> get_bound_thread_count_by_numa_node() const;
+  usize numa_nodes() const;
 
   void ensure_network_replicated();
 
-  std::atomic_bool stop, abortedSearch, increaseDepth;
+  std::atomic_bool stop, increaseDepth;
 
   auto cbegin() const noexcept { return threads.cbegin(); }
   auto begin() noexcept { return threads.begin(); }
@@ -147,9 +150,9 @@ private:
   std::vector<std::unique_ptr<Thread>> threads;
   std::vector<NumaIndex> boundThreadToNumaNode;
 
-  uint64_t accumulate(std::atomic<uint64_t> Search::Worker::*member) const {
+  u64 accumulate(RelaxedAtomic<u64> Search::Worker::*member) const {
 
-    uint64_t sum = 0;
+    u64 sum = 0;
     for (auto &&th : threads)
       sum += (th->worker.get()->*member).load(std::memory_order_relaxed);
     return sum;

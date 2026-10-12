@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cassert>
 #include <deque>
+#include <filesystem>
 #include <iosfwd>
 #include <memory>
 #include <ostream>
@@ -27,7 +28,6 @@
 #include "eval/evaluate.h"
 #include "eval/nnue/network.h"
 #include "eval/nnue/nnue_common.h"
-#include "eval/nnue/nnue_misc.h"
 #include "search/search.h"
 #include "syzygy/tbprobe.h"
 #include "uci/uci.h"
@@ -39,30 +39,35 @@ namespace NN = Eval::NNUE;
 
 constexpr auto StartFEN =
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-constexpr int MaxHashMB = Is64Bit ? 33554432 : 2048;
 int MaxThreads = std::max(1024, 4 * int(get_hardware_concurrency()));
 
-Engine::Engine(std::optional<std::string> path)
-    : binaryDirectory(path ? CommandLine::get_binary_directory(*path) : ""),
-      numaContext(NumaConfig::from_system()),
+// The default configuration will attempt to group L3 domains up to 32 threads.
+// This size was found to be a good balance between the Elo gain of increased
+// history sharing and the speed loss from more cross-cache accesses (see
+// PR#6526). The user can always explicitly override this behavior.
+constexpr NumaAutoPolicy DefaultNumaPolicy = BundledL3Policy{32};
+
+Engine::Engine(std::optional<std::filesystem::path> path)
+    : binaryDirectory(path ? CommandLine::get_binary_directory(*path)
+                           : std::filesystem::path{}),
+      numaContext(NumaConfig::from_system(DefaultNumaPolicy)),
       states(new std::deque<StateInfo>(1)), threads(),
-      networks(numaContext,
-               // Heap-allocate because sizeof(NN::Networks) is large
-               std::make_unique<NN::Networks>(
-                   NN::EvalFile{EvalFileDefaultNameBig, "None", ""},
-                   NN::EvalFile{EvalFileDefaultNameSmall, "None", ""})) {
+      networkFile{std::nullopt, ""},
+      network(numaContext, get_default_network()) {
 
   pos.set(StartFEN, false, &states->back());
 
   options.add( //
       "Debug Log File", Option("", [](const Option &o) {
-        start_logger(o);
+        start_logger(path_from_utf8(std::string(o)));
         return std::nullopt;
       }));
 
   options.add( //
       "NumaPolicy", Option("auto", [this](const Option &o) {
-        set_numa_config_from_option(o);
+        if (!set_numa_config_from_option(o))
+          return "NumaPolicy: invalid value '" + std::string(o) +
+                 "', keeping previous config.";
         return numa_config_information_as_string() + "\n" +
                thread_allocation_information_as_string();
       }));
@@ -120,15 +125,8 @@ Engine::Engine(std::optional<std::string> path)
   options.add("SyzygyProbeLimit", Option(7, 0, 7));
 
   options.add( //
-      "EvalFile", Option(EvalFileDefaultNameBig, [this](const Option &o) {
-        load_big_network(o);
-        return std::nullopt;
-      }));
-
-  options.add( //
-      "EvalFileSmall",
-      Option(EvalFileDefaultNameSmall, [this](const Option &o) {
-        load_small_network(o);
+      "EvalFile", Option(EvalFileDefaultName, [this](const Option &o) {
+        load_network(path_from_utf8(std::string(o)));
         return std::nullopt;
       }));
 
@@ -245,18 +243,19 @@ Engine::Engine(std::optional<std::string> path)
   // with Elo/regression evidence (see docs/tuning_workflow.md).
   options.add("MCTSContempt", Option("0.0"));
 
-  load_networks();
+  threads.clear();
+  threads.ensure_network_replicated();
   resize_threads();
 }
 
-std::uint64_t Engine::perft(const std::string &fen, Depth depth,
-                            bool isChess960) {
+std::variant<u64, PositionSetError>
+Engine::perft(const std::string &fen, Depth depth, bool isChess960) {
   return Benchmark::perft(fen, depth, isChess960);
 }
 
 void Engine::go(Search::LimitsType &limits) {
   assert(limits.perft == 0);
-  verify_networks();
+  verify_network();
 
   threads.start_thinking(options, pos, states, limits);
 }
@@ -268,7 +267,7 @@ void Engine::search_clear() {
   tt.clear(threads);
   threads.clear();
 
-  // @TODO wont work with multiple instances
+  // TODO: does not work with multiple instances
   Tablebases::init(options["SyzygyPath"]); // Free mapped files
 }
 
@@ -291,8 +290,12 @@ void Engine::set_on_bestmove(
   updateContext.onBestmove = std::move(f);
 }
 
-void Engine::set_on_verify_networks(std::function<void(std::string_view)> &&f) {
-  onVerifyNetworks = std::move(f);
+void Engine::set_on_start(std::function<void()> &&f) {
+  updateContext.onStart = std::move(f);
+}
+
+void Engine::set_on_verify_network(std::function<void(std::string_view)> &&f) {
+  onVerifyNetwork = std::move(f);
 }
 
 std::function<void(std::string_view, std::string_view)>
@@ -312,43 +315,56 @@ void Engine::wait_for_search_finished() {
   threads.main_thread()->wait_for_search_finished();
 }
 
-void Engine::set_position(const std::string &fen,
-                          const std::vector<std::string> &moves) {
+std::optional<PositionSetError>
+Engine::set_position(const std::string &fen,
+                     const std::vector<std::string> &moves) {
+  // Drop the old state and create a new one
   states = StateListPtr(new std::deque<StateInfo>(1));
-  pos.set(fen, options["UCI_Chess960"], &states->back());
+  auto err = pos.set(fen, options["UCI_Chess960"], &states->back());
+  if (err.has_value())
+    return err;
 
   for (const auto &move : moves) {
     auto m = UCIEngine::to_move(pos, move);
 
     if (m == Move::none())
-      break;
+      return PositionSetError("Illegal move: " + move);
 
     states->emplace_back();
     pos.do_move(m, states->back());
   }
+
+  return std::nullopt;
 }
 
-void Engine::set_numa_config_from_option(const std::string &o) {
+// modifiers
+
+bool Engine::set_numa_config_from_option(const std::string &o) {
   if (o == "auto" || o == "system") {
-    numaContext.set_numa_config(NumaConfig::from_system());
+    numaContext.set_numa_config(NumaConfig::from_system(DefaultNumaPolicy));
   } else if (o == "hardware") {
     // Don't respect affinity set in the system.
-    numaContext.set_numa_config(NumaConfig::from_system(false));
+    numaContext.set_numa_config(
+        NumaConfig::from_system(DefaultNumaPolicy, false));
   } else if (o == "none") {
     numaContext.set_numa_config(NumaConfig{});
   } else {
-    numaContext.set_numa_config(NumaConfig::from_string(o));
+    auto parsed = NumaConfig::from_string(o);
+    if (!parsed.has_value())
+      return false;
+    numaContext.set_numa_config(std::move(*parsed));
   }
 
   // Force reallocation of threads in case affinities need to change.
   resize_threads();
   threads.ensure_network_replicated();
+  return true;
 }
 
 void Engine::resize_threads() {
   threads.wait_for_search_finished();
   threads.set(numaContext.get_numa_config(),
-              {options, threads, tt, sharedHists, networks}, updateContext);
+              {options, threads, tt, sharedHists, network}, updateContext);
 
   // Thread-count changes do not require rebuilding the TT. Preserving it is
   // important for hybrid search, which temporarily resizes the AB worker pool
@@ -356,29 +372,29 @@ void Engine::resize_threads() {
   if (!tt.is_allocated())
     set_tt_size(options["Hash"]);
   threads.ensure_network_replicated();
-  networksVerified = false;
+  networkVerified = false;
 }
 
-void Engine::set_tt_size(size_t mb) {
+void Engine::set_tt_size(usize mb) {
   wait_for_search_finished();
   tt.resize(mb, threads);
 }
 
 void Engine::set_ponderhit(bool b) { threads.main_manager()->ponder = b; }
 
-void Engine::verify_networks() const {
-  const std::string bigEvalFile = std::string(options["EvalFile"]);
-  const std::string smallEvalFile = std::string(options["EvalFileSmall"]);
+// network related
 
-  if (networksVerified && verifiedBigEvalFile == bigEvalFile &&
-      verifiedSmallEvalFile == smallEvalFile)
+void Engine::verify_network() const {
+  const std::string evalFileOption = std::string(options["EvalFile"]);
+
+  if (networkVerified && verifiedEvalFile == evalFileOption)
     return;
 
-  networks->big.verify(bigEvalFile, onVerifyNetworks);
-  networks->small.verify(smallEvalFile, onVerifyNetworks);
+  const auto file = path_from_utf8(evalFileOption);
+  network->verify(onVerifyNetwork, networkFile, file);
 
-  auto statuses = networks.get_status_and_errors();
-  for (size_t i = 0; i < statuses.size(); ++i) {
+  auto statuses = network.get_status_and_errors();
+  for (usize i = 0; i < statuses.size(); ++i) {
     const auto [status, error] = statuses[i];
     std::string message = "Network replica " + std::to_string(i + 1) + ": ";
     if (status == SystemWideSharedConstantAllocationStatus::NoAllocation) {
@@ -397,58 +413,47 @@ void Engine::verify_networks() const {
       message += " " + *error;
     }
 
-    onVerifyNetworks(message);
+    onVerifyNetwork(message);
   }
 
-  verifiedBigEvalFile = bigEvalFile;
-  verifiedSmallEvalFile = smallEvalFile;
-  networksVerified = true;
+  verifiedEvalFile = evalFileOption;
+  networkVerified = true;
 }
 
-void Engine::load_networks() {
-  networksVerified = false;
-  networks.modify_and_replicate([this](NN::Networks &networks_) {
-    networks_.big.load(binaryDirectory, options["EvalFile"]);
-    networks_.small.load(binaryDirectory, options["EvalFileSmall"]);
+std::unique_ptr<Eval::NNUE::Network> Engine::get_default_network() {
+
+  auto network_ = std::make_unique<NN::Network>();
+
+  network_->load(binaryDirectory, std::filesystem::path{}, networkFile);
+
+  return network_;
+}
+
+void Engine::load_network(const std::filesystem::path &file) {
+  networkVerified = false;
+  network.modify_and_replicate([this, &file](NN::Network &network_) {
+    network_.load(binaryDirectory, file, networkFile);
   });
   threads.clear();
   threads.ensure_network_replicated();
 }
 
-void Engine::load_big_network(const std::string &file) {
-  networksVerified = false;
-  networks.modify_and_replicate([this, &file](NN::Networks &networks_) {
-    networks_.big.load(binaryDirectory, file);
+void Engine::save_network(const std::optional<std::filesystem::path> &file) {
+  network.modify_and_replicate([&file, this](NN::Network &network_) {
+    network_.save(networkFile, file);
   });
-  threads.clear();
-  threads.ensure_network_replicated();
 }
 
-void Engine::load_small_network(const std::string &file) {
-  networksVerified = false;
-  networks.modify_and_replicate([this, &file](NN::Networks &networks_) {
-    networks_.small.load(binaryDirectory, file);
-  });
-  threads.clear();
-  threads.ensure_network_replicated();
-}
-
-void Engine::save_network(
-    const std::pair<std::optional<std::string>, std::string> files[2]) {
-  networks.modify_and_replicate([&files](NN::Networks &networks_) {
-    networks_.big.save(files[0].first);
-    networks_.small.save(files[1].first);
-  });
-}
+// utility functions
 
 void Engine::trace_eval() const {
   StateListPtr trace_states(new std::deque<StateInfo>(1));
   Position p;
   p.set(pos.fen(), options["UCI_Chess960"], &trace_states->back());
 
-  verify_networks();
+  verify_network();
 
-  sync_cout << "\n" << Eval::trace(p, *networks) << sync_endl;
+  sync_cout << "\n" << Eval::trace(p, *network) << sync_endl;
 }
 
 const OptionsMap &Engine::get_options() const { return options; }
@@ -456,7 +461,7 @@ OptionsMap &Engine::get_options() { return options; }
 
 std::string Engine::fen() const { return pos.fen(); }
 
-void Engine::flip() { pos.flip(); }
+std::optional<PositionSetError> Engine::flip() { return pos.flip(); }
 
 std::string Engine::visualize() const {
   std::stringstream ss;
@@ -466,11 +471,11 @@ std::string Engine::visualize() const {
 
 int Engine::get_hashfull(int maxAge) const { return tt.hashfull(maxAge); }
 
-std::vector<std::pair<size_t, size_t>>
+std::vector<std::pair<usize, usize>>
 Engine::get_bound_thread_count_by_numa_node() const {
   auto counts = threads.get_bound_thread_count_by_numa_node();
   const NumaConfig &cfg = numaContext.get_numa_config();
-  std::vector<std::pair<size_t, size_t>> ratios;
+  std::vector<std::pair<usize, usize>> ratios;
   NumaIndex n = 0;
   for (; n < counts.size(); ++n)
     ratios.emplace_back(counts[n], cfg.num_cpus_in_numa_node(n));
@@ -510,7 +515,7 @@ std::string Engine::thread_binding_information_as_string() const {
 std::string Engine::thread_allocation_information_as_string() const {
   std::stringstream ss;
 
-  size_t threadsSize = threads.size();
+  usize threadsSize = threads.size();
   ss << "Using " << threadsSize << (threadsSize > 1 ? " threads" : " thread");
 
   auto boundThreadsByNodeStr = thread_binding_information_as_string();
@@ -566,11 +571,11 @@ Engine::root_move_snapshot(size_t max_moves) const {
     item.score = rm.score;
     item.previous_score = rm.previousScore;
     item.average_score = rm.averageScore;
-    item.score_lowerbound = rm.scoreLowerbound;
-    item.score_upperbound = rm.scoreUpperbound;
+    item.score_lowerbound = rm.inexactLower;
+    item.score_upperbound = rm.inexactUpper;
     item.effort = rm.effort;
     item.sel_depth = rm.selDepth;
-    item.pv = rm.pv;
+    item.pv.assign(rm.pv.begin(), rm.pv.end());
     snapshot.push_back(std::move(item));
   }
   return snapshot;
@@ -599,9 +604,9 @@ Engine::QuickSearchResult Engine::search_sync(const std::string &fen, int depth,
     const auto &root_move = best_thread->worker->rootMoves[0];
     result.best_move = root_move.pv[0];
     result.score = root_move.score;
-    result.depth = best_thread->worker->completedDepth;
+    result.depth = best_thread->worker->rootDepth;
     result.nodes = threads.nodes_searched();
-    result.pv = root_move.pv;
+    result.pv.assign(root_move.pv.begin(), root_move.pv.end());
 
     if (root_move.pv.size() > 1) {
       result.ponder_move = root_move.pv[1];
@@ -641,9 +646,9 @@ Engine::QuickSearchResult Engine::search_silent(const std::string &fen,
     const auto &root_move = best_thread->worker->rootMoves[0];
     result.best_move = root_move.pv[0];
     result.score = root_move.score;
-    result.depth = best_thread->worker->completedDepth;
+    result.depth = best_thread->worker->rootDepth;
     result.nodes = threads.nodes_searched();
-    result.pv = root_move.pv;
+    result.pv.assign(root_move.pv.begin(), root_move.pv.end());
 
     if (root_move.pv.size() > 1) {
       result.ponder_move = root_move.pv[1];
@@ -676,9 +681,9 @@ void Engine::search_with_callbacks(const std::string &fen, int time_ms,
       const auto &rm = best->worker->rootMoves[0];
       result.best_move = rm.pv[0];
       result.score = rm.score;
-      result.depth = best->worker->completedDepth;
+      result.depth = best->worker->rootDepth;
       result.nodes = threads.nodes_searched();
-      result.pv = rm.pv;
+      result.pv.assign(rm.pv.begin(), rm.pv.end());
       if (rm.pv.size() > 1)
         result.ponder_move = rm.pv[1];
 

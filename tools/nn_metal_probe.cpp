@@ -5,6 +5,7 @@
   Licensed under GPL-3.0
 */
 
+#include "core/attacks.h"
 #include "core/bitboard.h"
 #include "core/movegen.h"
 #include "core/position.h"
@@ -667,7 +668,7 @@ void RefreshProbeHistoryPointers(ProbePositionHistory &history) {
 }
 
 void RunProbe(const Options &options) {
-  Bitboards::init();
+  Attacks::init();
   Position::init();
   NN::InitPolicyTables();
 

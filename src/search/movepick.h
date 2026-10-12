@@ -36,9 +36,7 @@ public:
 
 private:
   template <typename Pred> Move select(Pred);
-  template <GenType T> ExtMove *score(MoveList<T> &);
-  ExtMove *begin() { return cur; }
-  ExtMove *end() { return endCur; }
+  template <GenType T> ExtMove *score(const MoveList<T> &);
 
   const Position &pos;
   const ButterflyHistory *mainHistory;

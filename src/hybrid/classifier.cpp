@@ -6,11 +6,14 @@
 */
 
 #include "classifier.h"
+#include "../core/attacks.h"
 #include "../search/movepick.h"
 #include <algorithm>
 #include <cmath>
 
 namespace MetalFish {
+
+using namespace Attacks;
 
 constexpr int PieceValues[] = {0, 100, 320, 330, 500, 900, 20000};
 
@@ -339,9 +342,9 @@ Bitboard PositionClassifier::get_king_zone(Square ksq) const {
   Rank r = rank_of(ksq);
 
   if (r < RANK_7)
-    zone |= shift<NORTH>(zone & rank_bb(Rank(r + 1)));
+    zone |= shift(zone & rank_bb(Rank(r + 1)), NORTH);
   if (r > RANK_2)
-    zone |= shift<SOUTH>(zone & rank_bb(Rank(r - 1)));
+    zone |= shift(zone & rank_bb(Rank(r - 1)), SOUTH);
 
   return zone;
 }

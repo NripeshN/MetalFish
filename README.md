@@ -206,10 +206,8 @@ python3 tools/download_engine_networks.py --dest networks
 Manual download equivalent:
 
 ```bash
-curl -L -o networks/nn-c288c895ea92.nnue \
-  https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
-curl -L -o networks/nn-37f18f62d772.nnue \
-  https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+curl -L -o networks/nn-1a298aa575a0.nnue \
+  https://tests.stockfishchess.org/api/nn/nn-1a298aa575a0.nnue
 curl -L -o networks/BT4-1024x15x32h-swa-6147500.pb.gz \
   https://storage.lczero.org/files/networks-contrib/big-transformers/BT4-1024x15x32h-swa-6147500.pb.gz
 gzip -dc networks/BT4-1024x15x32h-swa-6147500.pb.gz \

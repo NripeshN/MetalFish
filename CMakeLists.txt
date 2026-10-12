@@ -140,8 +140,8 @@ endif()
 # ============================================================================
 
 # Core chess primitives
-set(CORE_SOURCES src/core/bitboard.cpp src/core/misc.cpp src/core/movegen.cpp
-                 src/core/position.cpp src/core/memory.cpp)
+set(CORE_SOURCES src/core/attacks.cpp src/core/bitboard.cpp src/core/misc.cpp
+                 src/core/movegen.cpp src/core/position.cpp src/core/memory.cpp)
 
 # Alpha-Beta search engine
 set(SEARCH_SOURCES
@@ -156,7 +156,8 @@ set(EVAL_SOURCES
     src/eval/nnue/nnue_accumulator.cpp
     src/eval/nnue/nnue_misc.cpp
     src/eval/nnue/features/full_threats.cpp
-    src/eval/nnue/features/half_ka_v2_hm.cpp)
+    src/eval/nnue/features/half_ka_v2_hm.cpp
+    src/eval/nnue/features/pp_3wide.cpp)
 
 # UCI protocol
 set(UCI_SOURCES src/uci/uci.cpp src/uci/ucioption.cpp src/uci/engine.cpp
@@ -407,19 +408,13 @@ if(APPLE)
   endif()
 endif()
 
-# Copy NNUE files to build directory
-set(NNUE_FILE1 ${CMAKE_CURRENT_SOURCE_DIR}/networks/nn-c288c895ea92.nnue)
-set(NNUE_FILE2 ${CMAKE_CURRENT_SOURCE_DIR}/networks/nn-37f18f62d772.nnue)
+# Copy the NNUE file to the build directory
+set(NNUE_FILE ${CMAKE_CURRENT_SOURCE_DIR}/networks/nn-1a298aa575a0.nnue)
 
-if(EXISTS ${NNUE_FILE1})
-  configure_file(${NNUE_FILE1} ${CMAKE_CURRENT_BINARY_DIR}/nn-c288c895ea92.nnue
+if(EXISTS ${NNUE_FILE})
+  configure_file(${NNUE_FILE} ${CMAKE_CURRENT_BINARY_DIR}/nn-1a298aa575a0.nnue
                  COPYONLY)
-  message(STATUS "Found NNUE file: nn-c288c895ea92.nnue")
-endif()
-if(EXISTS ${NNUE_FILE2})
-  configure_file(${NNUE_FILE2} ${CMAKE_CURRENT_BINARY_DIR}/nn-37f18f62d772.nnue
-                 COPYONLY)
-  message(STATUS "Found NNUE file: nn-37f18f62d772.nnue")
+  message(STATUS "Found NNUE file: nn-1a298aa575a0.nnue")
 endif()
 
 # ============================================================================

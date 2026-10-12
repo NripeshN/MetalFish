@@ -5,6 +5,7 @@
   Hybrid Search Tests - Position Classifier, AB Integration, Parallel Search
 */
 
+#include "core/attacks.h"
 #include "core/bitboard.h"
 #include "core/movegen.h"
 #include "core/position.h"
@@ -3432,7 +3433,7 @@ void test_parallel_stats() {
 bool test_hybrid_module() {
   std::cout << "\n=== Hybrid Search Tests ===" << std::endl;
 
-  Bitboards::init();
+  Attacks::init();
   Position::init();
 
   g_tests_passed = 0;
