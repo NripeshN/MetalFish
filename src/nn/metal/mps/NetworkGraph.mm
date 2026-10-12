@@ -100,7 +100,7 @@ static const NSInteger kMinSubBatchSize = 20;
   @synchronized(self) {
     if (graphs[index] == nil) {
       graphs[index] = [[MetalNetworkGraph alloc] initWithDevice:device
-                                                 halfPrecision:halfPrecision];
+                                                  halfPrecision:halfPrecision];
     }
   }
 }

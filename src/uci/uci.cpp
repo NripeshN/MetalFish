@@ -1431,10 +1431,9 @@ static int resolve_mcts_thread_count(Engine &engine, bool explicit_threads_arg,
 static std::string make_mcts_cache_key(const std::string &nn_weights,
                                        const MCTS::SearchParams &config) {
   std::ostringstream key;
-  key << nn_weights << "|" << config.nn_backend << "|"
-      << config.metal_fp16 << "|" << config.coreml_model_path << "|"
-      << config.coreml_compute_units << "|"
-      << config.cuda_device << "|" << config.cuda_graph_execution << "|"
+  key << nn_weights << "|" << config.nn_backend << "|" << config.metal_fp16
+      << "|" << config.coreml_model_path << "|" << config.coreml_compute_units
+      << "|" << config.cuda_device << "|" << config.cuda_graph_execution << "|"
       << config.cuda_stable_execution_batch_size << "|"
       << config.cuda_deterministic_attention_softmax << "|"
       << config.cuda_full_buffer_clear << "|" << config.num_threads << "|"
