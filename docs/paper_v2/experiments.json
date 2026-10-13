@@ -7,7 +7,8 @@
     "Never use st= (fixed time per move). Threads must be >= 3 for any hybrid arm. Options must be separate option.NAME=VALUE tokens.",
     "est_hours assume 0.8 min/game at 10+0.1, 1.9 at 30+0.3, 3.7 at 60+0.6, concurrency 1, incl. engine restarts.",
     "RQ2c (hybrid oversubscription) requires engine option HybridOversubscribe (added 2026-10-12).",
-    "All MetalFish arms get option 'Move Overhead'=defaults.move_overhead_ms (50 ms) unless the cell overrides it; a 12 ms overrun forfeit was observed at 10+0.1 with the 10 ms default."
+    "All MetalFish arms get option 'Move Overhead'=defaults.move_overhead_ms (50 ms) unless the cell overrides it; a 12 ms overrun forfeit was observed at 10+0.1 with the 10 ms default.",
+    "2026-10-13 amendment (protocol 02 §11.3): the shipped hybrid is oversubscribed (HybridOversubscribe=true by default after gate L9): alpha-beta keeps all T UCI threads and the MCTS worker is an extra thread that mostly blocks on GPU inference. Hybrid arms therefore no longer pin HybridABThreads; the 6+1 split (HybridOversubscribe=false, HybridABThreads=T-2) is the ablation used by RQ2b and RQ2c."
   ],
   "defaults": {
     "manager": "reference/fastchess/fastchess",
@@ -111,10 +112,7 @@
       "pairs": 1000,
       "a": {
         "engine": "Hybrid",
-        "threads": 8,
-        "options": {
-          "HybridABThreads": "6"
-        }
+        "threads": 8
       },
       "b": {
         "engine": "AB",
@@ -130,10 +128,7 @@
       "pairs": 500,
       "a": {
         "engine": "Hybrid",
-        "threads": 8,
-        "options": {
-          "HybridABThreads": "6"
-        }
+        "threads": 8
       },
       "b": {
         "engine": "AB",
@@ -149,10 +144,7 @@
       "pairs": 1000,
       "a": {
         "engine": "Hybrid",
-        "threads": 8,
-        "options": {
-          "HybridABThreads": "6"
-        }
+        "threads": 8
       },
       "b": {
         "engine": "AB",
@@ -171,7 +163,6 @@
         "engine": "Hybrid",
         "threads": 8,
         "options": {
-          "HybridABThreads": "6",
           "TransformerMinMoveBudgetMs": "0",
           "TransformerLowTimeFallbackMs": "0"
         }
@@ -193,10 +184,7 @@
       "book_format": "pgn",
       "a": {
         "engine": "Hybrid",
-        "threads": 8,
-        "options": {
-          "HybridABThreads": "6"
-        }
+        "threads": 8
       },
       "b": {
         "engine": "AB",
@@ -231,7 +219,8 @@
         "engine": "Hybrid",
         "threads": 8,
         "options": {
-          "HybridABThreads": "6"
+          "HybridABThreads": "6",
+          "HybridOversubscribe": "false"
         }
       },
       "b": {
@@ -250,7 +239,8 @@
         "engine": "Hybrid",
         "threads": 8,
         "options": {
-          "HybridOversubscribe": "true"
+          "HybridOversubscribe": "false",
+          "HybridABThreads": "6"
         }
       },
       "b": {
@@ -258,7 +248,7 @@
         "threads": 8
       },
       "est_hours": 32,
-      "note": "oversubscribed hybrid: AB keeps all 8 threads, MCTS worker extra; requires HybridOversubscribe option"
+      "note": "6+1 split hybrid (HybridOversubscribe=false, HybridABThreads=6) vs AB(8): the full price of the thread split; RQ2c ≈ RQ2b − RQ2a"
     },
     {
       "id": "RQ3-T4",
@@ -268,10 +258,7 @@
       "pairs": 400,
       "a": {
         "engine": "Hybrid",
-        "threads": 4,
-        "options": {
-          "HybridABThreads": "2"
-        }
+        "threads": 4
       },
       "b": {
         "engine": "AB",
@@ -287,10 +274,7 @@
       "pairs": 400,
       "a": {
         "engine": "Hybrid",
-        "threads": 6,
-        "options": {
-          "HybridABThreads": "4"
-        }
+        "threads": 6
       },
       "b": {
         "engine": "AB",
@@ -306,10 +290,7 @@
       "pairs": 400,
       "a": {
         "engine": "Hybrid",
-        "threads": 12,
-        "options": {
-          "HybridABThreads": "10"
-        }
+        "threads": 12
       },
       "b": {
         "engine": "AB",
@@ -329,7 +310,6 @@
         "engine": "Hybrid",
         "threads": 8,
         "options": {
-          "HybridABThreads": "6",
           "MCTSMinibatchSize": "4"
         }
       },
@@ -350,7 +330,6 @@
         "engine": "Hybrid",
         "threads": 8,
         "options": {
-          "HybridABThreads": "6",
           "MCTSMinibatchSize": "16"
         }
       },
@@ -371,7 +350,6 @@
         "threads": 8,
         "options": {
           "HybridMCTSThreads": "2",
-          "HybridABThreads": "5",
           "MCTSMaxThreads": "2"
         }
       },
@@ -456,17 +434,11 @@
       "requires": "C11",
       "a": {
         "engine": "HybridMin",
-        "threads": 8,
-        "options": {
-          "HybridABThreads": "6"
-        }
+        "threads": 8
       },
       "b": {
         "engine": "Hybrid",
-        "threads": 8,
-        "options": {
-          "HybridABThreads": "6"
-        }
+        "threads": 8
       },
       "est_hours": 32
     },
@@ -480,7 +452,6 @@
         "engine": "Hybrid",
         "threads": 8,
         "options": {
-          "HybridABThreads": "6",
           "HybridMCTSABRootHints": "false",
           "HybridABCandidateVerifyMs": "0"
         }
