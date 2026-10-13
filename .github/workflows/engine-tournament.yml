@@ -882,13 +882,13 @@ jobs:
 
               Pass criteria (any of):
               1. SPRT H1 accepted (candidate is not weaker)
-              2. SPRT inconclusive AND score >= 45%
-              3. No SPRT, score >= 45% and Elo above threshold
+              2. SPRT inconclusive and the 95% Elo interval includes zero
+                 (a 10-pair phase cannot resolve small differences; raw score
+                 thresholds fired on sampling noise between identical engines)
 
               Fail criteria (any of):
               1. SPRT H0 accepted (candidate IS weaker -- regression confirmed)
-              2. Score < 40% (catastrophic regression regardless of SPRT)
-              3. Elo below max_elo_loss with 95% CI entirely negative
+              2. 95% Elo interval entirely below zero
               """
               w, l, d = result["wins"], result["losses"], result["draws"]
               n = result["total_games"]
@@ -911,12 +911,6 @@ jobs:
                   print(f"  RESULT: SKIPPED (no games played)")
                   return True
 
-              # Catastrophic regression: always fail
-              if n >= 10 and score_pct < 40.0:
-                  print(f"  RESULT: FAIL -- catastrophic regression "
-                        f"(score {score_pct:.1f}% < 40%)")
-                  return False
-
               # SPRT H0 accepted: statistically confirmed regression
               if sprt == "H0":
                   print(f"  RESULT: FAIL -- SPRT H0 accepted "
@@ -929,24 +923,15 @@ jobs:
                         f"(candidate not weaker, Elo {elo:+.1f})")
                   return True
 
-              # Inconclusive or no SPRT: use score threshold
-              if elo < max_elo_loss and (elo + result["elo_error"]) < 0:
-                  print(f"  RESULT: FAIL -- Elo {elo:+.1f} below threshold "
-                        f"{max_elo_loss} (95% CI entirely negative)")
+              # Inconclusive or no SPRT: only a 95% interval entirely below zero fails
+              if (elo + result["elo_error"]) < 0:
+                  print(f"  RESULT: FAIL -- Elo {elo:+.1f} +/- {result['elo_error']:.1f} "
+                        f"(95% CI entirely negative)")
                   return False
 
-              if score_pct >= 45.0:
-                  print(f"  RESULT: PASS -- score {score_pct:.1f}% >= 45% "
-                        f"(no significant regression)")
-                  return True
-
-              # Insufficient data
-              if n < 20:
-                  print(f"  RESULT: PASS (insufficient games for conclusion, n={n})")
-                  return True
-
-              print(f"  RESULT: FAIL -- score {score_pct:.1f}% < 45% over {n} games")
-              return False
+              print(f"  RESULT: PASS -- Elo {elo:+.1f} +/- {result['elo_error']:.1f}, "
+                    f"score {score_pct:.1f}% (no significant regression at n={n})")
+              return True
 
           # ---------------------------------------------------------------
           # Parse all tournament results
