@@ -792,7 +792,7 @@ def default_hybrid_options(weights_path: str, threads: int) -> Dict[str, str]:
         "HybridABCandidateVerifyMs": "240",
         "HybridABCandidateVerifyCount": "5",
         "HybridABPolicyWeight": "0.0",
-        "HybridRootPawnLeverTieBreak": "true",
+        "HybridRootPawnLeverTieBreak": "false",
         "HybridTrace": "false",
     }
 

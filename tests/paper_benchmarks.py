@@ -496,7 +496,7 @@ def detect_engines(threads: int, hash_mb: int) -> Dict[str, EngineConfig]:
             "HybridABCandidateVerifyMs": "240",
             "HybridABCandidateVerifyCount": "5",
             "HybridABPolicyWeight": "0.0",
-            "HybridRootPawnLeverTieBreak": "true",
+            "HybridRootPawnLeverTieBreak": "false",
             "HybridTrace": "false",
         },
     )

@@ -545,7 +545,7 @@ class MetalFishProbe:
                 "HybridABCandidateVerifyMs": "240",
                 "HybridABCandidateVerifyCount": "4",
                 "HybridABPolicyWeight": "0.0",
-                "HybridRootPawnLeverTieBreak": "true",
+                "HybridRootPawnLeverTieBreak": "false",
                 "HybridTrace": "true",
             }
             for name, value in options.items():

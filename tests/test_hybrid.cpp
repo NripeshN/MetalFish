@@ -271,7 +271,8 @@ void test_hybrid_config() {
     EXPECT(tc, config.mcts_ab_root_hint_count == 8);
     EXPECT(tc, config.ab_candidate_verify_ms == 120);
     EXPECT(tc, config.ab_candidate_verify_count == 5);
-    EXPECT(tc, config.root_pawn_lever_tiebreak);
+    EXPECT(tc, !config.root_pawn_lever_tiebreak);
+    EXPECT(tc, config.follow_ab_time);
     EXPECT(tc, !config.ane_root_probe);
     EXPECT(tc, !config.ane_root_hints);
     EXPECT(tc, !config.ane_only_pawn_endgames);
