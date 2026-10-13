@@ -50,7 +50,7 @@ value. Unless stated, all other options are the shipped defaults.
 | `Hybrid-mb{k}(T)` | `Hybrid(T)` + `MCTSMinibatchSize=k` (k ∈ {4,16}) | MCTS throughput knob for RQ4 (needs 03 §C12) |
 | `MCTS(1)` | `UseMCTS=true NNWeights=<BT4> Threads=1 MCTSMaxThreads=1 MCTSMinibatchSize=1 TransformerLowTimeFallbackMs=0` | Pure transformer MCTS as shipped (batch 1, one worker) |
 | `SF19(T)` | Stockfish 19, `Threads=T Hash=2048` | Current release reference |
-| `SFdev(T)` | Stockfish dev-20260106, `Threads=T Hash=2048` | Parity reference for AB |
+| `SFdev(T)` | Stockfish dev-20260106, `Threads=T Hash=2048` | Historical base of MetalFish 1.0.0's AB (the 2026-10-12 port moved the AB core to Stockfish 19; the parity reference is now `SF19` and `bench` reproduces its 2,497,913-node signature) |
 | `Lc0-mb1` | lc0 0.32.1 `--backend=metal`, `option.Threads=1 option.MinibatchSize=1`, BT4 weights | Matched-settings reference for MCTS(1) |
 | `Lc0-def` | lc0 0.32.1 `--backend=metal`, defaults (`Threads` auto, `MinibatchSize` auto), BT4 weights | Lc0 as users run it |
 
@@ -213,10 +213,13 @@ staleness; it is the only clean throughput knob available on this hardware.
 - `RQ5a`: MCTS(1) vs Lc0-mb1, 30+0.3, 300 pairs → is the MCTS implementation on par with
   Lc0's search at matched settings and the same network?
 - `RQ5b` (optional): MCTS(1) vs Lc0-def, 300 pairs → vs Lc0 as users run it.
-- `RQ5c`: AB(8) vs SF19(8), 30+0.3, 500 pairs → how far the port is behind the current
-  Stockfish release (expect −30 to −60 Elo given SF18→SF19 gains).
-- `RQ5d`: AB(8) vs SFdev(8), 30+0.3, 300 pairs → parity with its own base (expect ≈ 0;
-  a non-zero result indicates a porting bug such as the NEON issue fixed in v1.0.0).
+- `RQ5c`: AB(8) vs SF19(8), 30+0.3, 500 pairs → parity of the ported AB core with the current
+  Stockfish release (expect ≈ 0 after the 2026-10-12 port; the port measured +62 ± 28 Elo over
+  the previous dev-20260103 base at 10+0.1).
+- `RQ5d`: AB(8) vs SF19(8) at *equal settings* is the parity check after the Stockfish 19
+  port (expect ≈ 0; `bench` already matches upstream node-for-node). `RQ5c` (AB vs SF19)
+  therefore doubles as the parity cell; the SFdev cell is kept only to quantify how far the
+  published v1.0.0 engine was behind (optional).
 
 ### RQ6 — Arbitration analysis and oracle study
 
