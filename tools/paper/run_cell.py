@@ -229,6 +229,7 @@ def build_command(
         *engine_args(lb, b, engines, hash_mb, engine_log),
         "-each",
         f"tc={tc}",
+        "restart=on",
         "-rounds",
         str(pairs),
         "-games",

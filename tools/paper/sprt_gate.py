@@ -108,6 +108,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         *engine_block("base", base, base_opts, args.base_arg),
         "-each",
         f"tc={args.tc}",
+        "restart=on",
         "-rounds",
         str(args.max_rounds),
         "-games",
