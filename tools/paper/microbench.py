@@ -88,7 +88,12 @@ def nn_sweep(batches: List[int], iterations: int, lc0: Optional[str]) -> Dict:
                 {
                     "minibatch": mb,
                     "nps_per_position": nps,
+                    # Median over all per-second samples (includes the tree-growth
+                    # ramp-up, so it is biased low) and the steady-state rate
+                    # (median of the last five samples), which is the one to report.
                     "nps_median": statistics.median(nps) if nps else None,
+                    "nps_steady_median": (statistics.median(nps[-5:]) if nps else None),
+                    "nps_max": max(nps) if nps else None,
                 }
             )
             print(f"lc0 minibatch={mb}: {nps}")
