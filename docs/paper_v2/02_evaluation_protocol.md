@@ -105,8 +105,9 @@ Rules:
   games, time forfeits, illegal moves, crashes and disconnects are reported per cell.
 - `-recover` restarts a crashed engine; the game is scored per fastchess rules and the
   event is logged. No game is excluded post hoc.
-- Engine restart per game is fastchess's default (process restarted each game); BT4 load
-  time (~1–2 s) happens before `readyok` and is not charged to the clock.
+- Engines are restarted for every game (`-each ... restart=on`; fastchess's default keeps
+  processes alive across games). BT4 load time (~1–2 s) happens before `readyok` and is not
+  charged to the clock.
 - The same book, order and seed are used for every cell within a research question so
   arms and cells see the same opening sample; `-repeat` plays each opening with colours
   swapped.

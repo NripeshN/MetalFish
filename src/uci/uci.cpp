@@ -304,14 +304,28 @@ Search::LimitsType UCIEngine::parse_limits(std::istream &is) {
   return limits;
 }
 
+// A preceding hybrid search may have left the alpha-beta pool at its
+// sub-budget size; plain alpha-beta searches (including the hybrid's
+// time-safety fallback) use the full Threads value. Resizing only when the
+// size differs keeps the per-thread search histories across consecutive
+// searches of the same kind.
+static void ensure_full_thread_pool(Engine &engine) {
+  const auto requested =
+      static_cast<usize>(std::max(1, int(engine.get_options()["Threads"])));
+  if (engine.get_threads().size() != requested)
+    engine.resize_threads();
+}
+
 void UCIEngine::go(std::istringstream &is) {
 
   Search::LimitsType limits = parse_limits(is);
 
   if (limits.perft)
     perft(limits);
-  else
+  else {
+    ensure_full_thread_pool(engine);
     engine.go(limits);
+  }
 }
 
 void UCIEngine::bench(std::istream &args) {
@@ -1708,6 +1722,7 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
     if (auto reason = transformer_low_time_fallback_reason(engine, limits)) {
       sync_cout << "info string Time safety: " << *reason
                 << "; using Alpha-Beta without transformer MCTS" << sync_endl;
+      ensure_full_thread_pool(engine);
       engine.go(limits);
       return;
     }
@@ -1830,6 +1845,7 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   if (auto reason = transformer_low_time_fallback_reason(engine, limits)) {
     sync_cout << "info string Time safety: " << *reason
               << "; using Alpha-Beta without transformer MCTS" << sync_endl;
+    ensure_full_thread_pool(engine);
     engine.go(limits);
     return;
   }

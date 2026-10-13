@@ -427,6 +427,18 @@ bool HybridLowNodeMCTSPrimaryReady(bool enabled, uint64_t requested_nodes,
 HybridBuildMCTSLimits(const ::MetalFish::Search::LimitsType &limits,
                       int time_budget_ms, bool waiting_for_ponderhit);
 
+// The coordinator owns a clock move's wall budget: it keeps the move open
+// until the MCTS side has used it (HybridShouldContinueMCTSAfterAB), so an
+// alpha-beta search that stops early on its own clock-based time management
+// only leaves its workers idle for the rest of the budget. For clock searches
+// this bounds the alpha-beta limits by the budget that is still left
+// (movetime semantics, no clock-based early stop) instead of the game clock.
+// Fixed-budget, analysis and ponder searches are returned unchanged.
+::MetalFish::Search::LimitsType
+HybridBuildABLimits(const ::MetalFish::Search::LimitsType &limits,
+                    int time_budget_ms, int64_t elapsed_ms,
+                    bool waiting_for_ponderhit);
+
 int HybridABCandidateVerifyBudgetMs(
     const ::MetalFish::Search::LimitsType &limits, int time_budget_ms,
     int requested_ms, bool waiting_for_ponderhit);

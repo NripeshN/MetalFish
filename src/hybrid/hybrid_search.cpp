@@ -614,6 +614,32 @@ HybridBuildMCTSLimits(const ::MetalFish::Search::LimitsType &limits,
   return mcts_limits;
 }
 
+::MetalFish::Search::LimitsType
+HybridBuildABLimits(const ::MetalFish::Search::LimitsType &limits,
+                    int time_budget_ms, int64_t elapsed_ms,
+                    bool waiting_for_ponderhit) {
+  ::MetalFish::Search::LimitsType ab_limits = limits;
+  if (waiting_for_ponderhit || limits.ponderMode)
+    return ab_limits;
+
+  const bool fixed_or_analysis = limits.movetime > 0 || limits.nodes > 0 ||
+                                 limits.infinite || limits.depth > 0 ||
+                                 limits.mate > 0;
+  const bool clock_search = limits.time[WHITE] > 0 || limits.time[BLACK] > 0;
+  if (fixed_or_analysis || !clock_search || time_budget_ms <= 0)
+    return ab_limits;
+
+  const int64_t remaining =
+      static_cast<int64_t>(time_budget_ms) - std::max<int64_t>(0, elapsed_ms);
+  ab_limits.movetime = static_cast<TimePoint>(std::max<int64_t>(1, remaining));
+  ab_limits.time[WHITE] = 0;
+  ab_limits.time[BLACK] = 0;
+  ab_limits.inc[WHITE] = 0;
+  ab_limits.inc[BLACK] = 0;
+  ab_limits.movestogo = 0;
+  return ab_limits;
+}
+
 bool HybridMCTSDecisiveFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
                                            uint64_t mcts_total_nodes,
                                            uint32_t mcts_visits,
@@ -3764,10 +3790,7 @@ void ParallelHybridSearch::run_ab_search() {
   if (should_stop())
     return;
 
-  const int original_threads =
-      static_cast<int>(engine_->get_options()["Threads"]);
   const int requested_ab_threads = std::max(1, config_.ab_threads);
-  const bool needs_thread_resize = (requested_ab_threads != original_threads);
   const int original_multipv =
       static_cast<int>(engine_->get_options()["MultiPV"]);
   const bool needs_multipv_reset = original_multipv != 1;
@@ -3777,9 +3800,13 @@ void ParallelHybridSearch::run_ab_search() {
     engine_->get_options().setoption(ss);
   };
 
-  if (needs_thread_resize) {
-    set_engine_option("Threads", requested_ab_threads);
-  }
+  // Size the alpha-beta worker pool for the hybrid's share only when it
+  // actually changes (once per game in practice). Rebuilding the pool
+  // discards every per-thread search history, so it must not happen on each
+  // move; the pool keeps this size until a plain alpha-beta search asks for
+  // the full Threads value again (see UCIEngine::go).
+  if (static_cast<int>(engine_->get_threads().size()) != requested_ab_threads)
+    engine_->resize_threads(requested_ab_threads);
   if (needs_multipv_reset) {
     set_engine_option("MultiPV", 1);
   }
@@ -3902,6 +3929,16 @@ void ParallelHybridSearch::run_ab_search() {
           ponderhit_received_.load(std::memory_order_acquire)) {
         ab_limits.ponderMode = false;
       }
+      // Bound the search by the coordinator's remaining wall budget rather
+      // than the game clock (see HybridBuildABLimits): the move stays open
+      // for the MCTS side until the budget is used, so alpha-beta should
+      // keep searching for the whole window.
+      ab_limits = HybridBuildABLimits(
+          ab_limits, time_budget_ms_.load(std::memory_order_acquire),
+          SteadyNowMs() - search_start_ms_.load(std::memory_order_acquire),
+          limits_.ponderMode &&
+              !ponderhit_received_.load(std::memory_order_acquire));
+      ab_limits.startTime = now();
       engine_->go(ab_limits);
       ab_search_started_.store(true, std::memory_order_release);
       ab_started = true;
@@ -3943,9 +3980,6 @@ void ParallelHybridSearch::run_ab_search() {
 
   if (needs_multipv_reset) {
     set_engine_option("MultiPV", original_multipv);
-  }
-  if (needs_thread_resize) {
-    set_engine_option("Threads", original_threads);
   }
 }
 

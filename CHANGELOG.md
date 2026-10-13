@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Hybrid search no longer rebuilds the alpha-beta thread pool twice per move. The
+  pool is sized for the hybrid's alpha-beta share once and kept, so Stockfish's
+  per-thread search histories now persist across moves; plain alpha-beta
+  searches restore the full `Threads` pool on demand.
 - New `HybridOversubscribe` option (default off): alpha-beta keeps the full
   `Threads` budget in hybrid mode and the MCTS worker runs as an extra thread.
   Off by default pending game validation.

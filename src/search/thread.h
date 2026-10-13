@@ -119,8 +119,11 @@ public:
   void wait_on_thread(usize threadId);
   usize num_threads() const;
   void clear();
+  // requestedOverride > 0 sizes the pool explicitly instead of reading the
+  // Threads option (the hybrid search runs alpha-beta on a sub-budget).
   void set(const NumaConfig &numaConfig, Search::SharedState,
-           const Search::SearchManager::UpdateContext &);
+           const Search::SearchManager::UpdateContext &,
+           usize requestedOverride = 0);
 
   Search::SearchManager *main_manager();
   Thread *main_thread() const { return threads.front().get(); }

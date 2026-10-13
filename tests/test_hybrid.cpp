@@ -340,6 +340,29 @@ void test_hybrid_config() {
     mcts_limits = HybridBuildMCTSLimits(limits, 1500, false);
     EXPECT(tc, mcts_limits.movetime == 1000);
 
+    // Alpha-beta limits inside the hybrid: a clock search is bounded by the
+    // coordinator's remaining budget (movetime, no clock), fixed-budget and
+    // ponder searches are left alone.
+    limits.movetime = 0;
+    auto ab_limits = HybridBuildABLimits(limits, 1500, 400, false);
+    EXPECT(tc, ab_limits.movetime == 1100);
+    EXPECT(tc, ab_limits.time[WHITE] == 0);
+    EXPECT(tc, ab_limits.inc[WHITE] == 0);
+    EXPECT(tc, ab_limits.movestogo == 0);
+    EXPECT(tc, ab_limits.searchmoves.size() == 1);
+    ab_limits = HybridBuildABLimits(limits, 1500, 5000, false);
+    EXPECT(tc, ab_limits.movetime == 1);
+    ab_limits = HybridBuildABLimits(limits, 0, 400, false);
+    EXPECT(tc, ab_limits.movetime == 0);
+    EXPECT(tc, ab_limits.time[WHITE] == 30000);
+    ab_limits = HybridBuildABLimits(limits, 1500, 400, true);
+    EXPECT(tc, ab_limits.movetime == 0);
+    EXPECT(tc, ab_limits.time[WHITE] == 30000);
+    limits.movetime = 1000;
+    ab_limits = HybridBuildABLimits(limits, 1500, 400, false);
+    EXPECT(tc, ab_limits.movetime == 1000);
+    EXPECT(tc, ab_limits.time[WHITE] == 30000);
+
     limits.movetime = 0;
     limits.ponderMode = true;
     EXPECT(tc, !HybridHasMCTSDecisionBudget(limits, 1500, false));
