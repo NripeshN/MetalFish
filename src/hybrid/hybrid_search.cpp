@@ -614,6 +614,32 @@ HybridBuildMCTSLimits(const ::MetalFish::Search::LimitsType &limits,
   return mcts_limits;
 }
 
+::MetalFish::Search::LimitsType
+HybridBuildABLimits(const ::MetalFish::Search::LimitsType &limits,
+                    int time_budget_ms, int64_t elapsed_ms,
+                    bool waiting_for_ponderhit) {
+  ::MetalFish::Search::LimitsType ab_limits = limits;
+  if (waiting_for_ponderhit || limits.ponderMode)
+    return ab_limits;
+
+  const bool fixed_or_analysis = limits.movetime > 0 || limits.nodes > 0 ||
+                                 limits.infinite || limits.depth > 0 ||
+                                 limits.mate > 0;
+  const bool clock_search = limits.time[WHITE] > 0 || limits.time[BLACK] > 0;
+  if (fixed_or_analysis || !clock_search || time_budget_ms <= 0)
+    return ab_limits;
+
+  const int64_t remaining =
+      static_cast<int64_t>(time_budget_ms) - std::max<int64_t>(0, elapsed_ms);
+  ab_limits.movetime = static_cast<TimePoint>(std::max<int64_t>(1, remaining));
+  ab_limits.time[WHITE] = 0;
+  ab_limits.time[BLACK] = 0;
+  ab_limits.inc[WHITE] = 0;
+  ab_limits.inc[BLACK] = 0;
+  ab_limits.movestogo = 0;
+  return ab_limits;
+}
+
 bool HybridMCTSDecisiveFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
                                            uint64_t mcts_total_nodes,
                                            uint32_t mcts_visits,
@@ -3903,6 +3929,16 @@ void ParallelHybridSearch::run_ab_search() {
           ponderhit_received_.load(std::memory_order_acquire)) {
         ab_limits.ponderMode = false;
       }
+      // Bound the search by the coordinator's remaining wall budget rather
+      // than the game clock (see HybridBuildABLimits): the move stays open
+      // for the MCTS side until the budget is used, so alpha-beta should
+      // keep searching for the whole window.
+      ab_limits = HybridBuildABLimits(
+          ab_limits, time_budget_ms_.load(std::memory_order_acquire),
+          SteadyNowMs() - search_start_ms_.load(std::memory_order_acquire),
+          limits_.ponderMode &&
+              !ponderhit_received_.load(std::memory_order_acquire));
+      ab_limits.startTime = now();
       engine_->go(ab_limits);
       ab_search_started_.store(true, std::memory_order_release);
       ab_started = true;
