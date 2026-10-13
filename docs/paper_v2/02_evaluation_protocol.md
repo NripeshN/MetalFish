@@ -340,4 +340,13 @@ the SHOULD cells with its own manifest (results are per-machine and are *not* po
 
 ## 11. Amendments
 
-(none yet)
+1. **2026-10-13 — shipped hybrid configuration changed before the freeze** (strength
+   programme 07, L5b–L5e; codebase changes C13–C16): the alpha-beta pool persists across
+   hybrid moves, Stockfish's time manager owns the clock in hybrid mode
+   (`HybridFollowABTime=true`, the coordinator's per-move budget bounds only the MCTS side),
+   and the root tie-break overrides are off (`HybridRootPawnLeverTieBreak=false`). The
+   "Hybrid" arm in §2 and `experiments.json` means this configuration; the v1.0 hybrid is
+   kept as a secondary arm where the budget allows (RQ1d). Gate evidence: L7b, +74 ± 30 Elo
+   over the previous hybrid at 20+0.2 (100 games).
+2. **2026-10-13 — engines restart per game** (`restart=on`), already stated in §3; fastchess
+   keeps processes alive by default, which the first runs did not override.

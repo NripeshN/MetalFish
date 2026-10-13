@@ -64,7 +64,8 @@ the hybrid as finally configured and, where a change was measured, the before/af
 | --- | --- | --- | --- |
 | C13 | **Alpha-beta pool stable across hybrid moves** (07 L5b): `ThreadPool::set` size override, `Engine::resize_threads(int)`, hybrid resizes only when the size changes, plain searches restore the full pool. | `src/search/thread.{h,cpp}`, `src/uci/{engine,uci}.cpp`, `src/hybrid/hybrid_search.cpp` | PR #73; gate L6b showed the time-manager interaction below. |
 | C14 | **Hybrid alpha-beta bounded by the coordinator budget** (07 L5c): `HybridBuildABLimits` (movetime = remaining budget for clock searches). | `src/hybrid/hybrid_search.{h,cpp}`, `tests/test_hybrid.cpp` | PR #73; gate L6c running. |
-| C15 | **`HybridFollowABTime`** (07 L5d, opt-in): a clock move ends when alpha-beta's own time manager stops; MCTS stopped with it. | `src/uci/{engine,uci}.cpp`, `src/hybrid/hybrid_search.{h,cpp}`, `tests/test_hybrid.cpp` | branch `hybrid-follow-ab-time`; gate L7 queued after L6c; default flipped only if L7 passes. |
+| C15 | **`HybridFollowABTime`** (07 L5d, opt-in): a clock move ends when alpha-beta's own time manager stops; MCTS stopped with it. | `src/uci/{engine,uci}.cpp`, `src/hybrid/hybrid_search.{h,cpp}`, `tests/test_hybrid.cpp` | branch `hybrid-follow-ab-time`; gate L7b (+74 ± 30 after 100 games vs the main hybrid) → **default on**; the per-move deadline no longer applies to clock searches in this mode (`HybridABTimeManagerOwnsClock`). |
+| C16 | **Root tie-break overrides off by default** (`HybridRootPawnLeverTieBreak=false`, gates the pawn-lever and quiet-attack tie-breaks): oracle study of 22 override positions (SF19) showed a 1.2% expected-score cost per override. | `src/uci/engine.cpp`, `src/hybrid/hybrid_search.h`, tool/CI option tables | Gated with C15 in L7b; RQ6c separates them. |
 
 ## P1 — Ablation switch (needed for RQ6c; defaults preserve shipped behaviour)
 
