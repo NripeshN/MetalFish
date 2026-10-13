@@ -43,7 +43,7 @@ cap is reported with its CI and the author decides.
 | Gate | Arms | Result | Reading |
 | --- | --- | --- | --- |
 | `L8_hybrid_new_vs_ab8_20p02` | adopted hybrid (L5b–L5e; 6 AB threads + 1 MCTS) vs plain alpha-beta with 8 threads, same binary, 20+0.2 | **−11.6 ± 20.7 Elo after 151 games** (LOS 14%), stopped by the 150-game rule | Telemetry: the hybrid never deviates from alpha-beta's move (tie-breaks off), falls back to plain alpha-beta on 64% of moves at this TC, and in hybrid moves reaches the same depth with 3% fewer nodes; MCTS gets a median of 27 evaluations per move. The remaining gap is the thread split plus noise → L9. |
-| `L9_hybrid_oversub_vs_split_20p02` | adopted hybrid with `HybridOversubscribe=true` (alpha-beta keeps 8 threads, MCTS worker extra) vs the 6+1 split, same binary, 20+0.2 | started 2026-10-13 ~13:00 BST | Decides the shipped thread policy before the paper cells. |
+| `L9_hybrid_oversub_vs_split_20p02` | adopted hybrid with `HybridOversubscribe=true` (alpha-beta keeps 8 threads, MCTS worker extra) vs the 6+1 split, same binary, 20+0.2 | **+15.1 ± 17.0 Elo after 300 games** (LOS 96%, pairs ratio 1.59), stopped by the author's 300-game rule; fastchess's normalized LLR 0.34 of 2.94 | **ADOPTED (author decision under the capped-run rule):** the point estimate is positive at LOS 96%, the mechanism is direct (L8 showed the 6-thread split costs against plain 8-thread alpha-beta and MCTS decides <1% of moves, so giving alpha-beta its threads back cannot plausibly hurt), and the alternative keeps a dominated configuration. `HybridOversubscribe=true` by default (C17); the paper's Hybrid arm is the oversubscribed configuration (02 §11.3). |
 
 ## Order of work
 
