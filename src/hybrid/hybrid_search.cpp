@@ -508,8 +508,8 @@ bool HybridShouldContinueMCTSAfterAB(
   return !follow_ab_time && (limits.time[WHITE] > 0 || limits.time[BLACK] > 0);
 }
 
-bool HybridABTimeManagerOwnsClock(
-    const ::MetalFish::Search::LimitsType &limits, bool follow_ab_time) {
+bool HybridABTimeManagerOwnsClock(const ::MetalFish::Search::LimitsType &limits,
+                                  bool follow_ab_time) {
   if (!follow_ab_time)
     return false;
   if (limits.movetime > 0 || limits.nodes > 0 || limits.infinite ||
