@@ -38,6 +38,13 @@ cap is reported with its CI and the author decides.
 | L8 | **Syzygy 6-piece tablebases** (≈150 GB). | +5 to +15 Elo at long TC only | Deferred: disk and download cost; not part of the paper's primary cells |
 | L9 | **CUDA path**: the SF19 port carries over automatically; the CUDA MCTS backend is parity-gated in CI only. | Same AB gain on NVIDIA hosts | Compile gate must stay green; no local measurement possible |
 
+## Strength checks on the adopted hybrid (2026-10-13)
+
+| Gate | Arms | Result | Reading |
+| --- | --- | --- | --- |
+| `L8_hybrid_new_vs_ab8_20p02` | adopted hybrid (L5b–L5e; 6 AB threads + 1 MCTS) vs plain alpha-beta with 8 threads, same binary, 20+0.2 | **−11.6 ± 20.7 Elo after 151 games** (LOS 14%), stopped by the 150-game rule | Telemetry: the hybrid never deviates from alpha-beta's move (tie-breaks off), falls back to plain alpha-beta on 64% of moves at this TC, and in hybrid moves reaches the same depth with 3% fewer nodes; MCTS gets a median of 27 evaluations per move. The remaining gap is the thread split plus noise → L9. |
+| `L9_hybrid_oversub_vs_split_20p02` | adopted hybrid with `HybridOversubscribe=true` (alpha-beta keeps 8 threads, MCTS worker extra) vs the 6+1 split, same binary, 20+0.2 | started 2026-10-13 ~13:00 BST | Decides the shipped thread policy before the paper cells. |
+
 ## Order of work
 
 1. L1 (port) → bench parity, unit/perft/UCI/hybrid smokes → SPRT vs the pre-port binary at 10+0.1 [0, 10].
