@@ -45,7 +45,7 @@ value. Unless stated, all other options are the shipped defaults.
 | Name | Options | Notes |
 | --- | --- | --- |
 | `AB(T)` | `UseHybridSearch=false UseMCTS=false Threads=T Hash=2048` | Pure CPU alpha-beta + NNUE (Stockfish-derived) |
-| `Hybrid(T)` | `UseHybridSearch=true NNWeights=<BT4> Threads=T Hash=2048 HybridTrace=true` | On a game clock with T≥8: 1 MCTS worker + (T−2) AB threads + coordinator. For T<8 the engine uses T−1 AB threads; to keep the rule uniform across RQ3 cells set `HybridMCTSThreads=1 HybridABThreads=T-2` explicitly for every hybrid cell and verify via the `Hybrid thread split:` log line |
+| `Hybrid(T)` | `UseHybridSearch=true NNWeights=<BT4> Threads=T Hash=2048 HybridTrace=true` | Shipped configuration (amendment §11.3, 2026-10-13): on a game clock alpha-beta keeps all T threads and the single MCTS worker is an extra thread that mostly blocks on GPU inference (`HybridOversubscribe=true`), Stockfish's time manager owns the move (`HybridFollowABTime=true`), root tie-break overrides off. `Hybrid-split(T)` = `Hybrid(T)` + `HybridOversubscribe=false HybridABThreads=T−2` (1 MCTS worker + (T−2) AB threads), the pre-amendment arm, used as the ablation in RQ2b/RQ2c. |
 | `Hybrid-min(T)` | `Hybrid(T)` + `HybridArbitration=minimal` (new option, see 03 §C11) | AB move by default; MCTS move only when AB has no result. Isolates the override ladder |
 | `Hybrid-mb{k}(T)` | `Hybrid(T)` + `MCTSMinibatchSize=k` (k ∈ {4,16}) | MCTS throughput knob for RQ4 (needs 03 §C12) |
 | `MCTS(1)` | `UseMCTS=true NNWeights=<BT4> Threads=1 MCTSMaxThreads=1 MCTSMinibatchSize=1 TransformerLowTimeFallbackMs=0` | Pure transformer MCTS as shipped (batch 1, one worker) |
@@ -179,12 +179,15 @@ strength, on one machine, at equal wall-clock and equal total CPU-thread budget?
 
 ### RQ2 — Isolation: cost of threads vs value of MCTS
 
-- `RQ2a`: AB(6) vs AB(8), 30+0.3, 500 pairs → the price the hybrid pays for giving two
-  threads to MCTS and the coordinator (expect −10 to −25 Elo).
-- `RQ2b`: Hybrid(8) vs AB(6), 30+0.3, 500 pairs → value of the GPU search given the *same*
-  AB resources (expect ≥ 0 if the arbiter never picks a worse move).
-- Interpretation: RQ1a ≈ RQ2b − RQ2a. A positive RQ2b with a negative RQ1a means the GPU
-  helps but not enough to pay for its CPU threads on this core count.
+- `RQ2a`: AB(6) vs AB(8), 30+0.3, 500 pairs → the price of giving two of eight CPU threads
+  to the GPU side (the pre-amendment split).
+- `RQ2b`: Hybrid-split(8) vs AB(6), 30+0.3, 500 pairs → value of the GPU search given the
+  *same* six alpha-beta threads.
+- `RQ2c`: Hybrid-split(8) vs AB(8), 30+0.3, 500 pairs → the pre-amendment headline;
+  RQ2c ≈ RQ2b − RQ2a.
+- Interpretation: RQ1a (shipped, oversubscribed hybrid vs AB(8)) measures the marginal value
+  of the GPU side at the full CPU budget; RQ2a–c decompose the old split design. A positive
+  RQ2b with a negative RQ2c means the GPU search helps only when CPU threads are free.
 
 ### RQ3 — CPU-budget crossover
 
@@ -350,3 +353,9 @@ the SHOULD cells with its own manifest (results are per-machine and are *not* po
    over the previous hybrid at 20+0.2 (100 games).
 2. **2026-10-13 — engines restart per game** (`restart=on`), already stated in §3; fastchess
    keeps processes alive by default, which the first runs did not override.
+3. **2026-10-13 — shipped hybrid is oversubscribed** (programme 07 L9; codebase change C17):
+   `HybridOversubscribe=true` by default, so `Hybrid(T)` keeps all T alpha-beta threads and
+   runs the MCTS worker as an extra thread. Hybrid cells no longer pin `HybridABThreads`;
+   the 6+1 split becomes `Hybrid-split(T)` and is the ablation in RQ2b/RQ2c (RQ2c repurposed
+   from "oversubscribed vs AB(8)", which RQ1a now covers). Gate evidence: L9 (oversubscribed
+   vs split, 20+0.2) — see 07.

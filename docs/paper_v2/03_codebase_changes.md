@@ -66,6 +66,7 @@ the hybrid as finally configured and, where a change was measured, the before/af
 | C14 | **Hybrid alpha-beta bounded by the coordinator budget** (07 L5c): `HybridBuildABLimits` (movetime = remaining budget for clock searches). | `src/hybrid/hybrid_search.{h,cpp}`, `tests/test_hybrid.cpp` | PR #73; gate L6c running. |
 | C15 | **`HybridFollowABTime`** (07 L5d, opt-in): a clock move ends when alpha-beta's own time manager stops; MCTS stopped with it. | `src/uci/{engine,uci}.cpp`, `src/hybrid/hybrid_search.{h,cpp}`, `tests/test_hybrid.cpp` | branch `hybrid-follow-ab-time`; gate L7b (+74 ± 30 after 100 games vs the main hybrid) → **default on**; the per-move deadline no longer applies to clock searches in this mode (`HybridABTimeManagerOwnsClock`). |
 | C16 | **Root tie-break overrides off by default** (`HybridRootPawnLeverTieBreak=false`, gates the pawn-lever and quiet-attack tie-breaks): oracle study of 22 override positions (SF19) showed a 1.2% expected-score cost per override. | `src/uci/engine.cpp`, `src/hybrid/hybrid_search.h`, tool/CI option tables | Gated with C15 in L7b; RQ6c separates them. |
+| C17 | **Oversubscription by default** (`HybridOversubscribe=true`): alpha-beta keeps all `Threads`, the MCTS worker is an extra thread. | `src/uci/engine.cpp` | Gate L9 (oversubscribed vs 6+1 split on the adopted hybrid, 20+0.2): see 07. |
 
 ## P1 — Ablation switch (needed for RQ6c; defaults preserve shipped behaviour)
 
