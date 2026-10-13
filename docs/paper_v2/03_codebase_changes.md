@@ -53,6 +53,19 @@ Verified against `b935e66` on 2026-10-07 (full audit in `01_published_paper_audi
 | C11a | **Microbenchmarks**: `tools/paper/nn_latency_sweep.py` (nn_probe + lc0 benchmark across batch sizes and precision), `tools/paper/ab_scaling.py` (fixed-depth bench vs threads), `tools/paper/make_figures.py` (all figures from JSON). | `tools/paper/` | Figures M1/M2 regenerate from JSON with one command. |
 | C12 | **Minibatch on a clock.** Verify whether the hybrid forces `MCTSMinibatchSize=1` when the per-move budget is < 1000 ms (`src/uci/uci.cpp:~1187-1191` forces 1 for `movetime < 1000`). For RQ4 the requested minibatch must be honoured on a clock budget; add `MCTSMinibatchSize` precedence over the auto rule when set explicitly, keeping auto behaviour unchanged. | `src/uci/uci.cpp`, `src/mcts/search.cpp` | Trace shows the configured minibatch and ~3× evals/s at mb16 in a 30+0.3 pilot game. |
 
+## P0b — Engine-strength changes made under the strength programme (07)
+
+The author's 2026-10-12 re-scope ("strongest engine first, then the preprint") supersedes
+the "no changes to the search" non-goal below for the items in
+`07_engine_strength_program.md`; each is game-gated and recorded there. The paper reports
+the hybrid as finally configured and, where a change was measured, the before/after gate.
+
+| # | Change | Files | Status |
+| --- | --- | --- | --- |
+| C13 | **Alpha-beta pool stable across hybrid moves** (07 L5b): `ThreadPool::set` size override, `Engine::resize_threads(int)`, hybrid resizes only when the size changes, plain searches restore the full pool. | `src/search/thread.{h,cpp}`, `src/uci/{engine,uci}.cpp`, `src/hybrid/hybrid_search.cpp` | PR #73; gate L6b showed the time-manager interaction below. |
+| C14 | **Hybrid alpha-beta bounded by the coordinator budget** (07 L5c): `HybridBuildABLimits` (movetime = remaining budget for clock searches). | `src/hybrid/hybrid_search.{h,cpp}`, `tests/test_hybrid.cpp` | PR #73; gate L6c running. |
+| C15 | **`HybridFollowABTime`** (07 L5d, opt-in): a clock move ends when alpha-beta's own time manager stops; MCTS stopped with it. | `src/uci/{engine,uci}.cpp`, `src/hybrid/hybrid_search.{h,cpp}`, `tests/test_hybrid.cpp` | branch `hybrid-follow-ab-time`; gate L7 queued after L6c; default flipped only if L7 passes. |
+
 ## P1 — Ablation switch (needed for RQ6c; defaults preserve shipped behaviour)
 
 | ID | Change | Where | Acceptance |
