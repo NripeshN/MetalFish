@@ -338,6 +338,8 @@ void test_hybrid_config() {
     // manager; fixed-budget searches still run MCTS to their budget.
     EXPECT(tc, !HybridShouldContinueMCTSAfterAB(limits, true));
     EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits, false));
+    EXPECT(tc, HybridABTimeManagerOwnsClock(limits, true));
+    EXPECT(tc, !HybridABTimeManagerOwnsClock(limits, false));
 
     limits.movetime = 1000;
     EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits));
@@ -345,6 +347,7 @@ void test_hybrid_config() {
     mcts_limits = HybridBuildMCTSLimits(limits, 1500, false);
     EXPECT(tc, mcts_limits.movetime == 1000);
     EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits, true));
+    EXPECT(tc, !HybridABTimeManagerOwnsClock(limits, true));
 
     // Alpha-beta limits inside the hybrid: a clock search is bounded by the
     // coordinator's remaining budget (movetime, no clock), fixed-budget and

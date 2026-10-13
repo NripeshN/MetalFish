@@ -412,6 +412,13 @@ std::unique_ptr<ParallelHybridSearch> create_parallel_hybrid_search(
 bool HybridShouldContinueMCTSAfterAB(
     const ::MetalFish::Search::LimitsType &limits, bool follow_ab_time = false);
 
+// With follow_ab_time a clock search is ended by alpha-beta's own time
+// manager (Stockfish optimum/maximum), so the coordinator's per-move budget
+// must not cut it short; the budget still bounds the MCTS side and the
+// decision thresholds. Fixed-budget and analysis searches keep the deadline.
+bool HybridABTimeManagerOwnsClock(
+    const ::MetalFish::Search::LimitsType &limits, bool follow_ab_time);
+
 bool HybridCanReuseABPositionHistory(const std::string &engine_fen,
                                      const std::string &root_fen);
 

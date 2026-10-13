@@ -508,6 +508,16 @@ bool HybridShouldContinueMCTSAfterAB(
   return !follow_ab_time && (limits.time[WHITE] > 0 || limits.time[BLACK] > 0);
 }
 
+bool HybridABTimeManagerOwnsClock(
+    const ::MetalFish::Search::LimitsType &limits, bool follow_ab_time) {
+  if (!follow_ab_time)
+    return false;
+  if (limits.movetime > 0 || limits.nodes > 0 || limits.infinite ||
+      limits.depth > 0 || limits.mate > 0)
+    return false;
+  return limits.time[WHITE] > 0 || limits.time[BLACK] > 0;
+}
+
 bool HybridCanReuseABPositionHistory(const std::string &engine_fen,
                                      const std::string &root_fen) {
   return !engine_fen.empty() && engine_fen == root_fen;
@@ -2869,7 +2879,8 @@ bool ParallelHybridSearch::should_stop() const {
   }
 
   const int time_budget_ms = time_budget_ms_.load(std::memory_order_acquire);
-  if (time_budget_ms > 0) {
+  if (time_budget_ms > 0 &&
+      !HybridABTimeManagerOwnsClock(limits_, config_.follow_ab_time)) {
     const int64_t search_start_ms =
         search_start_ms_.load(std::memory_order_acquire);
     const int64_t elapsed_ms = SteadyNowMs() - search_start_ms;
