@@ -1271,6 +1271,7 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   config.decision_mode = MCTS::ParallelHybridConfig::DecisionMode::DYNAMIC;
   config.transformer_batch_size = 128;
   config.use_transformer_prefetch = true;
+  config.follow_ab_time = engine.get_options()["HybridFollowABTime"];
   config.ab_root_reject_mcts = engine.get_options()["HybridABRootRejectMCTS"];
   config.mcts_root_reject = engine.get_options()["HybridMCTSRootReject"];
   config.use_shared_tt = engine.get_options()["HybridMCTSUseSharedTT"];

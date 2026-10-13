@@ -32,6 +32,11 @@ ANE_MODEL = PROJ / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc"
 
 ITERATIONS = 20
 TIMEOUT_BESTMOVE = 15.0
+# The clock-based regression scenarios give the engine minutes on the clock, and
+# in hybrid mode Stockfish's time manager owns the move (HybridFollowABTime), so a
+# think of tens of seconds after ponderhit is legitimate there; these scenarios
+# guard against hangs and invalid moves, not against thinking time.
+TIMEOUT_CLOCK_REGRESSION = 90.0
 TIMEOUT_FOLLOWUP = 10.0
 
 POSITIONS = [
@@ -521,7 +526,7 @@ def main():
         send("position startpos moves d2d4 g8f6 c2c4 e7e6 g2g3 d7d5 f1g2")
         send("go ponder wtime 305930 btime 293540 winc 3000 binc 3000")
         send("ponderhit")
-        r, regression_lines = read_until_collect("bestmove", TIMEOUT_BESTMOVE)
+        r, regression_lines = read_until_collect("bestmove", TIMEOUT_CLOCK_REGRESSION)
         if not alive():
             print(f"  [FILqKzru] CRASH after book ponderhit (exit {proc.returncode})")
             stats["crashes"] += 1
@@ -577,7 +582,9 @@ def main():
             stats["early_bestmove"] += 1
         else:
             send("ponderhit")
-            r, regression_lines = read_until_collect("bestmove", TIMEOUT_BESTMOVE)
+            r, regression_lines = read_until_collect(
+                "bestmove", TIMEOUT_CLOCK_REGRESSION
+            )
             if r is None or r == "TIMEOUT":
                 print("  [NBCejRUE] TIMEOUT after ponderhit")
                 stats["timeouts"] += 1

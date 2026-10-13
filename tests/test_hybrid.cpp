@@ -271,7 +271,8 @@ void test_hybrid_config() {
     EXPECT(tc, config.mcts_ab_root_hint_count == 8);
     EXPECT(tc, config.ab_candidate_verify_ms == 120);
     EXPECT(tc, config.ab_candidate_verify_count == 5);
-    EXPECT(tc, config.root_pawn_lever_tiebreak);
+    EXPECT(tc, !config.root_pawn_lever_tiebreak);
+    EXPECT(tc, config.follow_ab_time);
     EXPECT(tc, !config.ane_root_probe);
     EXPECT(tc, !config.ane_root_hints);
     EXPECT(tc, !config.ane_only_pawn_endgames);
@@ -334,11 +335,20 @@ void test_hybrid_config() {
     EXPECT(tc, mcts_limits.inc[WHITE] == 0);
     EXPECT(tc, mcts_limits.searchmoves.size() == 1);
 
+    // HybridFollowABTime: a clock search ends with alpha-beta's own time
+    // manager; fixed-budget searches still run MCTS to their budget.
+    EXPECT(tc, !HybridShouldContinueMCTSAfterAB(limits, true));
+    EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits, false));
+    EXPECT(tc, HybridABTimeManagerOwnsClock(limits, true));
+    EXPECT(tc, !HybridABTimeManagerOwnsClock(limits, false));
+
     limits.movetime = 1000;
     EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits));
     EXPECT(tc, !HybridCanStopEarlyOnAgreement(limits));
     mcts_limits = HybridBuildMCTSLimits(limits, 1500, false);
     EXPECT(tc, mcts_limits.movetime == 1000);
+    EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits, true));
+    EXPECT(tc, !HybridABTimeManagerOwnsClock(limits, true));
 
     // Alpha-beta limits inside the hybrid: a clock search is bounded by the
     // coordinator's remaining budget (movetime, no clock), fixed-budget and

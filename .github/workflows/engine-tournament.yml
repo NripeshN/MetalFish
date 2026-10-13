@@ -509,7 +509,7 @@ jobs:
               option.HybridMCTSABRootHintDelayMs=0 \
               option.HybridABCandidateVerifyMs=240 \
               option.HybridABCandidateVerifyCount=5 \
-              option.HybridRootPawnLeverTieBreak=true \
+              option.HybridRootPawnLeverTieBreak=false \
               option.HybridMCTSUseSharedTT=false \
               option.HybridMCTSMinimumKLDGainPerNode=0.0 \
               option.HybridABPolicyWeight=0.0 \
@@ -539,7 +539,7 @@ jobs:
               option.HybridMCTSABRootHintDelayMs=0 \
               option.HybridABCandidateVerifyMs=240 \
               option.HybridABCandidateVerifyCount=5 \
-              option.HybridRootPawnLeverTieBreak=true \
+              option.HybridRootPawnLeverTieBreak=false \
               option.HybridMCTSUseSharedTT=false \
               option.HybridMCTSMinimumKLDGainPerNode=0.0 \
               option.HybridABPolicyWeight=0.0 \
@@ -662,7 +662,7 @@ jobs:
               option.HybridMCTSABRootHintDelayMs=0 \
               option.HybridABCandidateVerifyMs=240 \
               option.HybridABCandidateVerifyCount=5 \
-              option.HybridRootPawnLeverTieBreak=true \
+              option.HybridRootPawnLeverTieBreak=false \
               option.HybridMCTSUseSharedTT=false \
               option.HybridMCTSMinimumKLDGainPerNode=0.0 \
               option.HybridABPolicyWeight=0.0 \
@@ -692,7 +692,7 @@ jobs:
               option.HybridMCTSABRootHintDelayMs=0 \
               option.HybridABCandidateVerifyMs=240 \
               option.HybridABCandidateVerifyCount=5 \
-              option.HybridRootPawnLeverTieBreak=true \
+              option.HybridRootPawnLeverTieBreak=false \
               option.HybridMCTSUseSharedTT=false \
               option.HybridMCTSMinimumKLDGainPerNode=0.0 \
               option.HybridABPolicyWeight=0.0 \
