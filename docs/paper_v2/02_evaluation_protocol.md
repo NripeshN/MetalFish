@@ -341,6 +341,14 @@ the SHOULD cells with its own manifest (results are per-machine and are *not* po
    `Move Overhead` for both arms equally and record.
 5. Freeze: tag `paper-v2-protocol-freeze`; start MUST cells.
 
+**Pilot record (2026-10-13, build 8777b99 = tree of PR #75, 50 pairs of RQ1a at 30+0.3):**
+draw rate 46% (within 45–65%), time forfeits 0, `-srand` reproducible, fastchess and
+`penta_stats.py` agree (−41.89 ± 25.07 both), mean game 1.95 min, GPU-active fraction
+**50.1%** of the hybrid arm's moves (median 27 MCTS evaluations per move) — below the 80%
+target; see amendment §11.4. The pilot's strength reading (−41.9 ± 25.1 Elo for the hybrid)
+triggered a diagnostic gate before the freeze (07, L10); the MUST cells start on the engine
+that results from it.
+
 ## 11. Amendments
 
 1. **2026-10-13 — shipped hybrid configuration changed before the freeze** (strength
@@ -359,3 +367,10 @@ the SHOULD cells with its own manifest (results are per-machine and are *not* po
    the 6+1 split becomes `Hybrid-split(T)` and is the ablation in RQ2b/RQ2c (RQ2c repurposed
    from "oversubscribed vs AB(8)", which RQ1a now covers). Gate evidence: L9 (oversubscribed
    vs split, 20+0.2) — see 07.
+4. **2026-10-13 — GPU-active target not met at 30+0.3.** The pilot measured the GPU active on
+   50% of the hybrid's moves at the primary time control (the time-safety fallback runs plain
+   alpha-beta once the estimated budget is below 400 ms or the clock below 3 s, and
+   Stockfish-style time use reaches that regime by mid-game). The 80% criterion of §10 was a
+   feasibility target, not a property the engine guarantees; RQ1a keeps 30+0.3 as pre-registered
+   and reports the fraction as a covariate (M5), and RQ1b (60+0.6) is promoted to the first
+   SHOULD cell because it is the regime with the most GPU participation.
