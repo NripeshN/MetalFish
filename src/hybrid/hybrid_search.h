@@ -186,6 +186,12 @@ struct ParallelHybridConfig {
   int ab_max_depth = 64;
   bool ab_use_time = true;
 
+  // Let Stockfish's clock-based time manager end the move: alpha-beta keeps
+  // the game clock, and the coordinator stops the MCTS side as soon as
+  // alpha-beta has finished instead of running it to the fixed per-move
+  // budget. Opt-in (UCI HybridFollowABTime) until it is Elo-proven.
+  bool follow_ab_time = false;
+
   // Experimental AB PV -> MCTS prior mutation. Keep opt-in until it is
   // Elo-proven; unsafe prior mutation can overpower the network root policy.
   float ab_policy_weight = 0.0f;
@@ -401,8 +407,10 @@ std::unique_ptr<ParallelHybridSearch> create_parallel_hybrid_search(
 
 // Returns true when the coordinator, not AB's time manager, owns the outer
 // search budget and should keep MCTS running after AB has produced a result.
+// With follow_ab_time a clock search ends when alpha-beta's own time manager
+// stops (the MCTS side is stopped with it).
 bool HybridShouldContinueMCTSAfterAB(
-    const ::MetalFish::Search::LimitsType &limits);
+    const ::MetalFish::Search::LimitsType &limits, bool follow_ab_time = false);
 
 bool HybridCanReuseABPositionHistory(const std::string &engine_fen,
                                      const std::string &root_fen);

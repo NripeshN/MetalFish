@@ -500,12 +500,12 @@ int ParallelHybridSearch::calculate_time_budget() const {
 }
 
 bool HybridShouldContinueMCTSAfterAB(
-    const ::MetalFish::Search::LimitsType &limits) {
+    const ::MetalFish::Search::LimitsType &limits, bool follow_ab_time) {
   if (limits.movetime > 0 || limits.nodes > 0 || limits.infinite)
     return true;
   if (limits.depth > 0 || limits.mate > 0)
     return false;
-  return limits.time[WHITE] > 0 || limits.time[BLACK] > 0;
+  return !follow_ab_time && (limits.time[WHITE] > 0 || limits.time[BLACK] > 0);
 }
 
 bool HybridCanReuseABPositionHistory(const std::string &engine_fen,
@@ -3933,12 +3933,14 @@ void ParallelHybridSearch::run_ab_search() {
       // than the game clock (see HybridBuildABLimits): the move stays open
       // for the MCTS side until the budget is used, so alpha-beta should
       // keep searching for the whole window.
-      ab_limits = HybridBuildABLimits(
-          ab_limits, time_budget_ms_.load(std::memory_order_acquire),
-          SteadyNowMs() - search_start_ms_.load(std::memory_order_acquire),
-          limits_.ponderMode &&
-              !ponderhit_received_.load(std::memory_order_acquire));
-      ab_limits.startTime = now();
+      if (!config_.follow_ab_time) {
+        ab_limits = HybridBuildABLimits(
+            ab_limits, time_budget_ms_.load(std::memory_order_acquire),
+            SteadyNowMs() - search_start_ms_.load(std::memory_order_acquire),
+            limits_.ponderMode &&
+                !ponderhit_received_.load(std::memory_order_acquire));
+        ab_limits.startTime = now();
+      }
       engine_->go(ab_limits);
       ab_search_started_.store(true, std::memory_order_release);
       ab_started = true;
@@ -4022,7 +4024,8 @@ void ParallelHybridSearch::coordinator_thread_main() {
     bool mcts_done = !mcts_state_.mcts_running.load(std::memory_order_acquire);
 
     if (ab_done && ab_state_.has_result.load(std::memory_order_acquire)) {
-      if (!HybridShouldContinueMCTSAfterAB(limits_) || mcts_done) {
+      if (!HybridShouldContinueMCTSAfterAB(limits_, config_.follow_ab_time) ||
+          mcts_done) {
         break;
       }
     }
