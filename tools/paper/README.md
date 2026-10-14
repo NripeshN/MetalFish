@@ -12,6 +12,7 @@ experiment manifest: `docs/paper_v2/experiments.json`.
 | `oracle_probe.py` | Judge AB vs MCTS moves on disagreement positions with reference engines (Stockfish 19, optionally Lc0); loss per candidate, oracle-arbiter upper bound, bootstrap CIs. |
 | `suite_runner.py` | EPD suites (bm/am) and Lichess puzzle samples for any UCI engine; Wilson intervals; per-rating-band puzzle accuracy. |
 | `microbench.py` | `nn`: BT4 latency/throughput vs batch size (MetalFish FP16/FP32 and Lc0); `ab`: `bench` NPS vs thread count. |
+| `annotate_chapter.py` | Highlights every corrected passage of the published chapter's camera-ready PDF with the corrected statement (from `docs/paper_v2/correction/annotations.json`); exits non-zero if an anchor is missing. Needs PyMuPDF. |
 
 Calibration artifacts (fastchess self-match of Stockfish 19 used to validate `penta_stats.py`)
 live under `results/paper_v2/calibration/` (gitignored).
