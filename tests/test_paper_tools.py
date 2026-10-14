@@ -154,5 +154,71 @@ class TraceParserTest(unittest.TestCase):
         self.assertEqual(recs[0]["engine"], "MF-Hybrid-T8")
 
 
+class OracleSamplingTest(unittest.TestCase):
+    """Pins the stratified sampler of tools/paper/oracle_probe.py (protocol §11.6)."""
+
+    OPENING = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 10"
+    MIDDLE = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 30"
+    ENDGAME = "8/8/4k3/8/8/4K3/4R3/8 w - - 0 60"
+
+    def setUp(self):
+        try:
+            import oracle_probe  # noqa: F401
+        except ImportError as exc:  # python-chess missing
+            self.skipTest(f"oracle_probe unavailable: {exc}")
+        self.op = sys.modules["oracle_probe"]
+
+    def test_phase_rule(self):
+        self.assertEqual(self.op.phase_of(self.OPENING), "opening")
+        self.assertEqual(self.op.phase_of(self.MIDDLE), "middlegame")
+        self.assertEqual(self.op.phase_of(self.ENDGAME), "endgame")
+        self.assertEqual(self.op.phase_of(self.ENDGAME, endgame_pieces=0), "middlegame")
+
+    def _records(self):
+        recs = []
+        for i in range(300):
+            fen = (self.OPENING, self.MIDDLE, self.ENDGAME)[i % 3]
+            recs.append(
+                {
+                    "fen": fen,
+                    "ab_move": "e2e4",
+                    "mcts_move": "d2d4",
+                    "mcts_root_visits": i + 1,
+                }
+            )
+        return recs
+
+    def test_stratified_sample_is_proportional_and_deterministic(self):
+        sample, info = self.op.stratified_sample(self._records(), 60, seed=1)
+        self.assertEqual(len(sample), 60)
+        self.assertEqual(info["method"], "stratified")
+        self.assertEqual(sum(info["strata_sample"].values()), 60)
+        self.assertEqual(sum(info["strata_population"].values()), 300)
+        by_phase = {}
+        for r in sample:
+            self.assertIn("_stratum", r)
+            phase = r["_stratum"].split("/")[0]
+            by_phase[phase] = by_phase.get(phase, 0) + 1
+        for phase in ("opening", "middlegame", "endgame"):
+            self.assertAlmostEqual(by_phase[phase], 20, delta=1)
+        bins = {r["_stratum"].split("/")[1] for r in sample}
+        self.assertEqual(bins, {"visits_low", "visits_mid", "visits_high"})
+        again, _ = self.op.stratified_sample(self._records(), 60, seed=1)
+        self.assertEqual(
+            [r["mcts_root_visits"] for r in sample],
+            [r["mcts_root_visits"] for r in again],
+        )
+        other, _ = self.op.stratified_sample(self._records(), 60, seed=2)
+        self.assertNotEqual(
+            [r["mcts_root_visits"] for r in sample],
+            [r["mcts_root_visits"] for r in other],
+        )
+
+    def test_sample_capped_at_population(self):
+        sample, info = self.op.stratified_sample(self._records()[:10], 600, seed=1)
+        self.assertEqual(len(sample), 10)
+        self.assertEqual(info["requested"], 10)
+
+
 if __name__ == "__main__":
     unittest.main()

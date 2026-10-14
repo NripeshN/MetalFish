@@ -359,6 +359,25 @@ def start_thermal_logger(out: pathlib.Path) -> subprocess.Popen:
     )
 
 
+def count_pgn_games(path: pathlib.Path) -> int:
+    """Number of games in a PGN (one `[Result` header per game)."""
+    if not path.exists():
+        return 0
+    with open(path, errors="replace") as fh:
+        return sum(1 for line in fh if line.startswith("[Result "))
+
+
+def note_resume(manifest_path: pathlib.Path, block: int, info: Dict) -> None:
+    """Record a resumed block in the cell manifest (list `resumes`), keeping earlier entries."""
+    try:
+        data = json.load(open(manifest_path))
+    except (OSError, ValueError):
+        data = {}
+    data.setdefault("resumes", []).append({"block": block, **info})
+    with open(manifest_path, "w") as fh:
+        json.dump(data, fh, indent=2)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -379,6 +398,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="log engine I/O (needed for hybrid traces)",
     )
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--resume",
+        action="store_true",
+        help="after an interrupted run: skip the pairs of this block already present in "
+        "games.pgn and play the remaining pairs from the next opening (earlier blocks must "
+        "be complete); a complete block is skipped",
+    )
     args = ap.parse_args(argv)
 
     spec = json.load(open(args.manifest))
@@ -413,6 +439,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         pairs = min(per_block, pairs_total - b * per_block)
         if pairs <= 0:
             continue
+        resumed = None
+        if args.resume:
+            played = count_pgn_games(out / "games.pgn")
+            done_games = max(0, played - 2 * per_block * b)
+            pairs_done, orphan = done_games // 2, done_games % 2
+            if pairs_done >= pairs:
+                print(
+                    f"[{args.cell_id}] block {b}: already complete ({pairs_done} pairs); skipped"
+                )
+                continue
+            start += pairs_done
+            pairs -= pairs_done
+            resumed = {
+                "games_in_pgn_before_resume": played,
+                "pairs_done_in_block": pairs_done,
+                "orphan_game": bool(orphan),
+                "resumed_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            }
+            print(
+                f"[{args.cell_id}] block {b}: resuming after {pairs_done} complete pairs "
+                f"({orphan} orphan game); {pairs} pairs left"
+            )
         cmd = build_command(cell, defaults, engines, out, pairs, start, args.engine_log)
         print(f"[{args.cell_id}] block {b}: {pairs} pairs, openings start={start}")
         print(shlex.join(cmd))
@@ -436,6 +484,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"ABORT: arm {key} failed preflight: {err}", file=sys.stderr)
                 return 3
         write_manifest(cell, defaults, engines, out, cmd, pairs, b, args.tag)
+        if resumed:
+            note_resume(out / "manifest.json", b, resumed)
         therm = start_thermal_logger(out)
         t0 = time.time()
         try:
