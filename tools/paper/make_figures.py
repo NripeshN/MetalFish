@@ -48,7 +48,8 @@ def collect_cells(results: pathlib.Path):
             st = stats_of(obj)
             cells.append(
                 {
-                    "cell": obj.get("cell", d.name),
+                    # Label by directory so tagged runs (e.g. RQ1a_pilot) stay distinct.
+                    "cell": d.name,
                     "dir": d.name,
                     "arm_a": obj.get("arm_a"),
                     "arm_b": obj.get("arm_b"),
