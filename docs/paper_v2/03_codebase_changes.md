@@ -67,6 +67,7 @@ the hybrid as finally configured and, where a change was measured, the before/af
 | C15 | **`HybridFollowABTime`** (07 L5d, opt-in): a clock move ends when alpha-beta's own time manager stops; MCTS stopped with it. | `src/uci/{engine,uci}.cpp`, `src/hybrid/hybrid_search.{h,cpp}`, `tests/test_hybrid.cpp` | branch `hybrid-follow-ab-time`; gate L7b (+74 ± 30 after 100 games vs the main hybrid) → **default on**; the per-move deadline no longer applies to clock searches in this mode (`HybridABTimeManagerOwnsClock`). |
 | C16 | **Root tie-break overrides off by default** (`HybridRootPawnLeverTieBreak=false`, gates the pawn-lever and quiet-attack tie-breaks): oracle study of 22 override positions (SF19) showed a 1.2% expected-score cost per override. | `src/uci/engine.cpp`, `src/hybrid/hybrid_search.h`, tool/CI option tables | Gated with C15 in L7b; RQ6c separates them. |
 | C17 | **Oversubscription by default** (`HybridOversubscribe=true`): alpha-beta keeps all `Threads`, the MCTS worker is an extra thread. | `src/uci/engine.cpp` | Gate L9 (oversubscribed vs 6+1 split on the adopted hybrid, 20+0.2): see 07. |
+| C18 | **Hybrid NN-cache cap** (`kHybridNNCacheEntriesCap = 100000` in `make_hybrid_config`): the pure-MCTS default of 2 M entries pre-allocates ≈1.6 GB that the hybrid never uses, making its process ≈6 GB vs 2.3 GB for plain alpha-beta with a 2 GB hash. | `src/uci/uci.cpp` | Footprint re-measured with `vmmap`; gate L14 (lean hybrid vs AB(8), 30+0.3). |
 
 ## P1 — Ablation switch (needed for RQ6c; defaults preserve shipped behaviour)
 
