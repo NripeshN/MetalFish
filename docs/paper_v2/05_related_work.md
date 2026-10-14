@@ -62,10 +62,10 @@ new paper needs roughly 45–55.
 | coulom2008 | Coulom, Whole-history rating: a Bayesian rating system for players of time-varying strength, Computers and Games 2008, LNCS 5131, 113–124 | 10.1007/978-3-540-87608-3_11 | Rating methods (do not misuse) | ID verified 2026-10-14 (Crossref) |
 | bayeselo | Coulom, Bayesian Elo rating | remi-coulom.fr/Bayesian-Elo | Rating tool | web |
 | ordo | Ballicora, Ordo 1.2.6 | github.com/michiguel/Ordo | Rating tool used | software |
-| szczecinski2020 | Szczecinski & Djebbi, Understanding draws in Elo rating algorithm, J. Quant. Anal. Sports 16(3), 2020 | arXiv:1910.06081 | Draw modelling | verify journal cite |
-| glickman1999 | Glickman, Parameter estimation in large dynamic paired comparison experiments, Appl. Stat. 48(3) 377–394, 1999 | 10.1111/1467-9876.00159 | Rating uncertainty | verify |
+| szczecinski2020 | Szczecinski & Djebbi, Understanding draws in Elo rating algorithm, J. Quant. Anal. Sports 16(3) 211–220, 2020 | 10.1515/jqas-2019-0102 (arXiv:1910.06081) | Draw modelling | ID verified 2026-10-14 (Crossref) |
+| glickman1999 | Glickman, Parameter estimation in large dynamic paired comparison experiments, J. R. Stat. Soc. C (Appl. Stat.) 48(3) 377–394, 1999 | 10.1111/1467-9876.00159 | Rating uncertainty | ID verified 2026-10-14 (Crossref) |
 | ccrl | CCRL 40/15 "About" (reference machine, time-control scaling) | computerchess.org.uk/4040/about.html | Why cross-hardware Elo import is invalid | verified page |
-| tcec | TCEC hardware (ICGA Journal reports; S17 split CPU/GPU qualification) | ICGA J articles (verify) | GPU vs CPU fairness precedent | verify |
+| haworth2020 | Haworth & Hernandez, The 17th Top Chess Engine Championship, TCEC17, ICGA Journal 42(2–3) 181–191, 2020 | 10.3233/icg-200152 | Season 17 introduced separate CPU and GPU leagues (hardware fairness precedent) | ID verified 2026-10-14 (Crossref); the ChessProgramming wiki and Wikipedia differ on how the GPU league concluded — cite the report |
 | levy | Hardware-doubling heuristic (50–70 Elo per doubling), forum-level | — | Background only | web |
 | bratko1982 | Bratko & Kopec, Performance analysis of a chess engine advice-giving program, Advances in Computer Chess 3, 1982 | — | BK suite origin | known |
 | sts | Corbit & Swaminathan, Strategic Test Suite; Mosca's STS-Rating | sites.google.com/site/strategictestsuite; github.com/fsmosca/STS-Rating | STS | web |
@@ -79,10 +79,10 @@ new paper needs roughly 45–55.
 | --- | --- | --- | --- | --- |
 | applem2 | Apple, M2 Max technical overview; unified memory architecture | apple.com newsroom | Platform | web |
 | mpsgraph | Apple, Metal Performance Shaders Graph documentation (compiled executables) | developer.apple.com/documentation/metalperformanceshadersgraph | Backend | web |
-| mpslatency2026 | Non-monotonic latency in Apple MPS decoding (preprint) | arXiv:2605.08913 | Adjacent evidence on MPS latency regimes | verify |
-| fusionml2026 | FusionML: prefill, not decode — CPU+GPU co-execution on unified-memory Apple Silicon | arXiv:2607.22785 | Adjacent: CPU/GPU co-execution on unified memory | verify |
-| frameworktax2023 | Fernandez et al., The framework tax: disparities between inference efficiency in NLP research and deployment | arXiv:2302.06117 | Small-batch overhead argument | verify |
-| mlxbench2025 | Benchmarking on-device ML on Apple Silicon with MLX | arXiv:2510.18921 | Adjacent | verify |
+| hendria2026 | Hendria, Non-monotonic latency in Apple MPS decoding: KV cache interactions and execution regimes | arXiv:2605.08913 (v2, 2026-05-14) | Adjacent evidence on MPS latency regimes | ID verified 2026-10-14 (arXiv) |
+| mohite2026 | Mohite, FusionML: prefill, not decode — mechanism and boundaries of CPU+GPU co-execution on unified-memory Apple Silicon | arXiv:2607.22785 (2026-07-24) | Adjacent: CPU/GPU co-execution on unified memory | ID verified 2026-10-14 (arXiv) |
+| fernandez2023 | Fernandez, Kahn, Na, Bisk, Strubell, The framework tax: disparities between inference efficiency in NLP research and deployment, EMNLP 2023 | arXiv:2302.06117 (v2) | Small-batch overhead argument | ID verified 2026-10-14 (arXiv; venue from the arXiv comments) |
+| ajayi2025 | Ajayi & Odunayo, Benchmarking on-device machine learning on Apple Silicon with MLX | arXiv:2510.18921 (2025-10-21) | Adjacent | ID verified 2026-10-14 (arXiv) |
 
 ## E. What the earlier chapter cited (keep/replace)
 
