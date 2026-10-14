@@ -135,7 +135,8 @@ def write_tables(cells, gates, out: pathlib.Path):
         )
     tex += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "cells.md").write_text("\n".join(md) + "\n")
-    (tdir / "cells.tex").write_text("\n".join(tex) + "\n")
+    # cell names carry underscores (RQ1a_pilot); escape them for LaTeX text mode
+    (tdir / "cells.tex").write_text("\n".join(tex).replace("_", "\\_") + "\n")
     # Gates
     md = [
         "| Gate | Status | Games | Elo (95% CI) | nElo | LOS | Pentanomial |",
@@ -237,7 +238,7 @@ def plot_micro(results: pathlib.Path, out: pathlib.Path):
         ax.set_xlabel("alpha-beta threads")
         ax.set_ylabel("nodes / s (millions)")
         ax.set_title(
-            f"M2 — alpha-beta NPS at fixed depth {d.get('depth')} ({d.get('hardware', '')})"
+            f"M2 — alpha-beta NPS vs threads, depth {d.get('depth')} ({d.get('hardware', '')})"
         )
         ax.grid(alpha=0.3)
         fig.tight_layout()

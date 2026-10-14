@@ -1,0 +1,10 @@
+# LaTeX build products (the PDF is part of the Zenodo deposit, not of the repository)
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+build.log

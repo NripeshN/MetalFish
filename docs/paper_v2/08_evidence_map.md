@@ -22,6 +22,15 @@ colour-swapped pairs, Fishtest adjudication (draw 34/8/20, resign 3/600 two-side
 | `L13_hybrid_nullfallback_nopreload_vs_ab8_10p01` | Same without preload (footprint = plain) vs AB(8) | 10+0.1, Hash 1024 | 301 | −10.4 ± 16.8 Elo | bit-identical fixed-node searches (12/12); runner overhead 0 ms both arms |
 | `L14_hybrid_lean_vs_ab8_30p03` | Hybrid lean (C18 NN-cache cap, main 365f36a) vs AB(8), same binary | 30+0.3, Hash 2048 | 101 | **+13.9 ± 30.3 Elo**, LOS 82% | GPU active 50%, median 31 evals, MCTS move chosen 0 times |
 
+Interim, RQ1a block 0 (2026-10-14): the detached MUST queue (`queue_must_cells.sh`, started 09:09 UTC)
+and its fastchess/engine processes disappeared at 11:37 UTC with RQ1a block 0 at 128 games
+(64 complete pairs; 0 forfeits; no thermal warnings; no crash report, kernel memory event or
+signal in the system log; the block's exit was never logged, so the shell itself was killed).
+Readings at the interruption: 0.0 ± 22.0 Elo (`penta_stats.py`, 128 games). The block was
+resumed at 11:43 UTC by `queue_must_cells_resume.sh` with `run_cell.py --resume` (same seeded
+book order, next opening = pair 65, 186 pairs left; recorded in `RQ1a/manifest.json` →
+`resumes`); no game was deleted or replayed. The resumed queue logs any catchable signal.
+
 Memory footprint (vmmap physical footprint, `Hash=2048`, after `isready`): plain alpha-beta 2.3 GB;
 hybrid with the default 2 M-entry NN cache 5.8–6.1 GB; hybrid with the C18 cap 4.4 GB. With
 `Hash=16`: 3.8 GB (2 M entries) vs 2.2 GB (1,000 entries); the Metal batch cap and the new-game
