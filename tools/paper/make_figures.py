@@ -149,6 +149,151 @@ def write_tables(cells, gates, out: pathlib.Path):
     (tdir / "gates.md").write_text("\n".join(md) + "\n")
 
 
+def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
+    """T6 compute per cell, the telemetry table (M3-M5, RQ6a) and per-block consistency."""
+    tdir = out / "tables"
+    tdir.mkdir(parents=True, exist_ok=True)
+    esc = lambda t: str(t).replace("_", "\\_").replace("%", "\\%")  # noqa: E731
+    # --- compute (hours from the blocks actually run)
+    md = [
+        "| Cell | Games | Blocks | Hours | min/game |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    tex = [
+        "\\begin{tabular}{lrrrr}",
+        "\\toprule",
+        "Cell & Games & Blocks & Hours & min/game \\\\",
+        "\\midrule",
+    ]
+    for c in cells:
+        s = load(results / c["dir"] / "summary.json")
+        hours = sum(b.get("elapsed_s", 0) for b in s.get("blocks_run") or []) / 3600
+        mpg = 60 * hours / c["games"] if c["games"] else 0
+        md.append(
+            f"| {c['cell']} | {c['games']} | {c['blocks']} | {hours:.1f} | {mpg:.2f} |"
+        )
+        tex.append(
+            f"{esc(c['cell'])} & {c['games']} & {c['blocks']} & {hours:.1f} & {mpg:.2f} \\\\"
+        )
+    tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "compute.md").write_text("\n".join(md) + "\n")
+    (tdir / "compute.tex").write_text("\n".join(tex) + "\n")
+    # --- telemetry (hybrid arms only)
+    md = [
+        "| Cell | Hybrid moves | GPU-active | MCTS evals/move (median) | Playouts/move (median) | Disagreement rate | MCTS move chosen on disagreement | Reasons |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    tex = [
+        "\\begin{tabular}{lrrrrrr}",
+        "\\toprule",
+        "Cell & Hybrid moves & GPU-active & Evals/move & Playouts/move & Disagree & MCTS chosen \\\\",
+        "\\midrule",
+    ]
+    for c in cells:
+        t = c["telemetry"]
+        if not t or t.get("gpu_active_fraction") is None:
+            continue
+        reasons = ", ".join(
+            f"{k} {v}"
+            for k, v in sorted((t.get("reasons") or {}).items(), key=lambda kv: -kv[1])
+        )
+        dis = t.get("disagreement_rate")
+        md.append(
+            f"| {c['cell']} | {t.get('moves_total')} | {t['gpu_active_fraction']*100:.0f}% | {t.get('mcts_evals_median')} | "
+            f"{t.get('mcts_playouts_median')} | {dis*100:.1f}% | {t.get('mcts_move_selected_on_disagreement')} / {t.get('disagreements')} | {reasons} |"
+            if dis is not None
+            else f"| {c['cell']} | {t.get('moves_total')} | {t['gpu_active_fraction']*100:.0f}% | {t.get('mcts_evals_median')} | {t.get('mcts_playouts_median')} | — | — | {reasons} |"
+        )
+        tex.append(
+            f"{esc(c['cell'])} & {t.get('moves_total')} & {t['gpu_active_fraction']*100:.0f}\\% & {t.get('mcts_evals_median')} & "
+            f"{t.get('mcts_playouts_median')} & {(dis*100 if dis is not None else 0):.1f}\\% & {t.get('mcts_move_selected_on_disagreement')}/{t.get('disagreements')} \\\\"
+        )
+    tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "telemetry.md").write_text("\n".join(md) + "\n")
+    (tdir / "telemetry.tex").write_text("\n".join(tex) + "\n")
+    # --- per-block consistency (slices games.pgn by the cell's block size)
+    sys.path.insert(0, str(REPO / "tools" / "paper"))
+    import penta_stats  # noqa: E402
+
+    try:
+        nblocks = int(
+            load(REPO / "docs" / "paper_v2" / "experiments.json")["defaults"].get(
+                "blocks", 4
+            )
+        )
+    except (OSError, KeyError, ValueError):
+        nblocks = 4
+    md = [
+        "| Cell | Block | Games | Elo (95% CI) | Draw ratio |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    tex = [
+        "\\begin{tabular}{lrrrr}",
+        "\\toprule",
+        "Cell & Block & Games & Elo & Draws \\\\",
+        "\\midrule",
+    ]
+    for c in cells:
+        d = results / c["dir"]
+        pgn, man = d / "games.pgn", d / "manifest.json"
+        if not pgn.exists() or not man.exists() or not c["arm_a"]:
+            continue
+        try:
+            pairs_total = int(load(man)["cell"]["pairs"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        per_block = -(-pairs_total // nblocks)
+        games = penta_stats.read_games(str(pgn))
+        for b in range(nblocks):
+            chunk = games[2 * per_block * b : 2 * per_block * (b + 1)]
+            if not chunk:
+                continue
+            st = penta_stats.compute(chunk, c["arm_a"])
+            md.append(
+                f"| {c['cell']} | {b} | {st.get('games')} | {fmt_pm(st.get('elo'), st.get('elo_pm'))} | {(st.get('draw_ratio') or 0)*100:.0f}% |"
+            )
+            tex.append(
+                f"{esc(c['cell'])} & {b} & {st.get('games')} & ${fmt_pm(st.get('elo'), st.get('elo_pm')).replace('±', '\\pm')}$ & {(st.get('draw_ratio') or 0)*100:.0f}\\% \\\\"
+            )
+    tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "blocks.md").write_text("\n".join(md) + "\n")
+    (tdir / "blocks.tex").write_text("\n".join(tex) + "\n")
+
+
+def plot_reasons(cells, out: pathlib.Path):
+    """F7a: decision-reason histogram per hybrid cell (from the trace summary)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    rows = [c for c in cells if (c["telemetry"] or {}).get("reasons")]
+    if not rows:
+        return
+    keys = sorted({k for c in rows for k in c["telemetry"]["reasons"]})
+    fig, ax = plt.subplots(figsize=(7, 3.6))
+    width = 0.8 / len(rows)
+    for i, c in enumerate(rows):
+        tot = sum(c["telemetry"]["reasons"].values()) or 1
+        ax.bar(
+            [k_i + i * width for k_i in range(len(keys))],
+            [100 * c["telemetry"]["reasons"].get(k, 0) / tot for k in keys],
+            width=width,
+            label=c["cell"],
+        )
+    ax.set_xticks([k_i + 0.4 - width / 2 for k_i in range(len(keys))])
+    ax.set_xticklabels(keys, rotation=20, ha="right", fontsize=8)
+    ax.set_ylabel("% of hybrid-engine moves")
+    ax.set_title("Decision reasons per move (hybrid arm)")
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3, axis="y")
+    fig.tight_layout()
+    (out / "figures").mkdir(parents=True, exist_ok=True)
+    for ext in ("pdf", "png"):
+        fig.savefig(out / "figures" / f"f7_reasons.{ext}", dpi=150)
+    plt.close(fig)
+
+
 def plot_forest(cells, out: pathlib.Path):
     import matplotlib
 
@@ -259,7 +404,9 @@ def main(argv=None):
     cells = collect_cells(results)
     gates = collect_gates(results)
     write_tables(cells, gates, out)
+    write_extra_tables(cells, results, out)
     plot_forest(cells, out)
+    plot_reasons(cells, out)
     plot_micro(results, out)
     print(
         f"cells: {len(cells)}, gates: {len(gates)} -> {out/'tables'}, {out/'figures'}"

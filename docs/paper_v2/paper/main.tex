@@ -21,8 +21,15 @@
 \usetikzlibrary{positioning,arrows.meta,fit}
 \graphicspath{{../figures/}}
 
+% build.sh passes \def\FINAL{1} and/or \def\ANON{1} as pretex to select the variants.
 \newif\iffinal
 \finalfalse
+\ifdefined\FINAL\finaltrue\fi
+% Double-anonymous variant (IEEE ToG): no author block, third-person references to the chapter,
+% anonymised artifact links.
+\newif\ifanon
+\anonfalse
+\ifdefined\ANON\anontrue\fi
 \newcommand{\pending}[1]{\iffinal\PackageError{paper}{Pending content: #1}{Fill it from the artifact before the final build.}\else\textcolor{red}{[PENDING: #1]}\fi}
 \newcommand{\elo}[2]{$#1 \pm #2$}
 \newcommand{\MF}{MetalFish}
@@ -34,9 +41,13 @@
 
 \title{Does a GPU Help a Stockfish-Class Engine?\\A Controlled Evaluation of Concurrent Alpha-Beta and Transformer-MCTS Search on Apple Silicon}
 
+\ifanon
+\author{Anonymous author(s)}
+\else
 \author{
   \href{mailto:nripesh14@gmail.com}{Nripesh Niketan}\thanks{Independent researcher. ORCID 0009-0008-2066-1937.}
 }
+\fi
 
 \begin{document}
 \maketitle
@@ -53,7 +64,7 @@
 
 Two search paradigms dominate computer chess. Alpha-beta search with efficiently updatable neural-network evaluation (NNUE), exemplified by Stockfish~\cite{stockfish,nasu2018}, searches tens of millions of nodes per second on a CPU; Monte Carlo tree search (MCTS) guided by a deep policy--value network, exemplified by AlphaZero~\cite{silver2018} and Leela Chess Zero (Lc0)~\cite{lc0,monroe2024}, evaluates a few hundred to a few thousand positions per second on a GPU and compensates with the quality of each evaluation. Consumer systems-on-chip with unified memory, such as Apple's M-series~\cite{applem2}, place a capable GPU next to the CPU with no transfer bottleneck, which makes it cheap to run both searches on the same position at the same time and to arbitrate between their answers. Whether that arbitration adds playing strength to a Stockfish-class CPU search is an empirical question, and it has not been answered with a controlled measurement.
 
-Our earlier conference chapter~\cite{niketan2026chapter} described such a system, \MF{}, and reported ratings for its three modes. Re-examination of that chapter against the engine's source code and the retained records showed that its quantitative claims do not hold: the ratings were computed by averaging assumed opponent ratings and five-game match scores, the alpha-beta component is Stockfish's own search, and several implementation statements were wrong (Section~\ref{sec:chapter} lists each one; a Correction has been prepared). This paper is the controlled study the chapter lacked. It keeps the system, freezes it, and asks one pre-registered question with everything else held equal:
+\ifanon An earlier conference chapter~\cite{niketan2026chapter} described such a system, \MF{}, and reported ratings for its three modes. Re-examination of that chapter by its author\else Our earlier conference chapter~\cite{niketan2026chapter} described such a system, \MF{}, and reported ratings for its three modes. Re-examination of that chapter\fi against the engine's source code and the retained records showed that its quantitative claims do not hold: the ratings were computed by averaging assumed opponent ratings and five-game match scores, the alpha-beta component is Stockfish's own search, and several implementation statements were wrong (Section~\ref{sec:chapter} lists each one; a Correction has been prepared). This paper is the controlled study the chapter lacked. It keeps the system, freezes it, and asks one pre-registered question with everything else held equal:
 
 \begin{quote}
 \emph{Does running an Lc0-class transformer MCTS on the GPU concurrently with a Stockfish-class alpha-beta search on the CPU, with a final arbiter, change playing strength relative to the alpha-beta search alone, at equal wall-clock and equal CPU-thread budget on one machine?}
@@ -69,7 +80,7 @@ The answer is measured as an Elo difference with a confidence interval, decompos
   \item The as-built \MF{} system on Apple Silicon: a concurrent alpha-beta plus MCTS runtime with shared root state, MCTS-to-alpha-beta root-ordering hints and a gated arbiter; the BT4 transformer on Metal Performance Shaders Graph; and measurements of its batch-1 latency ceiling and CPU--GPU contention (Section~\ref{sec:system}).
   \item Measurements answering the research questions of Section~\ref{sec:rqs}: the marginal value of the GPU search at equal budget, the decomposition into thread cost and GPU value, component parity with Lc0 and Stockfish, and the sensitivity to time control (Section~\ref{sec:results}).
   \item An oracle analysis of arbitration that bounds what any arbiter could gain from this pair of searches and measures what the implemented arbiter achieves (Section~\ref{sec:oracle}).
-  \item A correction of the earlier chapter's claims together with the root causes of the errors (Section~\ref{sec:chapter}).
+  \item A correction of the \ifanon chapter's\else earlier chapter's\fi{} claims together with the root causes of the errors (Section~\ref{sec:chapter}).
 \end{enumerate}
 
 % =====================================================================================
@@ -203,7 +214,14 @@ Further cells of the protocol (CPU-budget crossover at 4 and 6 threads, MCTS bat
 A 50-pair pilot of RQ1a preceded the freeze and checked the runner, the statistics against fastchess, forfeits (none), the draw rate and the GPU-active fraction. The pilot found the memory defect described in Section~\ref{sec:prep}, which was fixed before the freeze; the pilot games are reported as a diagnostic and are not part of RQ1a. Six amendments were recorded: (1) the hybrid arm is the shipped configuration after the time-management and tie-break changes; (2) engines restart per game; (3) the shipped hybrid is oversubscribed, so the split configuration became the ablation of RQ2; (4) the GPU-active fraction at 30+0.3 (about 50\% of hybrid moves) fell short of the 80\% feasibility target, which was kept as a covariate and led to RQ1b being promoted; (5) RQ6d was promoted after the pilot; (6) the strata of the oracle study were defined. The RQ1a cell was interrupted once by a host-level process loss after 128 games and resumed from the next opening of the same seeded order with no game deleted or replayed; the manifest records the resume point.
 
 \subsection{Compute}
-\pending{Table T6: hours and games per cell from the manifests, after the cells finish}
+Table~\ref{tab:compute} lists the machine time per cell from the cell manifests.
+\begin{table}[t]
+\centering
+\caption{Compute per cell: games, blocks run, wall-clock hours and minutes per game. Generated from each cell's \texttt{summary.json}.}
+\label{tab:compute}
+\footnotesize
+\input{../tables/compute.tex}
+\end{table}
 
 % =====================================================================================
 \section{Results}
@@ -238,6 +256,20 @@ A 50-pair pilot of RQ1a preceded the freeze and checked the runner, the statisti
 \caption{Elo difference with 95\% intervals for every game cell and gate. Generated from the cell summaries.}
 \label{fig:forest}
 \end{figure}
+\begin{table}[t]
+\centering
+\caption{Hybrid telemetry per cell: hybrid-engine moves, fraction with the transformer active, median MCTS evaluations and playouts per move, disagreement rate between the two searches, and how often the MCTS move was chosen on a disagreement. Generated from the traces.}
+\label{tab:telemetry}
+\footnotesize
+\input{../tables/telemetry.tex}
+\end{table}
+\begin{table}[t]
+\centering
+\caption{Per-block results of each cell (blocks draw disjoint openings and were interleaved in time); a consistent sign across blocks is the drift check. Generated from \texttt{games.pgn}.}
+\label{tab:blocks}
+\footnotesize
+\input{../tables/blocks.tex}
+\end{table}
 \pending{RQ1a and RQ1b results: Elo, CI, nElo, draw rate, forfeits, GPU-active fraction, evals/move, per-block consistency}
 
 \subsection{RQ2: thread cost versus GPU value}
@@ -249,6 +281,12 @@ A 50-pair pilot of RQ1a preceded the freeze and checked the runner, the statisti
 % =====================================================================================
 \section{Why: arbitration and the oracle study}
 \label{sec:oracle}
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.8\linewidth]{f7_reasons.pdf}
+\caption{Decision reasons per hybrid-engine move. \texttt{ab\_fallback\_time\_safety} is the plain alpha-beta move under the time-safety rule; \texttt{engines\_agree} is agreement; \texttt{ab\_root\_rejects\_mcts} is alpha-beta's verification rejecting the MCTS move; \texttt{ab\_default} is alpha-beta's move with no override predicate firing. Generated from the traces.}
+\label{fig:reasons}
+\end{figure}
 \pending{RQ6a telemetry (disagreement rate, visits at decision, reason histogram, MCTS move chosen) and RQ6b oracle outcomes with bootstrap CIs; the arbiter upper bound in expected score and projected Elo; RQ6d}
 
 % =====================================================================================
@@ -259,7 +297,7 @@ A 50-pair pilot of RQ1a preceded the freeze and checked the runner, the statisti
 % =====================================================================================
 \section{Relation to the IntelliSys 2026 chapter}
 \label{sec:chapter}
-The chapter~\cite{niketan2026chapter} described the same system and reported ratings of about 4048, 3724 and 3289 Elo for its alpha-beta, hybrid and MCTS modes, a 74$\times$ MCTS speed-up, a 1.26$\times$ throughput advantage over Lc0, and a position classifier that weighted the final decision. Table~\ref{tab:corrections} lists the statements that do not hold and what replaces them; a Correction has been prepared for the publisher~\cite{correction}.
+The chapter~\cite{niketan2026chapter}\ifanon{} (by the author of this paper)\fi{} described the same system and reported ratings of about 4048, 3724 and 3289 Elo for its alpha-beta, hybrid and MCTS modes, a 74$\times$ MCTS speed-up, a 1.26$\times$ throughput advantage over Lc0, and a position classifier that weighted the final decision. Table~\ref{tab:corrections} lists the statements that do not hold and what replaces them; a Correction has been prepared for the publisher~\cite{correction}.
 
 \begin{table}[t]
 \centering
@@ -293,7 +331,7 @@ The root causes were a confounded contribution (the alpha-beta component's stren
 \pending{conclusion after the results: what was learned, conditions under which a concurrent GPU search is worth it, CUDA and other GPUs, learned arbiters}
 
 \section*{Data and code availability}
-The engine at the frozen commit, every game record, engine log, manifest, thermal log, microbenchmark output and the scripts that produce every figure and table of this paper are deposited at \pending{Zenodo DOI} and in the repository tag \texttt{paper-v2-freeze-rc1}. The pre-registered protocol with its amendments, the audit of the earlier chapter and the prepared Correction are part of the deposit.
+The engine at the frozen commit, every game record, engine log, manifest, thermal log, microbenchmark output and the scripts that produce every figure and table of this paper are deposited at \ifanon an anonymised archive link supplied to the editors\else\pending{Zenodo DOI} and in the repository tag \texttt{paper-v2-freeze-rc1}\fi. The pre-registered protocol with its amendments, the audit of the earlier chapter and the prepared Correction are part of the deposit.
 
 \bibliographystyle{unsrtnat}
 \bibliography{refs}
