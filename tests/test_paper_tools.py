@@ -153,6 +153,37 @@ class TraceParserTest(unittest.TestCase):
         self.assertEqual(len(recs), 1)
         self.assertEqual(recs[0]["engine"], "MF-Hybrid-T8")
 
+    def test_rounds_restarting_per_invocation_pair_by_round_and_fen(self):
+        # Two fastchess invocations (block 0 and a resume/block 1) both number their rounds from 1;
+        # the opening FEN keeps their pairs apart. An orphan game (one game of a round) is unpaired.
+        f1 = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        f2 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
+        f3 = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1"
+
+        def game(rnd, fen, white, black, result):
+            return (
+                f'[Event "t"]\n[Round "{rnd}"]\n[White "{white}"]\n[Black "{black}"]\n[Result "{result}"]\n'
+                f'[Termination "normal"]\n[FEN "{fen}"]\n[SetUp "1"]\n\n1. e4 {result}\n\n'
+            )
+
+        text = (
+            game(1, f1, "A", "B", "1-0")
+            + game(1, f1, "B", "A", "1/2-1/2")  # block 0, round 1: A scores 1.5
+            + game(2, f2, "A", "B", "1-0")  # orphan: second game never played
+            + game(1, f3, "A", "B", "0-1")
+            + game(
+                1, f3, "B", "A", "1/2-1/2"
+            )  # next invocation, round 1 again: A scores 0.5
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".pgn", delete=False) as fh:
+            fh.write(text)
+            path = fh.name
+        st = penta_stats.compute(penta_stats.read_games(path), "A")
+        self.assertEqual(st["games"], 5)
+        self.assertEqual(st["pairs"], 2)
+        self.assertEqual(st["unpaired_games"], 1)
+        self.assertEqual(st["ptnml_0_2"], [0, 1, 0, 1, 0])
+
 
 class OracleSamplingTest(unittest.TestCase):
     """Pins the stratified sampler of tools/paper/oracle_probe.py (protocol §11.6)."""

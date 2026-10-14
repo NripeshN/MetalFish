@@ -43,6 +43,16 @@ green CI run of main 8c0661d shows at batch 2; the engine evaluates at batch 1);
 libraries bundled under `build/lib`; bench, probe and unit suite re-passed after bundling. rc2 sha256
 8c534bb6f82fe9ec…; tag `paper-v2-freeze-rc2` on 8c0661d (engine source identical to 365f36a).
 Logs: `results/paper_v2/queue_logs/rc2_*.txt`.
+Third interruption, 21:19 UTC: the host rebooted (not by the programme) with RQ1a (rc2) at 283
+games; the queue was relaunched at 21:24 UTC and resumed from pair 142 (141 complete pairs; the one
+orphan game of round 142 stays in the PGN as an unpaired game and enters no pair). The restart
+exposed a pairing defect in `penta_stats.py`: it grouped the two games of a pair by fastchess round
+number alone, but fastchess restarts round numbers at 1 in every invocation (every block and every
+resume), so games of different invocations collided (the rc1 partial read as 36 pairs and 111
+unpaired games instead of 91 pairs and 1). Fixed before any multi-invocation cell was interpreted:
+pairs are keyed by round number and opening FEN (unit test added). Re-read of the two RQ1a files
+after the fix: rc1 partial 183 games = 91 pairs + 1 unpaired; rc2 283 games = 141 pairs + 1 unpaired.
+
 
 
 

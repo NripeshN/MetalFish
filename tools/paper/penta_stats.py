@@ -100,9 +100,12 @@ def classify_termination(g: Dict) -> str:
 
 
 def compute(games: List[Dict], engine: str) -> Dict:
-    by_round: Dict[str, List[Dict]] = defaultdict(list)
+    # A pair is the two games of one fastchess round. fastchess restarts round numbers at 1 in
+    # every invocation, and a cell is played in several invocations (blocks, resumes), so the
+    # round number alone collides; the opening FEN disambiguates (blocks draw disjoint openings).
+    by_round: Dict[tuple, List[Dict]] = defaultdict(list)
     for g in games:
-        by_round[g["round"]].append(g)
+        by_round[(g["round"], g["fen"])].append(g)
 
     pair_scores: List[float] = []
     penta = [0, 0, 0, 0, 0]
