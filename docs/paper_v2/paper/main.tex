@@ -240,6 +240,19 @@ Table~\ref{tab:compute} lists the machine time per cell from the cell manifests.
 \caption{M2: alpha-beta nodes per second against thread count at fixed depth 16 (median of five runs). Generated from \texttt{micro/ab\_scaling.json}.}
 \label{fig:m2}
 \end{figure}
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.9\linewidth]{f4_telemetry.pdf}
+\caption{Hybrid telemetry per cell: fraction of hybrid-engine moves on which the transformer was active (the time-safety rule disables it when the move budget is below 400 ms or the clock below 3 s) and the distribution of MCTS playouts per transformer-active move. Generated from the traces.}
+\label{fig:telemetry}
+\end{figure}
+\begin{table}[t]
+\centering
+\caption{Thermal state during each cell: one-minute \texttt{pmset} samples, samples with a thermal warning, and the lowest CPU speed limit observed. Generated from \texttt{therm.log}.}
+\label{tab:therm}
+\footnotesize
+\input{../tables/therm.tex}
+\end{table}
 \pending{M1/M2 text from the frozen-build re-run (nn\_latency\_frozen.json, ab\_scaling\_frozen.json) and M3--M5 from the RQ1a/RQ1b traces}
 
 \subsection{RQ1: marginal value of the GPU search}

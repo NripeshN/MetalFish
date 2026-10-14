@@ -260,6 +260,105 @@ def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
     (tdir / "blocks.tex").write_text("\n".join(tex) + "\n")
 
 
+def write_therm_table(cells, results: pathlib.Path, out: pathlib.Path):
+    """M6: thermal state per cell from therm.log (`pmset -g therm` sampled every minute)."""
+    tdir = out / "tables"
+    tdir.mkdir(parents=True, exist_ok=True)
+    esc = lambda t: str(t).replace("_", "\\_")  # noqa: E731
+    md = [
+        "| Cell | Samples | Warning samples | Min CPU speed limit |",
+        "| --- | --- | --- | --- |",
+    ]
+    tex = [
+        "\\begin{tabular}{lrrr}",
+        "\\toprule",
+        "Cell & Samples & Warning samples & Min CPU speed limit \\\\",
+        "\\midrule",
+    ]
+    for c in cells:
+        log = results / c["dir"] / "therm.log"
+        if not log.exists():
+            continue
+        samples = warnings = 0
+        limits = []
+        for line in open(log, errors="replace"):
+            if "No thermal warning" in line:
+                samples += 1
+            elif "thermal warning level" in line.lower():
+                samples += 1
+                warnings += 1
+            if "CPU_Speed_Limit" in line:
+                try:
+                    limits.append(int(line.split("=")[-1].strip()))
+                except ValueError:
+                    pass
+        lim = f"{min(limits)}%" if limits else "—"
+        md.append(f"| {c['cell']} | {samples} | {warnings} | {lim} |")
+        tex.append(
+            f"{esc(c['cell'])} & {samples} & {warnings} & {lim.replace('%', '\\%')} \\\\"
+        )
+    tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "therm.md").write_text("\n".join(md) + "\n")
+    (tdir / "therm.tex").write_text("\n".join(tex) + "\n")
+
+
+def plot_telemetry(cells, results: pathlib.Path, out: pathlib.Path):
+    """F4: GPU-active fraction per hybrid cell and the distribution of MCTS playouts per
+    transformer-active move (from moves.jsonl)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    rows = [
+        c
+        for c in cells
+        if (c["telemetry"] or {}).get("gpu_active_fraction") is not None
+    ]
+    if not rows:
+        return
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9, 3.6))
+    a1.bar(
+        [c["cell"] for c in rows],
+        [100 * c["telemetry"]["gpu_active_fraction"] for c in rows],
+    )
+    a1.set_ylabel("hybrid-engine moves with the transformer active (%)")
+    a1.set_ylim(0, 100)
+    a1.tick_params(axis="x", rotation=20, labelsize=8)
+    a1.grid(alpha=0.3, axis="y")
+    data, labels = [], []
+    for c in rows:
+        mj = results / c["dir"] / "moves.jsonl"
+        if not mj.exists():
+            continue
+        vals = []
+        with open(mj) as fh:
+            for line in fh:
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if r.get("gpu_active") and isinstance(
+                    r.get("mcts_playouts"), (int, float)
+                ):
+                    vals.append(r["mcts_playouts"])
+        if vals:
+            data.append(vals)
+            labels.append(c["cell"])
+    if data:
+        a2.boxplot(data, showfliers=False)
+        a2.set_xticks(range(1, len(labels) + 1))
+        a2.set_xticklabels(labels, rotation=20, fontsize=8)
+        a2.set_ylabel("MCTS playouts per transformer-active move")
+        a2.grid(alpha=0.3, axis="y")
+    fig.suptitle("Hybrid telemetry per cell")
+    fig.tight_layout()
+    (out / "figures").mkdir(parents=True, exist_ok=True)
+    for ext in ("pdf", "png"):
+        fig.savefig(out / "figures" / f"f4_telemetry.{ext}", dpi=150)
+    plt.close(fig)
+
+
 def plot_reasons(cells, out: pathlib.Path):
     """F7a: decision-reason histogram per hybrid cell (from the trace summary)."""
     import matplotlib
@@ -405,8 +504,10 @@ def main(argv=None):
     gates = collect_gates(results)
     write_tables(cells, gates, out)
     write_extra_tables(cells, results, out)
+    write_therm_table(cells, results, out)
     plot_forest(cells, out)
     plot_reasons(cells, out)
+    plot_telemetry(cells, results, out)
     plot_micro(results, out)
     print(
         f"cells: {len(cells)}, gates: {len(gates)} -> {out/'tables'}, {out/'figures'}"
