@@ -5,8 +5,8 @@ Reads:
   results/paper_v2/<cell>/summary.json            experiment cells (tools/paper/run_cell.py)
   results/paper_v2/sprt/<gate>/summary.json       finished gates (tools/paper/sprt_gate.py)
   results/paper_v2/sprt/<gate>/partial_stats.json gates stopped by an author rule (penta_stats --json)
-  results/paper_v2/micro/nn_latency.json          M1 (tools/paper/microbench.py nn)
-  results/paper_v2/micro/ab_scaling.json          M2 (tools/paper/microbench.py ab)
+  results/paper_v2/micro/nn_latency[_frozen].json M1 (tools/paper/microbench.py nn; the frozen-build re-run wins)
+  results/paper_v2/micro/ab_scaling[_frozen].json M2 (tools/paper/microbench.py ab; the frozen-build re-run wins)
 
 Writes docs/paper_v2/figures/*.pdf|png and docs/paper_v2/tables/*.md|tex.
 
@@ -432,7 +432,10 @@ def plot_micro(results: pathlib.Path, out: pathlib.Path):
 
     fdir = out / "figures"
     fdir.mkdir(parents=True, exist_ok=True)
-    nn = results / "micro" / "nn_latency.json"
+    # The frozen-build re-run (queue_after_must.sh writes *_frozen.json) takes precedence.
+    nn = results / "micro" / "nn_latency_frozen.json"
+    if not nn.exists():
+        nn = results / "micro" / "nn_latency.json"
     if nn.exists():
         d = load(nn)
         fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 3.8))
@@ -472,7 +475,9 @@ def plot_micro(results: pathlib.Path, out: pathlib.Path):
         for ext in ("pdf", "png"):
             fig.savefig(fdir / f"m1_nn_latency.{ext}", dpi=150)
         plt.close(fig)
-    ab = results / "micro" / "ab_scaling.json"
+    ab = results / "micro" / "ab_scaling_frozen.json"
+    if not ab.exists():
+        ab = results / "micro" / "ab_scaling.json"
     if ab.exists():
         d = load(ab)
         agg = d.get("aggregate", {})
