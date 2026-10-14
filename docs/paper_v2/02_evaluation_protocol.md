@@ -383,3 +383,16 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
    question is left to RQ6d at its pre-registered sample size rather than decided on 100-game
    gates. The shipped defaults are unchanged. A null control (hybrid UCI path with the
    transformer never engaged, L12) and the 6+1 split control (L11) are reported in 07.
+6. **2026-10-14 — RQ6b sampling strata defined** (before any oracle run). A disagreement
+   position is a hybrid decision record whose alpha-beta and MCTS best moves differ and that
+   was not a time-safety fallback. Game phase: *opening* = fullmove number ≤ 15; *endgame* =
+   at most 6 non-pawn, non-king pieces on the board (both sides together); otherwise
+   *middlegame*. MCTS visit count = root visits at decision time (`mcts_root_visits`, falling
+   back to playouts, then evaluations), binned at the terciles of the pooled RQ1a+RQ1b
+   disagreement population. Allocation proportional to stratum size (largest-remainder
+   rounding), seeded shuffle within strata (`--seed 1`), 600 positions; the population and
+   sample counts per stratum and the tercile cut points are recorded in
+   `results/paper_v2/RQ6b/oracle.jsonl.summary.json`. Judges as in §5; the exact invocation is
+   `results/paper_v2/run_oracle_rq6b.sh`, chained after RQ1b and the microbenchmark re-run in
+   `results/paper_v2/queue_after_must.sh`. This fixes the stratification that §5 left open; the
+   estimands are unchanged.
