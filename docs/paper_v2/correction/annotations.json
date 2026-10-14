@@ -1,111 +1,303 @@
 {
   "cover": "AUTHOR-INITIATED CORRECTION REQUEST (draft 2026-10-14). Highlighted passages carry a note with the corrected statement; item numbers E1-E14 refer to correction_note.md and error_list.md in the author's repository (docs/paper_v2/correction/). Page numbers are those of this camera-ready copy; the published chapter is pp. 653-664.",
   "items": [
-    {"id": "E1", "title": "Elo ratings withdrawn",
-     "note": "The ratings (~4048, ~3724, ~3289), the comparison with Berserk/Lc0, Fig. 2, Table 6's dElo column and the '~435 Elo' statements are withdrawn. They were computed as an average over assumed opponent ratings plus clamped five-game logistic differences; the assumed ratings were never measured and the game records were not retained. Corrected: no rating for any mode is to be inferred from the chapter; the controlled hybrid-vs-AB measurement is reported in the follow-up preprint.",
-     "anchors": [
-       {"page": 1, "text": "4048 Elo with zero losses in 110 games"},
-       {"page": 1, "text": "3724 Elo, competitive with engines such as Berserk"},
-       {"page": 2, "text": "Elo ratings for all three engine modes"},
-       {"page": 3, "text": "achieving an estimated 4048 Elo"},
-       {"page": 9, "text": "Elo estimates: AB"},
-       {"page": 9, "text": "Estimated Elo ratings for all engines"},
-       {"page": 10, "text": "3-2-0"},
-       {"page": 10, "text": "but weaker than pure alpha-beta"},
-       {"page": 10, "text": "435 Elo"},
-       {"page": 10, "text": "significantly weaker than Lc0"},
-       {"page": 11, "text": "4048 Elo with zero losses, MetalFish-Hybrid reached"}
-     ]},
-    {"id": "E2", "title": "The alpha-beta engine is Stockfish",
-     "note": "Corrected: the alpha-beta engine is Stockfish's search and NNUE evaluation (Stockfish dev of 2026-01-03 at the time; Stockfish 19 now, bench signature 2,497,913) with eight small local edits; no GPU integration in the search; no killer-move heuristic. The 100% agreement with Stockfish follows from the searches being the same program and validates nothing; every MetalFish-AB strength statement is a statement about Stockfish.",
-     "anchors": [
-       {"page": 2, "text": "Our alpha-beta engine derives from the Stockfish codebase, inheriting its"},
-       {"page": 3, "text": "killer move heuristics"},
-       {"page": 7, "text": "validates our alpha-beta implementation"}
-     ]},
-    {"id": "E3", "title": "Nodes are 128 bytes, not 64",
-     "note": "Corrected: on Apple Silicon Node is alignas(128) with static_assert(sizeof(Node) <= 128), so each node occupies exactly one 128-byte cache line (already so at the chapter's commit). 64-byte nodes exist only in non-Apple builds. 'Two nodes per cache line' and Sect. 6.3 item (3) are withdrawn.",
-     "anchors": [
-       {"page": 1, "text": "128 to 64 bytes"},
-       {"page": 2, "text": "128 to 64 bytes and improving multi-threaded throughput by"},
-       {"page": 6, "text": "Reduced sizeof(Node) from 128 to 64 bytes, fitting two nodes per M-series"},
-       {"page": 11, "text": "4-byte footprint allows two MCTS nodes per 128-byte cache line, doubling cache"}
-     ]},
-    {"id": "E4", "title": "74x improvement unsupported",
-     "note": "Corrected: the 2 NPS baseline was a lock-convoy defect in an unpreserved development build; no measurement record exists; the 74x figure and 'a 74x multi-threaded speedup' are withdrawn. os_unfair_lock remains in use. Other Table 1 rows are single runs without variance. The hybrid runs one MCTS worker by default, so multi-threaded MCTS throughput is not exercised in the evaluated mode.",
-     "anchors": [
-       {"page": 1, "text": "improved multi-threaded MCTS throughput from 2 to 148 NPS at 2 threads"},
-       {"page": 5, "text": "2 NPS 148 NPS"},
-       {"page": 6, "text": "Improved 2-thread NPS from 2 to 148"},
-       {"page": 11, "text": "multi-threaded speedup"}
-     ]},
-    {"id": "E5", "title": "NN cache figures wrong",
-     "note": "Corrected: with 96 moves per entry an entry is about 820 bytes, so 500,000 entries occupy about 0.41 GB (not 38 MB); the reduction from the 218-move, 2,000,000-entry layout (about 3.6 GB) is about 9x, not 92x. The full-history key (0% hit rate) was true at the time; since 2026-05-15 the key covers the current position only. Current defaults: 2,000,000 entries (about 1.65 GB) for stand-alone MCTS, 100,000 in the hybrid.",
-     "anchors": [
-       {"page": 5, "text": "Shrink NNCache"},
-       {"page": 6, "text": "reduced memory from 3.5GB to 38MB"},
-       {"page": 11, "text": "every path (0% cache hit rate)"}
-     ]},
-    {"id": "E6", "title": "TT and NNUE sizes misstated",
-     "note": "Corrected: the transposition-table size is the UCI Hash option, default 16 MB (512 MB was the tournament setting, Sect. 5.1). Networks at the time: nn-c288c895ea92.nnue, 108.9 MB (FullThreats + HalfKAv2_hm, L1 = 1024) and nn-37f18f62d772.nnue, 3.5 MB (HalfKAv2_hm, L1 = 128). Current release: single Stockfish 19 network nn-1a298aa575a0.nnue, 98.5 MB.",
-     "anchors": [
-       {"page": 3, "text": "512MB transposition table"},
-       {"page": 3, "text": "dual NNUE networks (a 125MB large network and a 6MB small network) with"},
-       {"page": 3, "text": "HalfKAv2 feature encoding"}
-     ]},
-    {"id": "E7", "title": "Classifier does not weight the decision; Fig. 1 routing wrong",
-     "note": "Corrected: the classifier's weighting fields are computed but read by no code outside the classifier and its unit tests (chapter's commit and current release); the final-move decision does not depend on the position class. The classifier only scales the per-move time budget and sets the minimum MCTS node count for the agreement stop. Engine mode is selected by UCI options (UseHybridSearch, UseMCTS), not by the classifier; Fig. 1's routing is wrong.",
-     "anchors": [
-       {"page": 4, "text": "Position Classifier"},
-       {"page": 5, "text": "Classify position type (tactical/strategic/endgame)"},
-       {"page": 5, "text": "The position classifier analyzes tactical features"},
-       {"page": 5, "text": "in quiet strategic positions, the MCTS evaluation carries more"},
-       {"page": 11, "text": "decision logic uses a simple position classifier"}
-     ]},
-    {"id": "E8", "title": "Early termination: no time saving measured",
-     "note": "Corrected: the agreement stop exists but is gated (clock games only; three consecutive coordinator polls about 1.5 ms apart, not iterations; more than 25% of the budget elapsed; at least 100 MCTS playouts; AB depth at least 10). It fired 0 of 209 times in the retained July 2026 telemetry. No time-saving measurement exists; '10-40%' is withdrawn.",
-     "anchors": [
-       {"page": 5, "text": "if AB and MCTS agree on best move for 3+ iterations then"},
-       {"page": 5, "text": "Terminate early"},
-       {"page": 10, "text": "confident early stopping, saving"}
-     ]},
-    {"id": "E9", "title": "NN influence inference wrong; BK suite at ceiling",
-     "note": "Corrected: in the retained telemetry the hybrid's final move was the alpha-beta move in 207 of 209 decisions (20+0.2, July 2026) and, in the current release at 30+0.3, the MCTS move was selected in none. Agreement with Lc0 reflects Stockfish/Lc0 agreement on these positions. The 24-position suite is at ceiling (a later 5 s run: AB 20, MCTS 24, Hybrid 24, Lc0 18, Stockfish 20) and was used during tuning; Tables 2-3 are not a ranking.",
-     "anchors": [
-       {"page": 7, "text": "Solved Rate (%)"},
-       {"page": 7, "text": "The 95.8% agreement between the hybrid engine and Lc0"},
-       {"page": 10, "text": "The 95.8% bestmove agreement between the hybrid and Lc0"}
-     ]},
-    {"id": "E10", "title": "Throughput vs Lc0 withdrawn",
-     "note": "Corrected: Table 4 rests on four 10 s positions and Lc0's 14 nps in the 'Complex middlegame' row indicates a harness fault. Idle-machine measurement with the same BT4 network (2026-10-14): MetalFish Metal FP16 135 positions/s at batch 1 (7.4 ms) and 538 at batch 64; Lc0 0.32.1 Metal 165 nps at minibatch 1 and 725 at minibatch 32. MetalFish's inference throughput is not higher than Lc0's at any batch size.",
-     "anchors": [
-       {"page": 8, "text": "MetalFish achieves 1.26"},
-       {"page": 8, "text": "Complex middlegame"},
-       {"page": 10, "text": "While our throughput is 1.26"}
-     ]},
-    {"id": "E11", "title": "M1 Ultra figures and 7.24x scaling unsupported",
-     "note": "Corrected: no measurement record exists for 9.8M NPS, 7.24x scaling or ~382 NPS on M1 Ultra; withdrawn. Measured on M2 Max (fixed depth 16, median of five runs, 1 GB hash): 1.53M nps on one thread, 11.81M on eight (7.7x), 13.52M on twelve.",
-     "anchors": [
-       {"page": 3, "text": "9.8M NPS on M1 Ultra"},
-       {"page": 4, "text": "382 NPS on M1 Ultra"}
-     ]},
-    {"id": "E12", "title": "Related work mischaracterised",
-     "note": "Corrected: Baier and Winands [9] embed shallow minimax searches within MCTS selection, rollout and backpropagation (not 'sequential', not a survey). Lanctot et al. [10] evaluated implicit minimax backups on Kalah, Breakthrough and Lines of Action, not in general game playing.",
-     "anchors": [
-       {"page": 2, "text": "hybrid approaches that use one paradigm to inform the other sequentially"},
-       {"page": 3, "text": "Baier and Winands [9] surveyed MCTS enhancements"},
-       {"page": 3, "text": "in general game playing"}
-     ]},
-    {"id": "E13", "title": "Time manager not used by the hybrid",
-     "note": "Corrected: the Lc0-style smooth time manager (mu 45.2, sigma 5.93, 0.73 cap, 12% piggybank) is used by the stand-alone MCTS mode only; inside the hybrid the MCTS component receives a fixed per-move budget from the coordinator.",
-     "anchors": [
-       {"page": 4, "text": "capped at 73%"},
-       {"page": 6, "text": "This eliminated time losses that occurred with the original"}
-     ]},
-    {"id": "E14", "title": "Omitted time-safety fallback",
-     "note": "Omission: the hybrid disables its transformer component and plays the alpha-beta move whenever the remaining time or the fixed move time is below a threshold (5 s at the chapter's commit; 3 s remaining or a move budget below 0.4 s in the current release). The transformer was active on 52% of hybrid moves at 20+0.2, about 50% at 30+0.3 and almost never at 10+0.1; hybrid results at short time controls are largely alpha-beta results.",
-     "anchors": [
-       {"page": 4, "text": "The hybrid engine coordinates alpha-beta and MCTS running simultaneously"}
-     ]}
+    {
+      "id": "E1",
+      "title": "Elo ratings withdrawn",
+      "note": "The ratings (~4048, ~3724, ~3289), the comparison with Berserk/Lc0, Fig. 2, Table 6's dElo column and the '~435 Elo' statements are withdrawn. They were computed as an average over assumed opponent ratings plus clamped five-game logistic differences; the assumed ratings were never measured and the game records were not retained. Corrected: no rating for any mode is to be inferred from the chapter; the controlled hybrid-vs-AB measurement is reported in the follow-up preprint.",
+      "anchors": [
+        {
+          "page": 1,
+          "text": "4048 Elo with zero losses in 110 games"
+        },
+        {
+          "page": 1,
+          "text": "3724 Elo, competitive with engines such as Berserk"
+        },
+        {
+          "page": 2,
+          "text": "Elo ratings for all three engine modes"
+        },
+        {
+          "page": 3,
+          "text": "achieving an estimated 4048 Elo"
+        },
+        {
+          "page": 9,
+          "text": "Elo estimates: AB"
+        },
+        {
+          "page": 9,
+          "text": "Estimated Elo ratings for all engines"
+        },
+        {
+          "page": 10,
+          "text": "3-2-0"
+        },
+        {
+          "page": 10,
+          "text": "but weaker than pure alpha-beta"
+        },
+        {
+          "page": 10,
+          "text": "435 Elo"
+        },
+        {
+          "page": 10,
+          "text": "significantly weaker than Lc0"
+        },
+        {
+          "page": 11,
+          "text": "4048 Elo with zero losses, MetalFish-Hybrid reached"
+        }
+      ]
+    },
+    {
+      "id": "E2",
+      "title": "The alpha-beta engine is Stockfish",
+      "note": "Corrected: the alpha-beta engine is Stockfish's search and NNUE evaluation (Stockfish dev of 2026-01-03 at the time; Stockfish 19 now, bench signature 2,497,913) with eight small local edits; no GPU integration in the search; no killer-move heuristic. The 100% agreement with Stockfish follows from the searches being the same program and validates nothing; every MetalFish-AB strength statement is a statement about Stockfish.",
+      "anchors": [
+        {
+          "page": 2,
+          "text": "Our alpha-beta engine derives from the Stockfish codebase, inheriting its"
+        },
+        {
+          "page": 3,
+          "text": "killer move heuristics"
+        },
+        {
+          "page": 7,
+          "text": "validates our alpha-beta implementation"
+        }
+      ]
+    },
+    {
+      "id": "E3",
+      "title": "Nodes are 128 bytes, not 64",
+      "note": "Corrected: on Apple Silicon Node is alignas(128) with static_assert(sizeof(Node) <= 128), so each node occupies exactly one 128-byte cache line (already so at the chapter's commit). 64-byte nodes exist only in non-Apple builds. 'Two nodes per cache line' and Sect. 6.3 item (3) are withdrawn.",
+      "anchors": [
+        {
+          "page": 1,
+          "text": "128 to 64 bytes"
+        },
+        {
+          "page": 2,
+          "text": "128 to 64 bytes and improving multi-threaded throughput by"
+        },
+        {
+          "page": 6,
+          "text": "Reduced sizeof(Node) from 128 to 64 bytes, fitting two nodes per M-series"
+        },
+        {
+          "page": 11,
+          "text": "4-byte footprint allows two MCTS nodes per 128-byte cache line, doubling cache"
+        }
+      ]
+    },
+    {
+      "id": "E4",
+      "title": "74x improvement unsupported",
+      "note": "Corrected: the 2 NPS baseline was a lock-convoy defect in an unpreserved development build; no measurement record exists; the 74x figure and 'a 74x multi-threaded speedup' are withdrawn. os_unfair_lock remains in use. Other Table 1 rows are single runs without variance. The hybrid runs one MCTS worker by default, so multi-threaded MCTS throughput is not exercised in the evaluated mode.",
+      "anchors": [
+        {
+          "page": 1,
+          "text": "improved multi-threaded MCTS throughput from 2 to 148 NPS at 2 threads"
+        },
+        {
+          "page": 5,
+          "text": "2 NPS 148 NPS"
+        },
+        {
+          "page": 6,
+          "text": "Improved 2-thread NPS from 2 to 148"
+        },
+        {
+          "page": 11,
+          "text": "multi-threaded speedup"
+        }
+      ]
+    },
+    {
+      "id": "E5",
+      "title": "NN cache figures wrong",
+      "note": "Corrected: with 96 moves per entry an entry is about 820 bytes, so 500,000 entries occupy about 0.41 GB (not 38 MB); the reduction from the 218-move, 2,000,000-entry layout (about 3.6 GB) is about 9x, not 92x. The full-history key (0% hit rate) was true at the time; since 2026-05-15 the key covers the current position only. Current defaults: 2,000,000 entries (about 1.65 GB) for stand-alone MCTS, 100,000 in the hybrid.",
+      "anchors": [
+        {
+          "page": 5,
+          "text": "Shrink NNCache"
+        },
+        {
+          "page": 6,
+          "text": "reduced memory from 3.5GB to 38MB"
+        },
+        {
+          "page": 11,
+          "text": "every path (0% cache hit rate)"
+        }
+      ]
+    },
+    {
+      "id": "E6",
+      "title": "TT and NNUE sizes misstated",
+      "note": "Corrected: the transposition-table size is the UCI Hash option, default 16 MB (512 MB was the tournament setting, Sect. 5.1). Networks at the time: nn-c288c895ea92.nnue, 108.9 MB (FullThreats + HalfKAv2_hm, L1 = 1024) and nn-37f18f62d772.nnue, 3.5 MB (HalfKAv2_hm, L1 = 128). Current release: single Stockfish 19 network nn-1a298aa575a0.nnue, 98.5 MB.",
+      "anchors": [
+        {
+          "page": 3,
+          "text": "512MB transposition table"
+        },
+        {
+          "page": 3,
+          "text": "dual NNUE networks (a 125MB large network and a 6MB small network) with"
+        },
+        {
+          "page": 3,
+          "text": "HalfKAv2 feature encoding"
+        }
+      ]
+    },
+    {
+      "id": "E7",
+      "title": "Classifier does not weight the decision; Fig. 1 routing wrong",
+      "note": "Corrected: the classifier's weighting fields are computed but read by no code outside the classifier and its unit tests (chapter's commit and current release); the final-move decision does not depend on the position class. The classifier only scales the per-move time budget and sets the minimum MCTS node count for the agreement stop. Engine mode is selected by UCI options (UseHybridSearch, UseMCTS), not by the classifier; Fig. 1's routing is wrong.",
+      "anchors": [
+        {
+          "page": 4,
+          "text": "Position Classifier"
+        },
+        {
+          "page": 5,
+          "text": "Classify position type (tactical/strategic/endgame)"
+        },
+        {
+          "page": 5,
+          "text": "The position classifier analyzes tactical features"
+        },
+        {
+          "page": 5,
+          "text": "in quiet strategic positions, the MCTS evaluation carries more"
+        },
+        {
+          "page": 11,
+          "text": "decision logic uses a simple position classifier"
+        }
+      ]
+    },
+    {
+      "id": "E8",
+      "title": "Early termination: no time saving measured",
+      "note": "Corrected: the agreement stop exists but is gated (clock games only; three consecutive coordinator polls about 1.5 ms apart, not iterations; more than 25% of the budget elapsed; at least 100 MCTS playouts; AB depth at least 10). It fired 0 of 209 times in the retained July 2026 telemetry. No time-saving measurement exists; '10-40%' is withdrawn.",
+      "anchors": [
+        {
+          "page": 5,
+          "text": "if AB and MCTS agree on best move for 3+ iterations then"
+        },
+        {
+          "page": 5,
+          "text": "Terminate early"
+        },
+        {
+          "page": 10,
+          "text": "confident early stopping, saving"
+        }
+      ]
+    },
+    {
+      "id": "E9",
+      "title": "NN influence inference wrong; BK suite at ceiling",
+      "note": "Corrected: in the retained telemetry the hybrid's final move was the alpha-beta move in 207 of 209 decisions (20+0.2, July 2026) and, in the current release at 30+0.3, the MCTS move was selected in none. Agreement with Lc0 reflects Stockfish/Lc0 agreement on these positions. The 24-position suite is at ceiling (a later 5 s run: AB 20, MCTS 24, Hybrid 24, Lc0 18, Stockfish 20) and was used during tuning; Tables 2-3 are not a ranking.",
+      "anchors": [
+        {
+          "page": 7,
+          "text": "Solved Rate (%)"
+        },
+        {
+          "page": 7,
+          "text": "The 95.8% agreement between the hybrid engine and Lc0"
+        },
+        {
+          "page": 10,
+          "text": "The 95.8% bestmove agreement between the hybrid and Lc0"
+        }
+      ]
+    },
+    {
+      "id": "E10",
+      "title": "Throughput vs Lc0 withdrawn",
+      "note": "Corrected: Table 4 rests on four 10 s positions and Lc0's 14 nps in the 'Complex middlegame' row indicates a harness fault. Idle-machine measurement with the same BT4 network (2026-10-14): MetalFish Metal FP16 135 positions/s at batch 1 (7.4 ms) and 538 at batch 64; Lc0 0.32.1 Metal 165 nps at minibatch 1 and 725 at minibatch 32. MetalFish's inference throughput is not higher than Lc0's at any batch size.",
+      "anchors": [
+        {
+          "page": 8,
+          "text": "MetalFish achieves 1.26"
+        },
+        {
+          "page": 8,
+          "text": "Complex middlegame"
+        },
+        {
+          "page": 10,
+          "text": "While our throughput is 1.26"
+        }
+      ]
+    },
+    {
+      "id": "E11",
+      "title": "M1 Ultra figures and 7.24x scaling unsupported",
+      "note": "Corrected: no measurement record exists for 9.8M NPS, 7.24x scaling or ~382 NPS on M1 Ultra; withdrawn. Measured on M2 Max (fixed depth 16, median of five runs, 1 GB hash): 1.53M nps on one thread, 11.81M on eight (7.7x), 13.52M on twelve.",
+      "anchors": [
+        {
+          "page": 3,
+          "text": "9.8M NPS on M1 Ultra"
+        },
+        {
+          "page": 4,
+          "text": "382 NPS on M1 Ultra"
+        }
+      ]
+    },
+    {
+      "id": "E12",
+      "title": "Related work mischaracterised",
+      "note": "Corrected: Baier and Winands [9] embed shallow minimax searches within MCTS selection, rollout and backpropagation (not 'sequential', not a survey). Lanctot et al. [10] evaluated implicit minimax backups on Kalah, Breakthrough and Lines of Action, not in general game playing.",
+      "anchors": [
+        {
+          "page": 2,
+          "text": "hybrid approaches that use one paradigm to inform the other sequentially"
+        },
+        {
+          "page": 3,
+          "text": "Baier and Winands [9] surveyed MCTS enhancements"
+        },
+        {
+          "page": 3,
+          "text": "in general game playing"
+        }
+      ]
+    },
+    {
+      "id": "E13",
+      "title": "Time manager not used by the hybrid",
+      "note": "Corrected: the Lc0-style smooth time manager (mu 45.2, sigma 5.93, 0.73 cap, 12% piggybank) is used by the stand-alone MCTS mode only; inside the hybrid the MCTS component receives a fixed per-move budget from the coordinator.",
+      "anchors": [
+        {
+          "page": 4,
+          "text": "capped at 73%"
+        },
+        {
+          "page": 6,
+          "text": "This eliminated time losses that occurred with the original"
+        }
+      ]
+    },
+    {
+      "id": "E14",
+      "title": "Omitted time-safety fallback",
+      "note": "Omission: the hybrid disables its transformer component and plays the alpha-beta move whenever the remaining time or the fixed move time is below a threshold (5 s at the chapter's commit; 3 s remaining or a move budget below 0.4 s in the current release). The transformer was active on 52% of hybrid moves at 20+0.2, about 50% at 30+0.3 and almost never at 10+0.1; hybrid results at short time controls are largely alpha-beta results.",
+      "anchors": [
+        {
+          "page": 4,
+          "text": "The hybrid engine coordinates alpha-beta and MCTS running simultaneously"
+        }
+      ]
+    }
   ]
 }
