@@ -13,7 +13,13 @@ shipped behaviour.
 
 ## 0. As-built summary (replaces §3 of the paper)
 
-Verified against `b935e66` on 2026-10-07 (full audit in `01_published_paper_audit.md` §C):
+Two snapshots. The first is the shipped v1.0.0 engine the published chapter described
+(verified against `b935e66` on 2026-10-07; full audit in `01_published_paper_audit.md` §C).
+The second is the engine frozen for this paper's measurements (`main` 365f36a, tags
+`paper-v2-freeze-rc1` / `paper-v2-protocol-freeze`, 2026-10-14) after the strength programme in
+`07_engine_strength_program.md`; every difference between the two was game-gated.
+
+**v1.0.0 (b935e66):**
 
 - **Modes**: selected by UCI (`UseHybridSearch`, `UseMCTS`); one binary; 118 options.
 - **AB**: Stockfish dev-20260103 search + NNUE (`FullThreats+HalfKAv2_hm` 108.9 MB big net,
@@ -28,12 +34,39 @@ Verified against `b935e66` on 2026-10-07 (full audit in `01_published_paper_audi
   7.6 ms (FP16) / 8.8 ms (FP32) on M2 Max; CoreML/ANE path exists, off by default.
 - **Hybrid**: three control threads (MCTS controller, AB, coordinator) + Stockfish pool +
   MCTS worker(s). `alignas(128)` shared root structs with mostly relaxed atomics. Thread
-  split on a clock with T≥8: MCTS 1, AB T−2. MCTS→AB root-order hints (top-8) and a 240 ms
-  AB candidate-verification sub-search are on; AB→MCTS policy boost and shared TT are off.
-  Final decision: AB's move unless one of ~30 gated MCTS-override predicates fires and
-  `HybridABRootRejectsMCTS` does not veto; agreement early-stop exists but never fired in
-  telemetry; the position classifier only lengthens budgets and sets a node minimum.
-  Transformer disabled per move when budget < 400 ms or time left < 3 s.
+  split on a clock with T≥8: MCTS 1, AB T−2; the Stockfish pool was rebuilt twice per move
+  (per-thread histories lost). The coordinator spent a fixed per-move budget
+  (`time_left/30 + 0.75·inc`, capped) and kept the move open for MCTS until it was used.
+  MCTS→AB root-order hints (top-8) and a 240 ms AB candidate-verification sub-search are
+  on; AB→MCTS policy boost and shared TT are off. Final decision: AB's move unless one of
+  ~30 gated MCTS-override predicates fires and `HybridABRootRejectsMCTS` does not veto;
+  agreement early-stop exists but never fired in telemetry; the position classifier only
+  lengthens budgets and sets a node minimum. Transformer disabled per move when the
+  estimated budget < 400 ms or time left < 3 s.
+
+**Frozen for the paper (365f36a), differences from v1.0.0:**
+
+- **AB core = Stockfish 19** (tag `sf_19`, SFNNv16 big net `nn-1a298aa575a0.nnue`; `bench`
+  reproduces the upstream 2,497,913-node signature) — programme L1, +62 ± 28 Elo over the
+  January base at 10+0.1.
+- **Thread policy**: oversubscribed — alpha-beta keeps all `Threads` and the single MCTS
+  worker is an extra thread that mostly blocks on GPU inference (`HybridOversubscribe=true`,
+  L9: +15 ± 17 over the 6+1 split). The Stockfish pool persists across hybrid moves (L5b).
+- **Time management**: Stockfish's clock-based time manager owns the move
+  (`HybridFollowABTime=true`); the coordinator's per-move budget no longer ends a clock
+  search and only bounds the MCTS side and the decision thresholds (L5c/L5d; with the
+  tie-break change, +74 ± 30 over v1.0.0's hybrid at 20+0.2).
+- **Arbitration**: the pawn-lever and quiet-attack root tie-breaks are off
+  (`HybridRootPawnLeverTieBreak=false`); the remaining override ladder is unchanged. In every
+  gate at 20+0.2 and 30+0.3 the frozen hybrid played alpha-beta's move on 100% of hybrid
+  moves (RQ6c/RQ6d measure the ladder and the hint/verify machinery at the paper's sample
+  sizes).
+- **Footprint**: the hybrid's MCTS NN cache is capped at 100,000 entries (C18): process
+  footprint 4.4 GB vs 2.3 GB for plain alpha-beta at `Hash=2048` (was 5.8–6.1 GB, which
+  made the 32 GB host page and cost ≈55 Elo in the 30+0.3 pilot).
+- Unchanged: PUCT constants, batch-1 Metal inference, the fallback thresholds (400 ms /
+  3 s), root-order hints (top-8) and the 240 ms candidate-verify sub-search (active only
+  when the per-move budget is ≥ 1 s), AB→MCTS policy boost off, shared TT off.
 
 ## P0 — Before the protocol freeze
 
