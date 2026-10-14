@@ -346,8 +346,11 @@ draw rate 46% (within 45–65%), time forfeits 0, `-srand` reproducible, fastche
 `penta_stats.py` agree (−41.89 ± 25.07 both), mean game 1.95 min, GPU-active fraction
 **50.1%** of the hybrid arm's moves (median 27 MCTS evaluations per move) — below the 80%
 target; see amendment §11.4. The pilot's strength reading (−41.9 ± 25.1 Elo for the hybrid)
-triggered a diagnostic gate before the freeze (07, L10); the MUST cells start on the engine
-that results from it.
+triggered diagnostic gates before the freeze (07, L10–L14). Outcome: the deficit came from
+the hybrid process's memory footprint (an unused 1.6 GB MCTS NN cache made it ≈6 GB vs 2.3 GB
+and the host paged); with the cache capped (C18) the hybrid reads +13.9 ± 30.3 Elo against
+AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST cells run on
+`build/` rebuilt from that commit, whose SHA-256 is recorded in each cell manifest.
 
 ## 11. Amendments
 
