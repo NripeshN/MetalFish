@@ -44,7 +44,12 @@ def collect_cells(results: pathlib.Path):
     for d in sorted(results.iterdir()):
         s = d / "summary.json"
         # A directory holding an EXCLUDED.txt (e.g. games of a superseded binary) enters nothing.
-        if d.is_dir() and s.exists() and not d.name.startswith("sprt") and not (d / "EXCLUDED.txt").exists():
+        if (
+            d.is_dir()
+            and s.exists()
+            and not d.name.startswith("sprt")
+            and not (d / "EXCLUDED.txt").exists()
+        ):
             obj = load(s)
             st = stats_of(obj)
             cells.append(
