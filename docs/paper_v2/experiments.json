@@ -445,7 +445,7 @@
     {
       "id": "RQ6d",
       "rq": "RQ6",
-      "priority": "COULD",
+      "priority": "SHOULD",
       "tc": "30+0.3",
       "pairs": 500,
       "a": {
@@ -460,7 +460,8 @@
         "engine": "AB",
         "threads": 8
       },
-      "est_hours": 32
+      "est_hours": 32,
+      "note": " Promoted from COULD on 2026-10-14: the 30+0.3 pilot (shipped config, -41.9 +/- 25.1) and the L10 diagnostic (hints+verify off, -17.4 +/- 31.0) differ by ~25 Elo with overlapping intervals; this cell resolves it."
     },
     {
       "id": "RQ8",

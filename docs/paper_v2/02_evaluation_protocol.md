@@ -374,3 +374,9 @@ that results from it.
    feasibility target, not a property the engine guarantees; RQ1a keeps 30+0.3 as pre-registered
    and reports the fraction as a covariate (M5), and RQ1b (60+0.6) is promoted to the first
    SHOULD cell because it is the regime with the most GPU participation.
+5. **2026-10-14 — RQ6d promoted from COULD to SHOULD.** The 30+0.3 pilot of the shipped
+   configuration read −41.9 ± 25.1 Elo against AB(8) and the L10 diagnostic with the MCTS root
+   hints and candidate-verify pre-searches off read −17.4 ± 31.0; the intervals overlap, so the
+   question is left to RQ6d at its pre-registered sample size rather than decided on 100-game
+   gates. The shipped defaults are unchanged. A null control (hybrid UCI path with the
+   transformer never engaged, L12) and the 6+1 split control (L11) are reported in 07.

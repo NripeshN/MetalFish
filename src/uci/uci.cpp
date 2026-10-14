@@ -1240,6 +1240,9 @@ compute_hybrid_thread_split(Engine &engine,
   return {mcts_threads, ab_threads};
 }
 
+// Hybrid-side cap on the MCTS NN cache (entries); see make_hybrid_config.
+constexpr int kHybridNNCacheEntriesCap = 100000;
+
 static MCTS::ParallelHybridConfig
 make_hybrid_config(Engine &engine, const std::string &nn_weights,
                    const Search::LimitsType *limits = nullptr) {
@@ -1247,6 +1250,11 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   auto split = compute_hybrid_thread_split(engine, limits);
 
   config.mcts_config = make_mcts_config(engine, nn_weights, split.mcts_threads);
+  // The hybrid evaluates a few dozen positions per move, so the pure-MCTS
+  // default of two million NN-cache entries (about 1.6 GB resident, measured
+  // with vmmap) is pure footprint here; cap it unless the user asked for less.
+  config.mcts_config.nn_cache_size =
+      std::min(config.mcts_config.nn_cache_size, kHybridNNCacheEntriesCap);
   if (limits && limits->movetime > 0 && limits->movetime < 1000 &&
       config.mcts_config.minibatch_size > 1) {
     config.mcts_config.minibatch_size = 1;
