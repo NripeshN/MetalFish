@@ -396,3 +396,12 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
    `results/paper_v2/run_oracle_rq6b.sh`, chained after RQ1b and the microbenchmark re-run in
    `results/paper_v2/queue_after_must.sh`. This fixes the stratification that §5 left open; the
    estimands are unchanged.
+7. **2026-10-14 — binary re-linked after a host library upgrade; RQ1a restarted.** During RQ1a
+   block 0 (183 games played with the rc1 binary) Homebrew upgraded the host's protobuf library,
+   after which the frozen binary could not start new engine processes (03 §C19). The source is
+   unchanged; the same commit was rebuilt against the new library with its dynamic libraries
+   bundled, re-verified (bench signature, unit suite, NN probe) and re-frozen as
+   `paper-v2-freeze-rc2`. Because the protocol requires one binary for every game of a cell and
+   the rc1 binary can no longer be executed for an equivalence check, RQ1a restarts from its
+   first opening pair with rc2; the 183 rc1 games are kept as `RQ1a_rc1_partial` for the record
+   and enter no cell. No cell result had been read beyond the 100-game diagnostic checkpoint.

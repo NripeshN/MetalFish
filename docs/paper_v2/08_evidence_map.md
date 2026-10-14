@@ -30,6 +30,21 @@ Readings at the interruption: 0.0 ± 22.0 Elo (`penta_stats.py`, 128 games). The
 resumed at 11:43 UTC by `queue_must_cells_resume.sh` with `run_cell.py --resume` (same seeded
 book order, next opening = pair 65, 186 pairs left; recorded in `RQ1a/manifest.json` →
 `resumes`); no game was deleted or replayed. The resumed queue logs any catchable signal.
+Second interruption, 13:13 UTC: a Homebrew upgrade of protobuf on the host removed the dynamic
+library the rc1 binary linked; fastchess aborted RQ1a at game 183 ("engine startup failure") and
+every later block failed its preflight (03 §C19). The 183 rc1 games (0 forfeits; 0.0 ± 20 Elo
+range at the time) are kept as `results/paper_v2/RQ1a_rc1_partial/` and are not part of any
+cell; RQ1a restarts from pair 1 with the re-linked rc2 binary (protocol amendment §11.7).
+rc2 verification (14:26–14:34 local): 130 objects rebuilt from the same source; `bench` 2,497,913
+nodes; unit suite 128 checks passed; UCI/perft smoke passed; `test_nn_comparison` fixed-position BT4
+references within tolerance (max value delta 0.0012, max top-policy delta 0.006), batch parity exact
+to batch 8, one FP16 policy-logit deviation of 0.0056 at batch 16 (the same class of deviation the
+green CI run of main 8c0661d shows at batch 2; the engine evaluates at batch 1); 81 Homebrew dynamic
+libraries bundled under `build/lib`; bench, probe and unit suite re-passed after bundling. rc2 sha256
+8c534bb6f82fe9ec…; tag `paper-v2-freeze-rc2` on 8c0661d (engine source identical to 365f36a).
+Logs: `results/paper_v2/queue_logs/rc2_*.txt`.
+
+
 
 Memory footprint (vmmap physical footprint, `Hash=2048`, after `isready`): plain alpha-beta 2.3 GB;
 hybrid with the default 2 M-entry NN cache 5.8–6.1 GB; hybrid with the C18 cap 4.4 GB. With
