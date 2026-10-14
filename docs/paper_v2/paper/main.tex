@@ -1,0 +1,352 @@
+% Manuscript of the MetalFish evaluation paper (arXiv preprint). Build: latexmk -pdf main.tex
+% Every number is traced to an artifact in docs/paper_v2/08_evidence_map.md; the `%src:` comments name it.
+% \pending{...} marks content that waits for a measurement cell; with \finaltrue it is a compile error.
+\documentclass{article}
+\usepackage{PRIMEarxiv}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{threeparttable}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{microtype}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{xcolor}
+\usepackage{multirow}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit}
+\graphicspath{{../figures/}}
+
+% build.sh passes \def\FINAL{1} and/or \def\ANON{1} as pretex to select the variants.
+\newif\iffinal
+\finalfalse
+\ifdefined\FINAL\finaltrue\fi
+% Double-anonymous variant (IEEE ToG): no author block, third-person references to the chapter,
+% anonymised artifact links.
+\newif\ifanon
+\anonfalse
+\ifdefined\ANON\anontrue\fi
+\newcommand{\pending}[1]{\iffinal\PackageError{paper}{Pending content: #1}{Fill it from the artifact before the final build.}\else\textcolor{red}{[PENDING: #1]}\fi}
+\newcommand{\elo}[2]{$#1 \pm #2$}
+\newcommand{\MF}{MetalFish}
+
+\pagestyle{fancy}
+\thispagestyle{empty}
+\rhead{\textit{Preprint}}
+\fancyhead[LO]{Does a GPU help a Stockfish-class engine?}
+
+\title{Does a GPU Help a Stockfish-Class Engine?\\A Controlled Evaluation of Concurrent Alpha-Beta and Transformer-MCTS Search on Apple Silicon}
+
+\ifanon
+\author{Anonymous author(s)}
+\else
+\author{
+  \href{mailto:nripesh14@gmail.com}{Nripesh Niketan}\thanks{Independent researcher. ORCID 0009-0008-2066-1937.}
+}
+\fi
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\pending{abstract: written after RQ1a and RQ1b complete (headline Elo with 95\% CI, GPU-active fraction, oracle bound); outcome-neutral per blueprint \S2}
+\end{abstract}
+
+\keywords{computer chess \and alpha-beta search \and Monte Carlo tree search \and transformer networks \and hybrid search \and Apple Silicon \and unified memory \and engine evaluation}
+
+% =====================================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Two search paradigms dominate computer chess. Alpha-beta search with efficiently updatable neural-network evaluation (NNUE), exemplified by Stockfish~\cite{stockfish,nasu2018}, searches tens of millions of nodes per second on a CPU; Monte Carlo tree search (MCTS) guided by a deep policy--value network, exemplified by AlphaZero~\cite{silver2018} and Leela Chess Zero (Lc0)~\cite{lc0,monroe2024}, evaluates a few hundred to a few thousand positions per second on a GPU and compensates with the quality of each evaluation. Consumer systems-on-chip with unified memory, such as Apple's M-series~\cite{applem2}, place a capable GPU next to the CPU with no transfer bottleneck, which makes it cheap to run both searches on the same position at the same time and to arbitrate between their answers. Whether that arbitration adds playing strength to a Stockfish-class CPU search is an empirical question, and it has not been answered with a controlled measurement.
+
+\ifanon An earlier conference chapter~\cite{niketan2026chapter} described such a system, \MF{}, and reported ratings for its three modes. Re-examination of that chapter by its author\else Our earlier conference chapter~\cite{niketan2026chapter} described such a system, \MF{}, and reported ratings for its three modes. Re-examination of that chapter\fi against the engine's source code and the retained records showed that its quantitative claims do not hold: the ratings were computed by averaging assumed opponent ratings and five-game match scores, the alpha-beta component is Stockfish's own search, and several implementation statements were wrong (Section~\ref{sec:chapter} lists each one; a Correction has been prepared). This paper is the controlled study the chapter lacked. It keeps the system, freezes it, and asks one pre-registered question with everything else held equal:
+
+\begin{quote}
+\emph{Does running an Lc0-class transformer MCTS on the GPU concurrently with a Stockfish-class alpha-beta search on the CPU, with a final arbiter, change playing strength relative to the alpha-beta search alone, at equal wall-clock and equal CPU-thread budget on one machine?}
+\end{quote}
+
+The answer is measured as an Elo difference with a confidence interval, decomposed into the cost of the resources the GPU path consumes and the value it returns, and explained by what the two searches disagree about and who is right when they do. The study design was written down before the data were collected (Section~\ref{sec:method}); the engine was frozen at a tagged commit; every number in this paper is produced by a script from a retained artifact.
+
+\paragraph{Headline result.} \pending{one paragraph: RQ1a Elo $\pm$ CI over 2{,}000 games at 30+0.3, RQ1b at 60+0.6, GPU-active fraction, and the oracle bound (RQ6b); framing chosen from blueprint \S2 after unblinding}
+
+\paragraph{Contributions.}
+\begin{enumerate}
+  \item A controlled, pre-registered methodology for evaluating hybrid or ensemble chess engines that share one machine: a fair-resource policy, pentanomial statistics with normalised Elo, unbalanced human openings, telemetry of when the GPU path is actually active, component isolation and scaling cells, with all artifacts released (Section~\ref{sec:method}).
+  \item The as-built \MF{} system on Apple Silicon: a concurrent alpha-beta plus MCTS runtime with shared root state, MCTS-to-alpha-beta root-ordering hints and a gated arbiter; the BT4 transformer on Metal Performance Shaders Graph; and measurements of its batch-1 latency ceiling and CPU--GPU contention (Section~\ref{sec:system}).
+  \item Measurements answering the research questions of Section~\ref{sec:rqs}: the marginal value of the GPU search at equal budget, the decomposition into thread cost and GPU value, component parity with Lc0 and Stockfish, and the sensitivity to time control (Section~\ref{sec:results}).
+  \item An oracle analysis of arbitration that bounds what any arbiter could gain from this pair of searches and measures what the implemented arbiter achieves (Section~\ref{sec:oracle}).
+  \item A correction of the \ifanon chapter's\else earlier chapter's\fi{} claims together with the root causes of the errors (Section~\ref{sec:chapter}).
+\end{enumerate}
+
+% =====================================================================================
+\section{Background and related work}
+\label{sec:background}
+
+\subsection{Alpha-beta search with NNUE}
+Alpha-beta pruning~\cite{knuth1975} remains the foundation of the strongest chess engines. Stockfish adds iterative deepening, aspiration windows, null-move and futility pruning, late-move reductions and a shared transposition table, and since 2020 evaluates positions with NNUE networks~\cite{nasu2018}, whose first layer is updated incrementally as moves are made and unmade. Stockfish's development is driven by Fishtest, a distributed testing framework whose statistical conventions (game pairs with colour swap, unbalanced opening books, pentanomial statistics, sequential tests) are the state of the art for measuring small strength differences~\cite{fishtest,stockfish}.
+
+\subsection{Monte Carlo tree search with neural networks}
+MCTS~\cite{coulom2006,kocsis2006,browne2012} with PUCT selection~\cite{rosin2011} and a policy--value network, as in AlphaZero~\cite{silver2018}, builds a tree of a few thousand nodes per move whose leaves are evaluated by the network. Lc0 is the open-source continuation of this line; its current networks are transformers~\cite{monroe2024,lc0}, and the BT4 network used here is one of them. Transformers have also been trained to play chess without search at all~\cite{ruoss2024}. The quality of an MCTS engine on a given GPU depends on evaluations per second, and that rate is governed by batching: a single evaluation is dominated by fixed launch and synchronisation overhead, a phenomenon documented for inference frameworks in general~\cite{fernandez2023} and for Apple's Metal Performance Shaders in particular~\cite{hendria2026}. Running CPU and GPU work concurrently on unified memory has its own regimes of benefit and interference~\cite{mohite2026,ajayi2025}.
+
+\subsection{Combining minimax and MCTS}
+The algorithmic literature on hybrids embeds one search inside the other. Baier and Winands embed shallow minimax searches in the selection, rollout and backpropagation phases of MCTS~\cite{baier2013,baier2015} and later add static state evaluations~\cite{baier2018}; Lanctot et al.\ back up an implicit minimax value alongside the Monte Carlo average~\cite{lanctot2014}; Huang shows that alpha-beta and MT-SSS* can be expressed as rollout algorithms~\cite{huang2015}, and Baier unifies MCTS and alpha-beta in one rollout-based algorithm~\cite{baier2017}. Ji and Thielscher vary the depth of the embedded minimax search dynamically~\cite{ji2023}. The motivation for these hybrids is the well-documented weakness of sampling-based search in tactical domains: shallow traps~\cite{ramanujan2010} and lookahead pathology~\cite{nguyen2024}. In the AlphaZero setting, Chen et al.\ add an alpha-beta phase to an AlphaZero-style player~\cite{chen2019}, Helfenstein et al.\ combine a mixture of experts with MCTS in chess~\cite{helfenstein2024}, and Cohen-Solal and Cazenave show that minimax-based learning remains competitive with MCTS-based learning~\cite{cohen2023}.
+
+\subsection{Engines that combine or compare the paradigms}
+Engine practice has its own precedents. Scorpio performs alpha-beta rollouts inside an MCTS framework with neural-network evaluation~\cite{scorpio}; Komodo and Dragon offer an MCTS mode whose tree growth is guided by shallow alpha-beta searches~\cite{komodo}; a 2017 Stockfish branch experimented with a Monte Carlo search on top of Stockfish's evaluation~\cite{sfmcts2017}; the lc0-stockfish-hybrid project uses Stockfish as a filter inside Lc0's selection~\cite{lc0sfhybrid}; Ceres and Allie are independent MCTS searches on Lc0 networks~\cite{ceres,allie}; and Stoofvlees II, an MCTS engine whose design departs from the AlphaZero recipe, won two World Computer Chess Championships~\cite{pascutto2025}. What distinguishes the system studied here is not the idea of combining the paradigms but that both searches run concurrently and independently on the same position and a final arbiter chooses between their answers; the question of this paper is whether that arbitration is worth anything at a fixed hardware budget, which none of the above measured under controlled conditions. Adjacent work combines engine search with human-derived policies for other goals~\cite{maia2,carlson2026}.
+
+\subsection{Measuring strength}
+Elo differences between near-equal engines are small relative to game-to-game noise, and the measurement conventions matter as much as the games. Fishtest's methodology, documented by Van den Bergh~\cite{vdbergh_gsprt,vdbergh_rw,vdbergh_nelo,fishtest}, plays colour-swapped game pairs from unbalanced human openings (UHO)~\cite{sfbooks,pohl2024} so that draws do not swamp the signal, and reports pentanomial statistics and normalised Elo; the book choice itself is debated~\cite{uhocritique}. Draw modelling in Elo~\cite{szczecinski2020} and uncertainty estimation in paired-comparison experiments~\cite{glickman1999} are the statistical background; whole-history rating~\cite{coulom2008} and Bayesian Elo~\cite{bayeselo} are the methods a multi-engine rating would use, and Ordo~\cite{ordo} is the tool used here. Ratings from public lists such as CCRL are specific to their reference hardware and time control~\cite{ccrl} and cannot be imported to another machine; the Top Chess Engine Championship separates CPU and GPU engines into different leagues for the same reason~\cite{haworth2020}. Tactical test suites~\cite{bratko1982,sts,eret,arasan,lichesspuzzles} measure something else than playing strength and, for an engine that was tuned on them, measure that optimistically.
+
+% =====================================================================================
+\section{The system as built}
+\label{sec:system}
+
+\MF{} is a single UCI binary with three modes selected by options: plain alpha-beta (\texttt{AB}), stand-alone transformer MCTS, and the hybrid that runs both concurrently. This section describes the engine as frozen for this study (repository tag \texttt{paper-v2-freeze-rc1}, commit \texttt{365f36a}); Section~\ref{sec:chapter} lists where the earlier chapter's description differed. Figure~\ref{fig:arch} shows the threads and data flows.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners, align=center, font=\footnotesize, minimum height=8mm, inner sep=3pt},
+  cpu/.style={box, fill=orange!12}, gpu/.style={box, fill=blue!10}, ctl/.style={box, fill=green!12},
+  shared/.style={box, fill=yellow!15, dashed}, off/.style={box, fill=gray!10, densely dotted},
+  arr/.style={-{Stealth[length=2mm]}, semithick}, flow/.style={arr, dashed}]
+  \node[ctl] (uci) at (0,0) {UCI front end (mode = option)};
+  \node[ctl] (coord) at (0,-1.5) {Coordinator thread: arbiter, budgets, telemetry};
+  \node[cpu, text width=52mm] (ab) at (-4.3,-3.4) {Alpha-beta: Stockfish 19 search + NNUE\\all $T$ CPU threads, Hash 2 GB};
+  \node[gpu, text width=52mm] (mcts) at (4.3,-3.4) {MCTS controller + one worker\\PUCT, 128-byte nodes, NN cache};
+  \node[shared, text width=52mm] (abst) at (-4.3,-5.3) {\texttt{ABSharedState}\\best move, score, depth, PV};
+  \node[shared, text width=52mm] (mcst) at (4.3,-5.3) {\texttt{MCTSSharedState}\\best move, $Q$, visits, top moves};
+  \node[gpu, text width=52mm] (nn) at (4.3,-7.0) {BT4 transformer on the GPU\\MPSGraph executable, FP16, batch 1};
+  \node[off, text width=116mm] (offs) at (0,-8.6) {Present but off by default: AB$\to$MCTS policy boost, shared transposition table, Core ML/ANE root probe, pawn-lever and quiet-attack tie-break overrides};
+  \draw[arr] (uci) -- (coord);
+  \draw[arr] (coord.south) -- ++(0,-0.4) -| (ab.north);
+  \draw[arr] (coord.south) -- ++(0,-0.4) -| (mcts.north);
+  \draw[arr] (mcts) -- (nn);
+  \draw[arr] (ab) -- (abst);
+  \draw[arr] (mcts) -- (mcst);
+  \draw[flow] (abst.west) -- ++(-0.5,0) |- (coord.west);
+  \draw[flow] (mcst.east) -- ++(0.5,0) |- (coord.east);
+  \draw[flow] (mcst.west) -- node[above, font=\scriptsize, align=center]{root-order hints (top 8)\\candidate verification} (abst.east);
+\end{tikzpicture}
+\caption{The hybrid runtime as frozen. The coordinator launches the Stockfish-derived alpha-beta search with all $T$ CPU threads and one MCTS worker that blocks on batch-1 GPU inference (\texttt{HybridOversubscribe}); both publish root state through 128-byte-aligned shared structures; the MCTS top moves pre-order the alpha-beta root and are verified by a short alpha-beta sub-search; the arbiter plays alpha-beta's move unless one of the gated override predicates fires. Dotted: features present but off by default.}
+\label{fig:arch}
+\end{figure}
+
+\subsection{Alpha-beta component}
+The alpha-beta component is Stockfish's search and NNUE evaluation. At the freeze it is a port of Stockfish 19 with its SFNNv16 network (\texttt{nn-1a298aa575a0.nnue}, 98.5 MB); the engine's \texttt{bench} command reproduces the upstream signature of 2{,}497{,}913 nodes, so the search is node-for-node Stockfish's. %src: results/paper_v2/calibration/build_final.log; 03 §0
+The local changes are small: root-move ordering hints received from the MCTS component, keeping the previous principal variation on an unproven fail-high, an AArch64 spin-wait hint, two branch-likelihood hints, thread quality-of-service classes, de-duplication of \texttt{searchmoves}, a transposition-table allocation check and a NEON kernel. There is no GPU code in the alpha-beta search; NNUE runs on the CPU by design, because incremental CPU evaluation is faster than any GPU round trip at the granularity of a node. On the test machine the search reaches 1.53 million nodes/s on one thread, 11.81 million on eight threads and 13.52 million on all twelve cores at fixed depth (Figure~\ref{fig:m2}). %src: results/paper_v2/micro/ab_scaling.json (depth 16, median of 5)
+
+\subsection{MCTS component and neural-network backend}
+The MCTS component follows Lc0's search: PUCT selection with first-play urgency, a policy softmax temperature, tree reuse between moves and a direct-mapped cache of network outputs keyed on the position. Nodes are 128 bytes and aligned to the M-series cache line; a 4-byte \texttt{os\_unfair\_lock} protects score updates. The BT4 transformer (\texttt{BT4-1024x15x32h}, 15 encoder blocks, 32 heads, 1024-wide; 383 MB of weights) is compiled once into a Metal Performance Shaders Graph executable~\cite{mpsgraph} with an FP16 body and FP32 inputs and outputs, and one evaluation is in flight at a time. The stand-alone MCTS mode runs one worker at batch size 1; the hybrid runs one worker.
+
+Batch-1 inference is the structural ceiling of this design. On an otherwise idle M2 Max a single BT4 evaluation takes 7.40 ms in FP16 (135 positions/s) and 8.74 ms in FP32; a batch of 8 takes 19.7 ms (407 positions/s) and a batch of 64 takes 119 ms (538 positions/s), so batching trades a fourfold throughput gain for proportionally staler tree statistics (Figure~\ref{fig:m1}). %src: results/paper_v2/micro/nn_latency.json (2026-10-14 sweep; to be refreshed from nn_latency_frozen.json)
+Lc0 0.32.1's Metal backend with the same weights reaches 165 nodes/s at minibatch 1 and 725 nodes/s at minibatch 32 on the same machine, so \MF{}'s inference is not faster than Lc0's at any batch size. %src: results/paper_v2/micro/nn_latency.json (lc0 nps_steady_median)
+Inside a game the MCTS worker competes with eight alpha-beta threads for memory bandwidth and scheduling; its observed rate is reported with the game telemetry in Section~\ref{sec:results}.
+
+\subsection{Hybrid runtime and arbiter}
+On every move the coordinator starts the alpha-beta search and the MCTS search on the same position and lets Stockfish's clock-based time manager own the move (\texttt{HybridFollowABTime}); the MCTS side is bounded by the coordinator's per-move budget. Alpha-beta keeps all $T$ threads and the single MCTS worker runs as an extra thread that mostly blocks on the GPU (\texttt{HybridOversubscribe}). The two searches publish their root state through two cache-line-aligned structures with relaxed atomics; the MCTS top-8 moves pre-order the alpha-beta root, and a 240 ms sub-search verifies the top MCTS candidates when the per-move budget is at least one second. The final decision is alpha-beta's move unless one of a ladder of gated predicates selects the MCTS move (for example when MCTS has a large visit majority and alpha-beta does not reject the move in its own verification); the pawn-lever and quiet-attack tie-break overrides that the earlier engine used are off. A time-safety rule disables the transformer for a move when the estimated budget is below 400 ms or the remaining clock below 3 s; the move is then plain alpha-beta. The position classifier that the chapter described as weighting the decision only lengthens the budget and sets a node minimum. The agreement-based early stop exists but is gated on at least 100 MCTS playouts and never fired in any retained game log.
+
+\subsection{Engine preparation and freeze}
+\label{sec:prep}
+The engine was not tuned for strength during the study, but four defects found while instrumenting it were fixed before the freeze, each gated by a same-binary match (exploratory, reported in full in the programme record~\cite{zenodo}): the alpha-beta core was moved from a January 2026 Stockfish development snapshot to Stockfish 19 (+\elo{62.0}{28.2} over the old base at 10+0.1, 136 games); %src: 08 §A sf19port_vs_preport_ab_10p01_v2
+the Stockfish thread pool was kept alive across hybrid moves and Stockfish's time manager was given the clock, with the tie-break overrides turned off (+\elo{74.1}{30.5} over the previous hybrid at 20+0.2, 100 games); %src: 08 §A L7b
+alpha-beta was allowed to keep all eight threads with the MCTS worker oversubscribed (+\elo{15.1}{17.0} over the 6+1 split, 300 games); %src: 08 §A L9
+and the hybrid's network-output cache was capped at 100{,}000 entries after a 100-game pilot of the study's main cell read \elo{-41.9}{25.1} for a hybrid whose 6 GB footprint made the 32 GB host page (the lean configuration read +\elo{13.9}{30.3} over 101 games under the same conditions; a null control in which the hybrid never engaged the transformer read \elo{-20.9}{28.5}, and the same control without preloading the network read \elo{-10.4}{16.8} over 301 games at 10+0.1). %src: 08 §A RQ1a_pilot, L14, L12, L13
+With the cap, the hybrid process occupies 4.4 GB against 2.3 GB for plain alpha-beta at a 2 GB hash. %src: 08 §A vmmap footprints
+The frozen binary's SHA-256 is recorded in every cell manifest.
+
+% =====================================================================================
+\section{Evaluation methodology}
+\label{sec:method}
+
+\subsection{Principles and fair-resource policy}
+The alpha-beta component is Stockfish, so its strength is not a contribution and is never compared across machines. Every primary comparison is \emph{same binary, same machine, same wall-clock, same total CPU-thread budget}, with the GPU search switched on or off. The protocol~\cite{zenodo} fixed the hypotheses, cells, sample sizes, statistics and decision rules before data collection and was amended only by numbered entries written before the affected cell was interpreted (six amendments; Section~\ref{sec:amend}). All games, engine logs, traces, manifests with hashes and seeds, and thermal logs are retained, and every figure and table is generated from them by a script.
+
+\subsection{Environment}
+All measurements were taken on one Apple M2 Max (8 performance and 4 efficiency CPU cores, 38-core GPU, 32 GB unified memory) running macOS 27.2, with the display off, no other user processes and the machine prevented from sleeping. Games were managed by fastchess v1.8.2-alpha at concurrency 1. Reference engines were Stockfish 19 (tag \texttt{sf\_19}, PGO build) and Lc0 0.32.1 with the Metal backend and the same BT4 weights. Syzygy 3--4--5 tablebases were available only to the oracle judges of Section~\ref{sec:oracle}, never to the engines under test.
+
+\subsection{Configurations}
+Table~\ref{tab:configs} lists the configurations. $T$ is the UCI \texttt{Threads} value; all other options are the shipped defaults.
+
+\begin{table}[t]
+\centering
+\caption{Configurations under test. All \MF{} configurations use the same frozen binary.}
+\label{tab:configs}
+\footnotesize
+\begin{tabular}{p{2.3cm}p{6.6cm}p{5.6cm}}
+\toprule
+Name & Options & Role \\
+\midrule
+AB($T$) & \texttt{UseHybridSearch=false UseMCTS=false Threads=$T$ Hash=2048} & Plain CPU alpha-beta + NNUE (Stockfish 19 port) \\
+Hybrid($T$) & \texttt{UseHybridSearch=true NNWeights=BT4 Threads=$T$ Hash=2048 HybridTrace=true} & Shipped hybrid: alpha-beta keeps $T$ threads, one MCTS worker oversubscribed \\
+Hybrid-split($T$) & Hybrid($T$) + \texttt{HybridOversubscribe=false HybridABThreads=$T-2$} & The earlier split design (ablation) \\
+MCTS(1) & \texttt{UseMCTS=true NNWeights=BT4 Threads=1 MCTSMinibatchSize=1 TransformerLowTimeFallbackMs=0} & Stand-alone transformer MCTS as shipped \\
+SF19($T$) & Stockfish 19, \texttt{Threads=$T$ Hash=2048} & Current Stockfish release \\
+Lc0-mb1 & lc0 0.32.1 Metal, \texttt{Threads=1 MinibatchSize=1}, BT4 & Matched-settings reference for MCTS(1) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Match protocol}
+Each cell is a fixed number of game pairs: every opening is played twice with colours swapped. Openings are drawn in a seeded random order from Fishtest's \texttt{UHO\_Lichess\_4852\_v1} book of 2{,}632{,}036 unbalanced human positions~\cite{sfbooks}; the same seed is used in every cell of a research question, so arms and cells see the same opening sample. Engines are restarted for every game, do not ponder, and use a 50 ms move overhead. Adjudication follows Fishtest's defaults: a draw after move 34 when eight consecutive scores are within $\pm 20$ cp, resignation after three consecutive scores beyond $\pm 600$ cp from both engines' perspectives, and a 200-move cap; adjudicated games, time forfeits and crashes are counted and reported per cell, and no game is excluded after the fact. Each cell is split into four blocks of equal size that draw disjoint openings, and the blocks of different cells are interleaved round-robin over the calendar so that thermal and background drift are balanced across cells; the thermal state is logged every minute. The hybrid's telemetry (\texttt{HybridTrace}) records, for every move, whether the transformer was active, the MCTS playouts and evaluations, both candidates, and the arbiter's decision and reason.
+
+\subsection{Statistics}
+The primary estimator is the pentanomial model: each game pair scores 0, $\tfrac12$, 1, $1\tfrac12$ or 2 points, and the mean and variance of the pair score give the logistic Elo difference with a 95\% normal-approximation confidence interval, the likelihood of superiority (LOS), and normalised Elo (nElo), the draw-rate-independent quantity~\cite{vdbergh_nelo,fishtest}. The statistics are computed independently from the PGN by our own script and must agree with fastchess's report to rounding. Multi-engine tables use Ordo~\cite{ordo} anchored to Stockfish 19 at 0 on this hardware; no absolute rating is claimed. The oracle study uses paired bootstrap intervals over positions (10{,}000 resamples). RQ1a at 30+0.3 is the single confirmatory test; all other cells are estimates with confidence intervals and are labelled exploratory, no family-wise correction is applied, and every planned cell is reported whether or not it ran to completion.
+
+\subsection{Research questions and cells}
+\label{sec:rqs}
+\begin{description}
+  \item[RQ1 (confirmatory).] Does the GPU search change strength at equal budget? Hybrid(8) vs AB(8) at 30 s + 0.3 s per game, 1{,}000 pairs (RQ1a); 60 s + 0.6 s, 500 pairs (RQ1b, the regime with the most GPU participation); the decision rule is the sign of the 95\% interval of RQ1a.
+  \item[RQ2 (isolation).] What do two threads cost and what does the GPU search return given six threads? AB(6) vs AB(8) (RQ2a) and Hybrid-split(8) vs AB(6) (RQ2b), 500 pairs each at 30+0.3; Hybrid-split(8) vs AB(8) (RQ2c) is their combination.
+  \item[RQ5 (component checks).] Is the alpha-beta core at parity with Stockfish 19 (AB(8) vs SF19(8), 500 pairs; RQ5c), and is the MCTS implementation at parity with Lc0 at matched settings (MCTS(1) vs Lc0-mb1, 300 pairs; RQ5a)?
+  \item[RQ6 (arbitration).] From the traces: disagreement rate, visits at decision time, decision reasons, and how often the MCTS move is chosen (RQ6a). An oracle study on 600 disagreement positions stratified by game phase and MCTS visit count judges both candidates with Stockfish 19 (8 threads, 60 s, both moves scored at equal depth with multi-PV, tablebases) and Lc0 (30{,}000 nodes), reports the fraction where each side is better and the expected-score loss of each move, and bounds what any arbiter could gain (RQ6b). An ablation with the MCTS-to-alpha-beta hints and the verification sub-search off (RQ6d) measures the hint channel.
+  \item[Microbenchmarks.] BT4 latency and throughput against batch size for \MF{} and Lc0 (M1), alpha-beta nodes/s against threads (M2), and, from the game traces, in-game MCTS evaluations per second, GPU-active fraction and playouts per move against time control (M3--M5).
+\end{description}
+Further cells of the protocol (CPU-budget crossover at 4 and 6 threads, MCTS batch-size scaling, a balanced-book control, a blitz cell, suites, and a multi-engine Ordo table) are listed in the released manifest; those not run are reported as not run.
+
+\subsection{Pilot, freeze and amendments}
+\label{sec:amend}
+A 50-pair pilot of RQ1a preceded the freeze and checked the runner, the statistics against fastchess, forfeits (none), the draw rate and the GPU-active fraction. The pilot found the memory defect described in Section~\ref{sec:prep}, which was fixed before the freeze; the pilot games are reported as a diagnostic and are not part of RQ1a. Six amendments were recorded: (1) the hybrid arm is the shipped configuration after the time-management and tie-break changes; (2) engines restart per game; (3) the shipped hybrid is oversubscribed, so the split configuration became the ablation of RQ2; (4) the GPU-active fraction at 30+0.3 (about 50\% of hybrid moves) fell short of the 80\% feasibility target, which was kept as a covariate and led to RQ1b being promoted; (5) RQ6d was promoted after the pilot; (6) the strata of the oracle study were defined. The RQ1a cell was interrupted once by a host-level process loss after 128 games and resumed from the next opening of the same seeded order with no game deleted or replayed; the manifest records the resume point.
+
+\subsection{Compute}
+Table~\ref{tab:compute} lists the machine time per cell from the cell manifests.
+\begin{table}[t]
+\centering
+\caption{Compute per cell: games, blocks run, wall-clock hours and minutes per game. Generated from each cell's \texttt{summary.json}.}
+\label{tab:compute}
+\footnotesize
+\input{../tables/compute.tex}
+\end{table}
+
+% =====================================================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Microbenchmarks}
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.8\linewidth]{m1_nn_latency.pdf}
+\caption{M1: BT4 evaluation latency and throughput against batch size for \MF{} (MPSGraph, FP16 and FP32) and Lc0 0.32.1 (Metal) with the same weights on an idle M2 Max. Generated from \texttt{micro/nn\_latency.json}.}
+\label{fig:m1}
+\end{figure}
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.8\linewidth]{m2_ab_scaling.pdf}
+\caption{M2: alpha-beta nodes per second against thread count at fixed depth 16 (median of five runs). Generated from \texttt{micro/ab\_scaling.json}.}
+\label{fig:m2}
+\end{figure}
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.9\linewidth]{f4_telemetry.pdf}
+\caption{Hybrid telemetry per cell: fraction of hybrid-engine moves on which the transformer was active (the time-safety rule disables it when the move budget is below 400 ms or the clock below 3 s) and the distribution of MCTS playouts per transformer-active move. Generated from the traces.}
+\label{fig:telemetry}
+\end{figure}
+\begin{table}[t]
+\centering
+\caption{Thermal state during each cell: one-minute \texttt{pmset} samples, samples with a thermal warning, and the lowest CPU speed limit observed. Generated from \texttt{therm.log}.}
+\label{tab:therm}
+\footnotesize
+\input{../tables/therm.tex}
+\end{table}
+\pending{M1/M2 text from the frozen-build re-run (nn\_latency\_frozen.json, ab\_scaling\_frozen.json) and M3--M5 from the RQ1a/RQ1b traces}
+
+\subsection{RQ1: marginal value of the GPU search}
+\begin{table}[t]
+\centering
+\caption{Game cells: pairs, pentanomial outcome, Elo with 95\% CI, nElo, LOS and GPU-active fraction. Generated by \texttt{make\_figures.py} from each cell's \texttt{summary.json}.}
+\label{tab:cells}
+\footnotesize
+\input{../tables/cells.tex}
+\end{table}
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.8\linewidth]{cells_forest.pdf}
+\caption{Elo difference with 95\% intervals for every game cell and gate. Generated from the cell summaries.}
+\label{fig:forest}
+\end{figure}
+\begin{table}[t]
+\centering
+\caption{Hybrid telemetry per cell: hybrid-engine moves, fraction with the transformer active, median MCTS evaluations and playouts per move, disagreement rate between the two searches, and how often the MCTS move was chosen on a disagreement. Generated from the traces.}
+\label{tab:telemetry}
+\footnotesize
+\input{../tables/telemetry.tex}
+\end{table}
+\begin{table}[t]
+\centering
+\caption{Per-block results of each cell (blocks draw disjoint openings and were interleaved in time); a consistent sign across blocks is the drift check. Generated from \texttt{games.pgn}.}
+\label{tab:blocks}
+\footnotesize
+\input{../tables/blocks.tex}
+\end{table}
+\pending{RQ1a and RQ1b results: Elo, CI, nElo, draw rate, forfeits, GPU-active fraction, evals/move, per-block consistency}
+
+\subsection{RQ2: thread cost versus GPU value}
+\pending{RQ2a, RQ2b (and RQ2c if run) with the decomposition}
+
+\subsection{RQ5: component parity}
+\pending{RQ5c (AB vs SF19); RQ5a if run}
+
+% =====================================================================================
+\section{Why: arbitration and the oracle study}
+\label{sec:oracle}
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.8\linewidth]{f7_reasons.pdf}
+\caption{Decision reasons per hybrid-engine move. \texttt{ab\_fallback\_time\_safety} is the plain alpha-beta move under the time-safety rule; \texttt{engines\_agree} is agreement; \texttt{ab\_root\_rejects\_mcts} is alpha-beta's verification rejecting the MCTS move; \texttt{ab\_default} is alpha-beta's move with no override predicate firing. Generated from the traces.}
+\label{fig:reasons}
+\end{figure}
+\pending{RQ6a telemetry (disagreement rate, visits at decision, reason histogram, MCTS move chosen) and RQ6b oracle outcomes with bootstrap CIs; the arbiter upper bound in expected score and projected Elo; RQ6d}
+
+% =====================================================================================
+\section{Threats to validity}
+\label{sec:threats}
+\textbf{Single platform.} Every measurement comes from one M2 Max; the direction of the scaling cells is informative but the numbers are not portable, and the CUDA build of the same engine is out of scope. \textbf{Opening book.} UHO openings make differences measurable but exaggerate Elo spreads relative to balanced books; nElo is reported for that reason and the book critique applies~\cite{uhocritique}. \textbf{GPU-active fraction.} The shipped time-safety rule is part of the system under test; at 30+0.3 the transformer is active on about half of the hybrid's moves and at 10+0.1 on almost none, so results at short time controls are largely alpha-beta results, and the fraction is reported as a covariate. \textbf{Tuning leakage.} The hybrid and MCTS heuristics were tuned on Bratko--Kopec and Lichess puzzle samples; any suite result for \MF{} is optimistic and is labelled so; game results are unaffected. \textbf{Reference drift.} Stockfish 19 is the alpha-beta base and the parity reference; the gap to the chapter-era base is quantified in Section~\ref{sec:prep}. \textbf{Adjudication.} Fishtest defaults were used and counted; adjudication can only shorten games that are already decided by both engines' own scores. \textbf{Interruption.} RQ1a was resumed once (Section~\ref{sec:amend}); per-block results are reported so that any effect of the gap is visible. \textbf{Statistics.} One confirmatory test at fixed $N$; everything else is exploratory and reported in full.
+
+% =====================================================================================
+\section{Relation to the IntelliSys 2026 chapter}
+\label{sec:chapter}
+The chapter~\cite{niketan2026chapter}\ifanon{} (by the author of this paper)\fi{} described the same system and reported ratings of about 4048, 3724 and 3289 Elo for its alpha-beta, hybrid and MCTS modes, a 74$\times$ MCTS speed-up, a 1.26$\times$ throughput advantage over Lc0, and a position classifier that weighted the final decision. Table~\ref{tab:corrections} lists the statements that do not hold and what replaces them; a Correction has been prepared for the publisher~\cite{correction}.
+
+\begin{table}[t]
+\centering
+\caption{Statements of the chapter that are withdrawn or corrected (the full list has fourteen items).}
+\label{tab:corrections}
+\footnotesize
+\begin{tabular}{p{5.2cm}p{9.4cm}}
+\toprule
+Chapter statement & Finding \\
+\midrule
+Ratings of $\sim$4048 / $\sim$3724 / $\sim$3289 Elo; ``competitive with Berserk and Lc0''; ``+435 Elo over pure MCTS'' & Computed by averaging assumed opponent ratings and clamped five-game logistic differences; anchors never measured; game records not retained. Withdrawn; replaced by RQ1 of this paper. \\
+Alpha-beta ``derives from Stockfish \ldots adding GPU integration''; ``100\% agreement validates our implementation'' & The alpha-beta search is Stockfish's (bench signature identical) with eight small edits and no GPU code; the agreement is expected. \\
+MCTS nodes shrunk from 128 to 64 bytes, two per cache line & Nodes are 128 bytes, one per cache line, on Apple Silicon. \\
+2 $\to$ 148 nodes/s, ``74$\times$'' & A lock-convoy defect in an unpreserved build; no record; withdrawn. \\
+NN cache 3.5 GB $\to$ 38 MB (92$\times$) & 500{,}000 entries of about 820 bytes occupy about 0.41 GB; the reduction is about 9$\times$. \\
+512 MB transposition table; 125 MB and 6 MB NNUE networks with HalfKAv2 & Default hash 16 MB; networks of 108.9 MB and 3.5 MB with FullThreats and HalfKAv2\_hm features. \\
+Position classifier adjusts the decision weighting; UCI routes through it & Its weights are computed but never read; mode is a UCI option. \\
+Agreement stop saves 10--40\% of time & Never fired in any retained log; no measurement exists. \\
+95.8\% agreement with Lc0 shows neural-network influence & The final move was alpha-beta's in 207 of 209 logged decisions and in every decision of the frozen engine's gates. \\
+1.26$\times$ (5.5$\times$ in middlegames) higher throughput than Lc0 & Four 10-second positions with a harness fault; controlled sweep: \MF{} is slower than Lc0 at every batch size. \\
+M1 Ultra figures (9.8M nodes/s, 7.24$\times$, 382 evals/s) & No record; withdrawn. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The root causes were a confounded contribution (the alpha-beta component's strength presented as the system's), an invalid rating calibration, a ceiling-level tactical suite that had also served as a tuning target, no retention of artifacts, an architecture described from intent rather than from code, a balanced opening book whose draw rate hid every difference, and no measurement of when the GPU path was active. Each of these has a specific countermeasure in Section~\ref{sec:method}.
+
+% =====================================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+\pending{conclusion after the results: what was learned, conditions under which a concurrent GPU search is worth it, CUDA and other GPUs, learned arbiters}
+
+\section*{Data and code availability}
+The engine at the frozen commit, every game record, engine log, manifest, thermal log, microbenchmark output and the scripts that produce every figure and table of this paper are deposited at \ifanon an anonymised archive link supplied to the editors\else\pending{Zenodo DOI} and in the repository tag \texttt{paper-v2-freeze-rc1}\fi. The pre-registered protocol with its amendments, the audit of the earlier chapter and the prepared Correction are part of the deposit.
+
+\bibliographystyle{unsrtnat}
+\bibliography{refs}
+
+\end{document}

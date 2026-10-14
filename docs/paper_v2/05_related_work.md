@@ -23,7 +23,7 @@ new paper needs roughly 45–55.
 | baier2017 | Baier, A rollout-based search algorithm unifying MCTS and alpha-beta, in: Computer Games (CGW/GIGA 2016), CCIS, Springer, 57–70, 2017 | 10.1007/978-3-319-57969-6_5 | Unification | ID verified 2026-10-14 (Crossref) |
 | ramanujan2010 | Ramanujan, Sabharwal, Selman, On adversarial search spaces and sampling-based planning, ICAPS 2010, 20(1) 242–245 | 10.1609/icaps.v20i1.13437 | Traps in chess vs Go | ID verified 2026-10-14 (AAAI OJS) |
 | nguyen2024 | Nguyen & Ramanujan, Lookahead pathology in Monte-Carlo tree search, ICAPS 2024, 34(1) 414–422 | 10.1609/icaps.v34i1.31501 (arXiv:2212.05208) | UCT pathology | ID verified 2026-10-14 (AAAI OJS) |
-| ji2023 | Ji & Thielscher, MCTS with dynamic depth minimax, Advances in Computer Games (ACG 2023), 63–75 | DBLP conf/acg/JiT23 (Springer LNCS; DOI to add from the volume) | Dynamic minimax depth inside MCTS | Title/venue/pages verified 2026-10-14 (DBLP, UNSW PDF); DOI pending |
+| ji2023 | Ji (James) & Thielscher, MCTS with dynamic depth minimax, Advances in Computer Games (ACG 2023), LNCS 14528, 63–75 | 10.1007/978-3-031-54968-7_6 | Dynamic minimax depth inside MCTS | Title/venue/pages verified 2026-10-14 (DBLP, UNSW PDF); DOI pending |
 | helfenstein2024 | Helfenstein, Czech, Blüml, Eisel, Kersting, Checkmating one, by using many: combining mixture of experts with MCTS to improve in chess, 2024 | arXiv:2401.16852 | MoE + MCTS in chess (CrazyAra line) | ID verified 2026-10-14 (arXiv API); the earlier key `czech2026` had the wrong year and first author |
 | ~~truong2023~~ | "Monte Carlo Tree Search-Minimax Hybrid in AlphaZero" (ml-research PDF) | — | — | **Not located** in two searches on 2026-10-14; do not cite |
 | chen2019 | Chen, Chen & Lin, Two-phase-win strategy for improving the AlphaZero's strength, WSCE 2019 (IEEE), 117–121 | 10.1109/WSCE49000.2019.9041112 | AlphaZero + alpha-beta minimax (Connect Four) | ID verified 2026-10-14 (NTNU scholar record) |
@@ -39,12 +39,12 @@ new paper needs roughly 45–55.
 | monroe2024 | Monroe & Chalmers, Mastering chess with a transformer model | arXiv:2409.12272 (v2, 2024-10-28) | Lc0 transformer design | ID verified 2026-10-14 (arXiv) |
 | ruoss2024 | Ruoss et al., Amortized planning with large-scale transformers: a case study on chess | arXiv:2402.04494 (v2, 2024-10-21) | Searchless transformer chess; ChessBench | ID verified 2026-10-14 (arXiv) |
 | scorpio | Shawul, Scorpio chess engine (alpha-beta rollouts in MCTS; NN eval), 2018– | github.com/dshawul/Scorpio | Closest engine-level precedent | software; cite repo + CPW |
-| komodo | Komodo/Dragon MCTS mode (tree growth guided by shallow alpha-beta) | komodochess.com; CPW "Komodo" | Commercial hybrid precedent; developer-reported strength | software/web |
-| sfmcts2017 | Nicolet, A branch to test the Monte Carlo algorithm in Stockfish, FishCooking, Dec 6, 2017 | groups.google.com/d/msg/fishcooking/AE4EgWQ20dY | Stockfish MCTS experiment | web; verify link |
+| komodo | Komodo/Dragon MCTS mode (tree growth guided by shallow alpha-beta) | chessprogramming.org/Komodo (komodochess.com unreachable 2026-10-14) | Commercial hybrid precedent; developer-reported strength | software/web; CPW page verified 2026-10-14 |
+| sfmcts2017 | Nicolet, A branch to test the Monte Carlo algorithm in Stockfish, FishCooking, Dec 6, 2017 | groups.google.com/g/fishcooking/c/AE4EgWQ20dY; github.com/snicolet/Stockfish/tree/montecarlo | Stockfish MCTS experiment | both URLs verified 2026-10-14 |
 | lc0sfhybrid | Black, lc0-stockfish-hybrid (Stockfish as a filter in Lc0's selection) | github.com/benblack769/lc0-stockfish-hybrid | Hobbyist hybrid precedent | software |
 | ceres | Elliott, Ceres (C# MCTS using Lc0 backends) | github/CPW | Alternative MCTS stack | software |
 | allie | Treat, Allie / AllieStein (own PUCT search on Lc0 nets, TCEC S15) | CPW "Allie" | Alternative MCTS stack | software |
-| pascutto2025 | Pascutto, Sin dolor no hay gloria: on conquering 2 World Computer Chess Championships in Spain, ICGA Journal 47(3) 136–156, 2025 | 10.1177/13896911251360654 | Stoofvlees II: MCTS + CNN + classical evaluator; WCCC 2023 winner, 2024 shared | ID verified 2026-10-14 (SAGE) |
+| pascutto2025 | Pascutto, Sin dolor no hay gloria: on conquering 2 World Computer Chess Championships in Spain, ICGA Journal 47(3) 136–156, 2025 (online 2025-08-22) | 10.1177/13896911251360654 (SAGE landing page verified 2026-10-14; the DOI did not resolve at doi.org and is absent from Crossref that day — manual bib entry) | Stoofvlees II: MCTS + CNN + classical evaluator; WCCC 2023 winner, 2024 shared | ID verified 2026-10-14 (SAGE) |
 | carlson2026 | Carlson, Matilda: engine-agnostic search with human policy guidance | arXiv:2606.25176 | Frozen human policy + engine search with a residual correction (adjacent) | ID verified 2026-10-14 (arXiv) |
 | maia2 | Tang et al., Maia-2: a unified model for human-AI alignment in chess, NeurIPS 2024 | arXiv:2409.20553 | Adjacent (human-like play) | ID verified 2026-10-14 (arXiv, NeurIPS poster page) |
 
@@ -66,10 +66,10 @@ new paper needs roughly 45–55.
 | glickman1999 | Glickman, Parameter estimation in large dynamic paired comparison experiments, J. R. Stat. Soc. C (Appl. Stat.) 48(3) 377–394, 1999 | 10.1111/1467-9876.00159 | Rating uncertainty | ID verified 2026-10-14 (Crossref) |
 | ccrl | CCRL 40/15 "About" (reference machine, time-control scaling) | computerchess.org.uk/4040/about.html | Why cross-hardware Elo import is invalid | verified page |
 | haworth2020 | Haworth & Hernandez, The 17th Top Chess Engine Championship, TCEC17, ICGA Journal 42(2–3) 181–191, 2020 | 10.3233/icg-200152 | Season 17 introduced separate CPU and GPU leagues (hardware fairness precedent) | ID verified 2026-10-14 (Crossref); the ChessProgramming wiki and Wikipedia differ on how the GPU league concluded — cite the report |
-| levy | Hardware-doubling heuristic (50–70 Elo per doubling), forum-level | — | Background only | web |
-| bratko1982 | Bratko & Kopec, Performance analysis of a chess engine advice-giving program, Advances in Computer Chess 3, 1982 | — | BK suite origin | known |
-| sts | Corbit & Swaminathan, Strategic Test Suite; Mosca's STS-Rating | sites.google.com/site/strategictestsuite; github.com/fsmosca/STS-Rating | STS | web |
-| eret | Eigenmann, Eigenmann Rapid Engine Test, Glarean Magazin, 2017 | glarean-magazin.ch | ERET (111) | web |
+| levy | Hardware-doubling heuristic (50–70 Elo per doubling), forum-level | — | Background only | **do not cite** (forum lore; no citable source) |
+| bratko1982 | Bratko & Kopec, A test for comparison of human and computer performance in chess, Advances in Computer Chess 3 (M.R.B. Clarke, ed.), Pergamon Press, Oxford, 1982 | — (pre-DOI) | BK suite origin | Title/authors verified 2026-10-14 via chessprogramming.org/Bratko-Kopec_Test (the chapter's earlier title was wrong); page range not verified (a secondary list gives 57–72) — cite without pages |
+| sts | Corbit & Swaminathan, Strategic Test Suite; Mosca's STS-Rating | sites.google.com/site/strategictestsuite; github.com/fsmosca/STS-Rating | STS | both URLs verified 2026-10-14 |
+| eret | Eigenmann, Eigenmann Rapid Engine Test, Glarean Magazin, 2017 | glarean-magazin.ch/2017/03/05/computerschach-testaufgaben-engines-eigenmann-rapid-engine-test-eret; chessprogramming.org/Eigenmann_Rapid_Engine_Test | ERET (111) | CPW page verified 2026-10-14 (author Walter Eigenmann, March 2017) |
 | arasan | Dart, Arasan test suite (2023 revision) | github.com/jdart1/arasan-chess | Arasan 2023 | software |
 | lichesspuzzles | Lichess open puzzle database | database.lichess.org | Puzzle evaluation | web |
 
