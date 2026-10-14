@@ -175,7 +175,10 @@ class TraceParserTest(unittest.TestCase):
                 1, f3, "B", "A", "1/2-1/2"
             )  # next invocation, round 1 again: A scores 0.5
         )
-        st = self._stats(text, "A")
+        with tempfile.NamedTemporaryFile("w", suffix=".pgn", delete=False) as fh:
+            fh.write(text)
+            path = fh.name
+        st = penta_stats.compute(penta_stats.read_games(path), "A")
         self.assertEqual(st["games"], 5)
         self.assertEqual(st["pairs"], 2)
         self.assertEqual(st["unpaired_games"], 1)
