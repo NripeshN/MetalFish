@@ -39,6 +39,25 @@ def fmt_pm(x, pm, nd=1):
     return f"{x:+.{nd}f} ± {pm:.{nd}f}"
 
 
+# Protocol names of the arms (02 §2) for tables and figures; fastchess labels stay in the PGNs.
+DISPLAY_ARMS = {
+    "RQ1a": "Hybrid(8) vs AB(8), 30+0.3",
+    "RQ1a_pilot": "Hybrid(8) vs AB(8), 30+0.3 (pilot, pre-C18 footprint)",
+    "RQ1b": "Hybrid(8) vs AB(8), 60+0.6",
+    "RQ1c": "Hybrid(8) vs AB(8), 10+0.1",
+    "RQ2a": "AB(6) vs AB(8), 30+0.3",
+    "RQ2b": "Hybrid-split(8) vs AB(6), 30+0.3",
+    "RQ2c": "Hybrid-split(8) vs AB(8), 30+0.3",
+    "RQ5a": "MCTS(1) vs Lc0-mb1, 30+0.3",
+    "RQ5c": "AB(8) vs SF19(8), 30+0.3",
+    "RQ6d": "Hybrid(8) without hints and verification vs AB(8), 30+0.3",
+}
+
+
+def arms_text(c) -> str:
+    return DISPLAY_ARMS.get(c["cell"], f"{c['arm_a']} vs {c['arm_b']}")
+
+
 def collect_cells(results: pathlib.Path):
     cells = []
     for d in sorted(results.iterdir()):
@@ -134,10 +153,10 @@ def write_tables(cells, gates, out: pathlib.Path):
         )
         ev = t.get("mcts_evals_median")
         md.append(
-            f"| {c['cell']} | {c['arm_a']} vs {c['arm_b']} | {c['games']} | {fmt_pm(c['elo'], c['elo_pm'])} | {fmt_pm(c['nelo'], c['nelo_pm'])} | {c['los']*100:.1f}% | {c['ptnml']} | {gpu} | {ev if ev is not None else '—'} |"
+            f"| {c['cell']} | {arms_text(c)} | {c['games']} | {fmt_pm(c['elo'], c['elo_pm'])} | {fmt_pm(c['nelo'], c['nelo_pm'])} | {c['los']*100:.1f}% | {c['ptnml']} | {gpu} | {ev if ev is not None else '—'} |"
         )
         tex.append(
-            f"{c['cell']} & {c['arm_a']} vs {c['arm_b']} & {c['games']} & ${fmt_pm(c['elo'], c['elo_pm']).replace('±', '\\pm')}$ & ${fmt_pm(c['nelo'], c['nelo_pm']).replace('±', '\\pm')}$ & {c['los']*100:.1f}\\% & {gpu.replace('%', '\\%')} \\\\"
+            f"{c['cell']} & {arms_text(c)} & {c['games']} & ${fmt_pm(c['elo'], c['elo_pm']).replace('±', '\\pm')}$ & ${fmt_pm(c['nelo'], c['nelo_pm']).replace('±', '\\pm')}$ & {c['los']*100:.1f}\\% & {gpu.replace('%', '\\%')} \\\\"
         )
     tex += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "cells.md").write_text("\n".join(md) + "\n")
@@ -583,9 +602,7 @@ def plot_forest(cells, out: pathlib.Path):
     )
     ax.axvline(0, color="grey", lw=0.8)
     ax.set_yticks(y)
-    ax.set_yticklabels(
-        [f"{c['cell']}: {c['arm_a']} vs {c['arm_b']} (n={c['games']})" for c in rows]
-    )
+    ax.set_yticklabels([f"{c['cell']}: {arms_text(c)} (n={c['games']})" for c in rows])
     ax.set_xlabel("Elo difference (arm A − arm B), 95% CI, pentanomial")
     fig.tight_layout()
     (out / "figures").mkdir(parents=True, exist_ok=True)
