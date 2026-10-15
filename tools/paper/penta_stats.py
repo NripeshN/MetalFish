@@ -64,6 +64,8 @@ def read_games(path: str) -> List[Dict]:
                     "termination": h.get("Termination", ""),
                     "fen": h.get("FEN", ""),
                     "plycount": h.get("PlyCount", ""),
+                    "start_time": h.get("GameStartTime", ""),
+                    "end_time": h.get("GameEndTime", ""),
                     "comment_tail": (game.end().comment or "")[:120],
                 }
             )
