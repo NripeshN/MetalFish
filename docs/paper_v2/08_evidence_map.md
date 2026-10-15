@@ -128,3 +128,12 @@ until 2026-10-15; the invocation history of RQ1a (two invocations of block 0: fr
 resume after the reboot from game 283), RQ2a and RQ2b was backfilled from the queue log
 (`manifest.pre_backfill.json` keeps the originals), and from now on `run_cell.py` appends every
 invocation to the manifest's `history` and resumes a block from its own recorded start.
+
+Load-gated scheduling from 2026-10-15 12:32 local (protocol amendment 8): the host-load log showed
+the host shared with other work (626 one-minute samples from 01:57 to 12:23 local: median external
+CPU 175%, 75th percentile 304%, 90th percentile 590%, maximum 1,069%; bursts from a virtual machine
+and a compiler). RQ2b block 0 was stopped at a pair boundary (54 games, 27 complete pairs, no
+unpaired game) and continues under `queue_must_cells_rc2_gated.sh`: chunks of 10 pairs, each started
+only when the 5-minute mean external CPU is below 300%. Every block of every cell reports the primary
+estimate (all games) and the pre-registered sensitivity estimate (pairs overlapping a high-load
+minute removed; `tables/sensitivity.md`).

@@ -310,6 +310,42 @@ class RunnerBookkeepingTest(unittest.TestCase):
         self.assertEqual(self.mf.pgn_game_seconds(pathlib.Path(path)), 3690.0)
 
 
+class HostLoadSensitivityTest(unittest.TestCase):
+    """Pins the host-load sensitivity analysis of protocol amendment 8."""
+
+    def test_flags_games_overlapping_high_load_minutes(self):
+        import make_figures as mf
+
+        with tempfile.NamedTemporaryFile("w", suffix=".log", delete=False) as fh:
+            fh.write(
+                "2026-10-15T10:00:00 1 1 1 ext_cpu=150% top_ext=x\n"  # old format: BST assumed
+                "2026-10-15T10:01:00 1 1 1 ext_cpu=450% top_ext=x\n"
+                "2026-10-15T12:40:00+0100 1 1 1 ext_cpu=120% top_ext=x\n"
+            )
+            path = fh.name
+        samples = mf.parse_hostload(pathlib.Path(path))
+        self.assertEqual([v for _, v in samples], [150, 450, 120])
+        games = [
+            {
+                "start_time": "2026-10-15T09:59:10 +0100",
+                "end_time": "2026-10-15T10:00:30 +0100",
+            },
+            {
+                "start_time": "2026-10-15T10:00:40 +0100",
+                "end_time": "2026-10-15T10:01:50 +0100",
+            },
+            {
+                "start_time": "2026-10-15T08:00:00 +0100",
+                "end_time": "2026-10-15T08:01:00 +0100",
+            },
+            {"start_time": "", "end_time": ""},
+        ]
+        # game 0 ends at 10:00:30; the 10:01:00 sample covers (10:00:00, 10:01:00] -> overlaps
+        # game 1 contains the 10:01:00 sample; game 2 predates the logger; game 3 has no times
+        self.assertEqual(mf.high_load_games(games, samples, threshold=300), {0, 1})
+        self.assertEqual(mf.high_load_games(games, samples, threshold=500), set())
+
+
 class OracleSamplingTest(unittest.TestCase):
     """Pins the stratified sampler of tools/paper/oracle_probe.py (protocol §11.6)."""
 

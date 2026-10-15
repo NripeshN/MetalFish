@@ -452,6 +452,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument(
+        "--max-pairs",
+        type=int,
+        help="play at most this many pairs of the block in this invocation (chunked, "
+        "load-gated scheduling; protocol amendment 8); use with --resume",
+    )
+    ap.add_argument(
+        "--status",
+        action="store_true",
+        help="print the block's progress as one JSON line and exit without playing",
+    )
+    ap.add_argument(
         "--resume",
         action="store_true",
         help="after an interrupted run: skip the pairs of this block already present in "
@@ -494,6 +505,24 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
         resumed = None
         played = count_pgn_games(out / "games.pgn")
+        if args.status:
+            try:
+                hist = load_manifest(out / "manifest.json").get("history") or []
+            except Exception:  # noqa: BLE001
+                hist = []
+            done = games_done_in_block(played, hist, b, per_block) // 2
+            print(
+                json.dumps(
+                    {
+                        "cell": args.cell_id,
+                        "block": b,
+                        "pairs_total": pairs,
+                        "pairs_done": min(done, pairs),
+                        "complete": done >= pairs,
+                    }
+                )
+            )
+            continue
         if args.resume:
             try:
                 history = load_manifest(out / "manifest.json").get("history") or []
@@ -508,6 +537,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 continue
             start += pairs_done
             pairs -= pairs_done
+            left = pairs
+            if args.max_pairs:
+                pairs = min(pairs, args.max_pairs)
             resumed = {
                 "games_in_pgn_before_resume": played,
                 "pairs_done_in_block": pairs_done,
@@ -516,7 +548,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             }
             print(
                 f"[{args.cell_id}] block {b}: resuming after {pairs_done} complete pairs "
-                f"({orphan} orphan game); {pairs} pairs left"
+                f"({orphan} orphan game); {left} pairs left, {pairs} in this invocation"
             )
         cmd = build_command(cell, defaults, engines, out, pairs, start, args.engine_log)
         print(f"[{args.cell_id}] block {b}: {pairs} pairs, openings start={start}")
@@ -571,7 +603,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             {"block": b, "pairs": pairs, "elapsed_s": elapsed, "exit": proc.returncode}
         )
 
-    if args.dry_run:
+    if args.dry_run or args.status:
         return 0
     # summary from the PGN (all blocks so far)
     sys.path.insert(0, str(REPO / "tools" / "paper"))

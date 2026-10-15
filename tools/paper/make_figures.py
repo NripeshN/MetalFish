@@ -196,6 +196,123 @@ def block_ranges(manifest: dict, n_games: int, per_block: int, nblocks: int):
     ]
 
 
+LOAD_THRESHOLD_PCT = (
+    300  # protocol amendment 8: external CPU above 3 cores oversubscribes the host
+)
+
+
+def parse_hostload(path: pathlib.Path):
+    """[(aware datetime, ext_cpu %)] from hostload.log. Lines written before the logger carried a
+    UTC offset (2026-10-15, before 12:33 local) are British Summer Time (+01:00)."""
+    import datetime as dt
+    import re
+
+    samples = []
+    if not path.exists():
+        return samples
+    bst = dt.timezone(dt.timedelta(hours=1))
+    for line in open(path, errors="replace"):
+        m = re.match(r"(\S+)\s.*ext_cpu=(\d+)%", line)
+        if not m:
+            continue
+        stamp = m.group(1)
+        try:
+            if re.search(r"[+-]\d{4}$", stamp):
+                t = dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S%z")
+            else:
+                t = dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=bst)
+        except ValueError:
+            continue
+        samples.append((t, int(m.group(2))))
+    samples.sort()
+    return samples
+
+
+def game_interval(g):
+    """(start, end) aware datetimes from fastchess's GameStartTime/GameEndTime, or None."""
+    import datetime as dt
+
+    try:
+        fmt = "%Y-%m-%dT%H:%M:%S %z"
+        return dt.datetime.strptime(g["start_time"], fmt), dt.datetime.strptime(
+            g["end_time"], fmt
+        )
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def high_load_games(games, samples, threshold=LOAD_THRESHOLD_PCT):
+    """Indices of games that overlap a logged minute with external CPU above `threshold`: a sample
+    at time t covers the minute (t - 60 s, t], so it overlaps a game if start <= t <= end + 60 s.
+    Games with no sample in that window (e.g. played before the logger existed) are not flagged.
+    """
+    import bisect
+    import datetime as dt
+
+    times = [t for t, _ in samples]
+    flagged = set()
+    for i, g in enumerate(games):
+        iv = game_interval(g)
+        if not iv:
+            continue
+        lo = bisect.bisect_left(times, iv[0])
+        hi = bisect.bisect_right(times, iv[1] + dt.timedelta(seconds=60))
+        if any(samples[j][1] > threshold for j in range(lo, hi)):
+            flagged.add(i)
+    return flagged
+
+
+def write_sensitivity_table(cells, results: pathlib.Path, out: pathlib.Path):
+    """Protocol amendment 8 (c): each cell's statistics after removing every game pair in which
+    either game overlaps a logged minute of external CPU above the threshold."""
+    sys.path.insert(0, str(REPO / "tools" / "paper"))
+    import penta_stats  # noqa: E402
+
+    tdir = out / "tables"
+    tdir.mkdir(parents=True, exist_ok=True)
+    esc = lambda t: str(t).replace("_", "\\_").replace("%", "\\%")  # noqa: E731
+    samples = parse_hostload(results / "hostload.log")
+    md = [
+        f"| Cell | Pairs | Elo (all games) | Pairs removed (load > {LOAD_THRESHOLD_PCT}%) | Elo (low-load pairs) | Shift vs SE |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    tex = [
+        "\\begin{tabular}{lrrrrl}",
+        "\\toprule",
+        "Cell & Pairs & Elo (all) & Removed & Elo (low load) & Shift \\\\",
+        "\\midrule",
+    ]
+    for c in cells:
+        pgn = results / c["dir"] / "games.pgn"
+        if not pgn.exists() or not c["arm_a"]:
+            continue
+        games = penta_stats.read_games(str(pgn))
+        allst = penta_stats.compute(games, c["arm_a"])
+        flagged = high_load_games(games, samples)
+        bad_keys = {(games[i]["round"], games[i]["fen"]) for i in flagged}
+        kept = [g for g in games if (g["round"], g["fen"]) not in bad_keys]
+        low = penta_stats.compute(kept, c["arm_a"]) if kept else {}
+        removed = allst.get("pairs", 0) - low.get("pairs", 0)
+        frac = removed / allst["pairs"] if allst.get("pairs") else 0.0
+        se = (allst.get("elo_pm") or 0) / 1.96
+        if low.get("elo") is not None and allst.get("elo") is not None and se:
+            shift = abs(low["elo"] - allst["elo"])
+            flag = "larger than SE" if shift > se else "within SE"
+        else:
+            flag = "—"
+        md.append(
+            f"| {c['cell']} | {allst.get('pairs')} | {fmt_pm(allst.get('elo'), allst.get('elo_pm'))} | "
+            f"{removed} ({frac*100:.0f}%) | {fmt_pm(low.get('elo'), low.get('elo_pm'))} | {flag} |"
+        )
+        tex.append(
+            f"{esc(c['cell'])} & {allst.get('pairs')} & ${fmt_pm(allst.get('elo'), allst.get('elo_pm')).replace('±', '\\pm')}$ & "
+            f"{removed} ({frac*100:.0f}\\%) & ${fmt_pm(low.get('elo'), low.get('elo_pm')).replace('±', '\\pm')}$ & {flag} \\\\"
+        )
+    tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "sensitivity.md").write_text("\n".join(md) + "\n")
+    (tdir / "sensitivity.tex").write_text("\n".join(tex) + "\n")
+
+
 def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
     """T6 compute per cell, the telemetry table (M3-M5, RQ6a) and per-block consistency."""
     tdir = out / "tables"
@@ -563,6 +680,7 @@ def main(argv=None):
     write_tables(cells, gates, out)
     write_extra_tables(cells, results, out)
     write_therm_table(cells, results, out)
+    write_sensitivity_table(cells, results, out)
     plot_forest(cells, out)
     plot_reasons(cells, out)
     plot_telemetry(cells, results, out)

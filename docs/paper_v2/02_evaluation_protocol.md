@@ -405,3 +405,22 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
    the rc1 binary can no longer be executed for an equivalence check, RQ1a restarts from its
    first opening pair with rc2; the 183 rc1 games are kept as `RQ1a_rc1_partial` for the record
    and enter no cell. No cell result had been read beyond the 100-game diagnostic checkpoint.
+8. **2026-10-15 — shared host: load-gated chunked scheduling, host-load covariate, sensitivity
+   analysis.** §3 assumed an otherwise idle machine. From 2026-10-15 01:57 local time a logger
+   (`results/paper_v2/hostload_logger.sh` → `hostload.log`, one sample per minute of the CPU used by
+   processes other than the engines and the game manager) shows the host shared with the author's
+   other work: a median of 1.75 cores and bursts up to 10.7 cores (virtual machines, compilers) over
+   626 samples. The engines need about 9 of the 12 cores (8 alpha-beta threads, plus the MCTS worker
+   in the hybrid arm), so external load above 3 cores oversubscribes the CPU, and it can bias
+   comparisons whose arms need different numbers of free cores (RQ1a, RQ2a–c). Decisions, taken
+   before any cell is interpreted and without examining any outcome by load:
+   (a) **Scheduling**: from RQ2b block 0 onward the confirmatory queue plays each block in chunks of
+   10 pairs (`run_cell.py --resume --max-pairs 10`; same openings, seed, order and binary), and a
+   chunk starts only when the mean external CPU over the last 5 samples is below 300% (3 cores);
+   gate waits are logged. Games already played and games in progress are unaffected.
+   (b) **Primary estimates** include every game as played, as pre-registered.
+   (c) **Sensitivity analysis** (reported for every cell next to the primary estimate): the same
+   statistics after removing every game pair in which either game overlaps a logged minute with
+   external CPU above 300%; games played before the logger existed carry no samples and are kept.
+   The fraction of pairs removed is reported; a difference between the two estimates larger than the
+   primary estimate's standard error is reported and discussed as a threat to validity.
