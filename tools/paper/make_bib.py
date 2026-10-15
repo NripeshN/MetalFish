@@ -214,9 +214,12 @@ def main() -> int:
     Path(args.out).write_text(
         header + "\n".join(entries) + "\n" + manual_text, encoding="utf-8"
     )
-    (Path(args.out).parent / "refs_sources.json").write_text(
-        json.dumps(sources, indent=1, sort_keys=True) + "\n"
-    )
+    if (
+        not args.offline
+    ):  # an offline build only knows "cache"; keep the record of the real sources
+        (Path(args.out).parent / "refs_sources.json").write_text(
+            json.dumps(sources, indent=1, sort_keys=True) + "\n"
+        )
     n_fetched = sum(1 for v in sources.values() if v not in ("manual", "skipped"))
     print(
         f"{len(rows)} rows: {n_fetched} fetched/cached, {sum(1 for v in sources.values() if v == 'manual')} manual, "
