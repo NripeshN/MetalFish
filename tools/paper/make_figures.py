@@ -155,6 +155,47 @@ def write_tables(cells, gates, out: pathlib.Path):
     (tdir / "gates.md").write_text("\n".join(md) + "\n")
 
 
+def pgn_game_seconds(pgn: pathlib.Path) -> float:
+    """Sum of fastchess's [GameDuration "hh:mm:ss"] headers: machine time spent in games, robust to
+    interrupted and resumed invocations (summary.json only records the last invocation).
+    """
+    total = 0.0
+    if not pgn.exists():
+        return total
+    with open(pgn, errors="replace") as fh:
+        for line in fh:
+            if line.startswith("[GameDuration "):
+                try:
+                    h, m, sec = line.split('"')[1].split(":")
+                    total += int(h) * 3600 + int(m) * 60 + float(sec)
+                except (IndexError, ValueError):
+                    pass
+    return total
+
+
+def block_ranges(manifest: dict, n_games: int, per_block: int, nblocks: int):
+    """[(block, first_game, end_game)] for a cell. From the runner's invocation history when
+    present (the first invocation of each block records how many games the PGN held when it
+    started); otherwise sequential slices of 2 * per_block games."""
+    starts = {}
+    for entry in manifest.get("history") or []:
+        b, g = entry.get("block"), entry.get("games_before")
+        if b is not None and g is not None and b not in starts:
+            starts[b] = int(g)
+    if starts:
+        order = sorted(starts.items(), key=lambda kv: kv[1])
+        out = []
+        for i, (b, first) in enumerate(order):
+            end = order[i + 1][1] if i + 1 < len(order) else n_games
+            out.append((b, first, end))
+        return out
+    return [
+        (b, 2 * per_block * b, min(n_games, 2 * per_block * (b + 1)))
+        for b in range(nblocks)
+        if 2 * per_block * b < n_games
+    ]
+
+
 def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
     """T6 compute per cell, the telemetry table (M3-M5, RQ6a) and per-block consistency."""
     tdir = out / "tables"
@@ -172,14 +213,20 @@ def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
         "\\midrule",
     ]
     for c in cells:
-        s = load(results / c["dir"] / "summary.json")
-        hours = sum(b.get("elapsed_s", 0) for b in s.get("blocks_run") or []) / 3600
+        d = results / c["dir"]
+        hours = pgn_game_seconds(d / "games.pgn") / 3600
+        if not hours:
+            s = load(d / "summary.json")
+            hours = sum(b.get("elapsed_s", 0) for b in s.get("blocks_run") or []) / 3600
+        try:
+            hist = load(d / "manifest.json").get("history") or []
+            nb = len({h.get("block") for h in hist}) or c["blocks"]
+        except (OSError, ValueError):
+            nb = c["blocks"]
         mpg = 60 * hours / c["games"] if c["games"] else 0
-        md.append(
-            f"| {c['cell']} | {c['games']} | {c['blocks']} | {hours:.1f} | {mpg:.2f} |"
-        )
+        md.append(f"| {c['cell']} | {c['games']} | {nb} | {hours:.1f} | {mpg:.2f} |")
         tex.append(
-            f"{esc(c['cell'])} & {c['games']} & {c['blocks']} & {hours:.1f} & {mpg:.2f} \\\\"
+            f"{esc(c['cell'])} & {c['games']} & {nb} & {hours:.1f} & {mpg:.2f} \\\\"
         )
     tex += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "compute.md").write_text("\n".join(md) + "\n")
@@ -250,8 +297,8 @@ def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
             continue
         per_block = -(-pairs_total // nblocks)
         games = penta_stats.read_games(str(pgn))
-        for b in range(nblocks):
-            chunk = games[2 * per_block * b : 2 * per_block * (b + 1)]
+        for b, first, end in block_ranges(load(man), len(games), per_block, nblocks):
+            chunk = games[first:end]
             if not chunk:
                 continue
             st = penta_stats.compute(chunk, c["arm_a"])

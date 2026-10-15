@@ -280,6 +280,8 @@ def write_manifest(
     pairs: int,
     block: Optional[int],
     tag: str,
+    games_before: Optional[int] = None,
+    start_opening: Optional[int] = None,
 ) -> Dict:
     git_sha = run_capture(["git", "-C", str(REPO), "rev-parse", "HEAD"])
     dirty = (
@@ -342,6 +344,27 @@ def write_manifest(
         "command": shlex.join(cmd),
         "started": dt.datetime.now().astimezone().isoformat(),
     }
+    # Earlier invocations of this cell (other blocks, resumes) stay on record: the top-level
+    # fields describe the latest invocation, `history` lists every invocation in order.
+    try:
+        prev = load_manifest(out / "manifest.json")
+        history = list(prev.get("history") or [])
+        if prev.get("resumes"):
+            manifest["resumes"] = prev["resumes"]
+        history.append(
+            {
+                "block": block,
+                "games_before": games_before,
+                "start_opening": start_opening,
+                "pairs_requested": pairs,
+                "started": manifest["started"],
+                "git_sha": git_sha,
+                "binary_sha256": {k: v["sha256"] for k, v in arms.items()},
+            }
+        )
+        manifest["history"] = history
+    except Exception as exc:  # noqa: BLE001 - never let bookkeeping stop a measurement
+        manifest["history_error"] = repr(exc)
     with open(out / "manifest.json", "w") as fh:
         json.dump(manifest, fh, indent=2)
     return manifest
@@ -357,6 +380,36 @@ def start_thermal_logger(out: pathlib.Path) -> subprocess.Popen:
         stdout=open(out / "therm.log", "a"),
         stderr=subprocess.DEVNULL,
     )
+
+
+def load_manifest(path: pathlib.Path) -> Dict:
+    """The cell's existing manifest, or {} when there is none or it cannot be read."""
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def block_start_index(history: List[Dict], block: int) -> Optional[int]:
+    """PGN game index at which `block` began (its first invocation), or None if it never ran."""
+    for entry in history or []:
+        if entry.get("block") == block and entry.get("games_before") is not None:
+            return int(entry["games_before"])
+    return None
+
+
+def games_done_in_block(
+    played: int, history: List[Dict], block: int, per_block: int
+) -> int:
+    """Games of `block` already in the PGN. Uses the invocation history when the manifest has
+    one (robust to unpaired games left by an interrupted earlier block); otherwise assumes every
+    earlier block is complete with exactly 2 * per_block games."""
+    if history:
+        first = block_start_index(history, block)
+        return 0 if first is None else max(0, played - first)
+    return max(0, played - 2 * per_block * block)
 
 
 def count_pgn_games(path: pathlib.Path) -> int:
@@ -440,9 +493,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         if pairs <= 0:
             continue
         resumed = None
+        played = count_pgn_games(out / "games.pgn")
         if args.resume:
-            played = count_pgn_games(out / "games.pgn")
-            done_games = max(0, played - 2 * per_block * b)
+            try:
+                history = load_manifest(out / "manifest.json").get("history") or []
+            except Exception:  # noqa: BLE001
+                history = []
+            done_games = games_done_in_block(played, history, b, per_block)
             pairs_done, orphan = done_games // 2, done_games % 2
             if pairs_done >= pairs:
                 print(
@@ -483,7 +540,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             if err:
                 print(f"ABORT: arm {key} failed preflight: {err}", file=sys.stderr)
                 return 3
-        write_manifest(cell, defaults, engines, out, cmd, pairs, b, args.tag)
+        write_manifest(
+            cell,
+            defaults,
+            engines,
+            out,
+            cmd,
+            pairs,
+            b,
+            args.tag,
+            games_before=played,
+            start_opening=start,
+        )
         if resumed:
             note_resume(out / "manifest.json", b, resumed)
         therm = start_thermal_logger(out)

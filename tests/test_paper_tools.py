@@ -185,6 +185,131 @@ class TraceParserTest(unittest.TestCase):
         self.assertEqual(st["ptnml_0_2"], [0, 1, 0, 1, 0])
 
 
+class RunnerBookkeepingTest(unittest.TestCase):
+    """Pins the runner's invocation history and resume arithmetic and the figure generator's
+    use of them (blocks and resumes of one cell; an unpaired game left by an interruption).
+    """
+
+    def setUp(self):
+        import make_figures
+        import run_cell
+
+        self.rc, self.mf = run_cell, make_figures
+        self._saved = (run_cell.uci_id, run_cell.sha256, run_cell.run_capture)
+        run_cell.uci_id = lambda *a, **k: "id name Test"
+        run_cell.sha256 = lambda p: "ab" * 32
+        run_cell.run_capture = lambda *a, **k: ""
+
+    def tearDown(self):
+        self.rc.uci_id, self.rc.sha256, self.rc.run_capture = self._saved
+
+    def test_games_done_in_block(self):
+        f = self.rc.games_done_in_block
+        self.assertEqual(
+            f(283, [], 0, 250), 283
+        )  # no history: earlier blocks assumed complete
+        hist = [{"block": 0, "games_before": 0}, {"block": 0, "games_before": 283}]
+        self.assertEqual(
+            f(501, hist, 1, 250), 0
+        )  # new block after an orphan game: fresh
+        self.assertEqual(f(283, hist, 0, 250), 283)
+        self.assertEqual(
+            f(601, hist + [{"block": 1, "games_before": 501}], 1, 250), 100
+        )
+
+    def test_manifest_keeps_history_and_resumes(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = pathlib.Path(d)
+            (out / "book.epd").write_text("x\n")
+            cell = {
+                "id": "T",
+                "a": {"engine": "E", "threads": 8},
+                "b": {"engine": "E", "threads": 6},
+            }
+            defaults = {"book": str(out / "book.epd"), "manager": "fastchess"}
+            engines = {"E": {"cmd": "/bin/echo", "options": {}}}
+            w = self.rc.write_manifest
+            w(
+                cell,
+                defaults,
+                engines,
+                out,
+                ["fc", "a"],
+                5,
+                0,
+                "",
+                games_before=0,
+                start_opening=1,
+            )
+            self.rc.note_resume(
+                out / "manifest.json", 0, {"games_in_pgn_before_resume": 0}
+            )
+            w(
+                cell,
+                defaults,
+                engines,
+                out,
+                ["fc", "b"],
+                3,
+                0,
+                "",
+                games_before=4,
+                start_opening=3,
+            )
+            w(
+                cell,
+                defaults,
+                engines,
+                out,
+                ["fc", "c"],
+                5,
+                1,
+                "",
+                games_before=10,
+                start_opening=6,
+            )
+            m = json.load(open(out / "manifest.json"))
+            self.assertEqual([h["games_before"] for h in m["history"]], [0, 4, 10])
+            self.assertEqual(len(m["resumes"]), 1)
+            self.assertEqual(m["block"], 1)
+            (out / "manifest.json").write_text("{broken")
+            w(
+                cell,
+                defaults,
+                engines,
+                out,
+                ["fc"],
+                1,
+                2,
+                "",
+                games_before=11,
+                start_opening=11,
+            )
+            self.assertEqual(
+                [h["block"] for h in json.load(open(out / "manifest.json"))["history"]],
+                [2],
+            )
+
+    def test_block_ranges_and_game_time(self):
+        hist = {
+            "history": [
+                {"block": 0, "games_before": 0},
+                {"block": 0, "games_before": 283},
+                {"block": 1, "games_before": 501},
+            ]
+        }
+        self.assertEqual(
+            self.mf.block_ranges(hist, 700, 250, 4), [(0, 0, 501), (1, 501, 700)]
+        )
+        self.assertEqual(
+            self.mf.block_ranges({}, 600, 250, 4), [(0, 0, 500), (1, 500, 600)]
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".pgn", delete=False) as fh:
+            fh.write('[GameDuration "00:01:30"]\n[GameDuration "01:00:00"]\n')
+            path = fh.name
+        self.assertEqual(self.mf.pgn_game_seconds(pathlib.Path(path)), 3690.0)
+
+
 class OracleSamplingTest(unittest.TestCase):
     """Pins the stratified sampler of tools/paper/oracle_probe.py (protocol §11.6)."""
 
