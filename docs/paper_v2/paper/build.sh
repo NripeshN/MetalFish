@@ -5,8 +5,11 @@
 #   --anon   double-anonymous variant for IEEE ToG -> main_anon.pdf
 set -euo pipefail
 cd "$(dirname "$0")"
-python3 ../../../tools/paper/make_bib.py --offline
-python3 ../../../tools/paper/make_figures.py
+# The measurement venv pins the interpreter and packages (the host's default python3 may lack them).
+PY=${PY:-../../../results/paper_v2/venv/bin/python}
+[ -x "$PY" ] || PY=python3
+"$PY" ../../../tools/paper/make_bib.py --offline
+"$PY" ../../../tools/paper/make_figures.py
 JOB=main; PRE=""
 for arg in "$@"; do
   case "$arg" in

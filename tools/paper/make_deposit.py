@@ -11,7 +11,8 @@ Collects, into <out>/ (default results/paper_v2/deposit/):
   plan/              docs/paper_v2 (protocol, audit, blueprint, evidence map, correction package,
                      manuscript source) without build products
   tools/             tools/paper/*.py and README
-  bin/MAIN_READY     frozen-binary hash record; FROZEN.md if present
+  bin/MAIN_READY     frozen-binary hash record; FROZEN.md if present; queue log; hostload.log
+  scripts/           the queue, load-gate, oracle and logger scripts (results/paper_v2/*.sh)
   CHECKSUMS.sha256   sha256 of every deposited file
   zenodo.json        deposit metadata (creators, description, license, related identifiers);
                      fill the arXiv identifier when it exists
@@ -161,10 +162,13 @@ def main() -> int:
         else []
     ):
         put(src, out / "micro" / src.name, plan, args.dry_run)
-    for name in ("bin/MAIN_READY", "FROZEN.md", "queue_paper_log.txt"):
+    for name in ("bin/MAIN_READY", "FROZEN.md", "queue_paper_log.txt", "hostload.log"):
         src = RESULTS / name
         if src.exists():
             put(src, out / name, plan, args.dry_run)
+    # the queue, gate, oracle and logger scripts that scheduled every measurement
+    for src in sorted(RESULTS.glob("*.sh")):
+        put(src, out / "scripts" / src.name, plan, args.dry_run)
     for src in sorted((REPO / "docs" / "paper_v2").rglob("*")):
         if (
             src.is_file()
