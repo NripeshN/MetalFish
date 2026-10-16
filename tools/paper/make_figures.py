@@ -8,7 +8,8 @@ Reads:
   results/paper_v2/micro/nn_latency[_frozen].json M1 (tools/paper/microbench.py nn; the frozen-build re-run wins)
   results/paper_v2/micro/ab_scaling[_frozen].json M2 (tools/paper/microbench.py ab; the frozen-build re-run wins)
 
-Writes docs/paper_v2/figures/*.pdf|png and docs/paper_v2/tables/*.md|tex.
+Writes docs/paper_v2/figures/*.pdf|png and docs/paper_v2/tables/*.md|tex, and exports the schematics in
+docs/paper_v2/diagrams/*.html to docs/paper_v2/figures/*.pdf with tools/paper/diagram_pdf.py.
 
 Usage:
     python3 tools/paper/make_figures.py [--out docs/paper_v2] [--results results/paper_v2]
@@ -683,6 +684,36 @@ def plot_micro(results: pathlib.Path, out: pathlib.Path):
         plt.close(fig)
 
 
+def export_diagrams(out: pathlib.Path) -> None:
+    """Hand-drawn schematics (docs/paper_v2/diagrams/*.html, diagram-design skill) to vector PDF.
+
+    The export needs the diagram tooling environment (Playwright + headless Chromium), which is
+    kept apart from the measurement environment; without it the diagrams are skipped with a
+    warning and a `build.sh --final` build fails on the missing figure."""
+    import subprocess
+
+    htmls = sorted((REPO / "docs" / "paper_v2" / "diagrams").glob("*.html"))
+    if not htmls:
+        return
+    py = pathlib.Path.home() / ".venvs" / "diagram-design" / "bin" / "python"
+    if not py.exists():
+        print(
+            f"warning: {py} missing; {len(htmls)} diagram(s) not exported",
+            file=sys.stderr,
+        )
+        return
+    subprocess.run(
+        [
+            str(py),
+            str(REPO / "tools" / "paper" / "diagram_pdf.py"),
+            *map(str, htmls),
+            "--out",
+            str(out / "figures"),
+        ],
+        check=True,
+    )
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -702,6 +733,7 @@ def main(argv=None):
     plot_reasons(cells, out)
     plot_telemetry(cells, results, out)
     plot_micro(results, out)
+    export_diagrams(out)
     print(
         f"cells: {len(cells)}, gates: {len(gates)} -> {out/'tables'}, {out/'figures'}"
     )

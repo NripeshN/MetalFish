@@ -17,8 +17,6 @@
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage{xcolor}
 \usepackage{multirow}
-\usepackage{tikz}
-\usetikzlibrary{positioning,arrows.meta,fit}
 \graphicspath{{../figures/}}
 
 % build.sh passes \def\FINAL{1} and/or \def\ANON{1} as pretex to select the variants.
@@ -110,30 +108,8 @@ Elo differences between near-equal engines are small relative to game-to-game no
 
 \begin{figure}[t]
 \centering
-\begin{tikzpicture}[
-  box/.style={draw, rounded corners, align=center, font=\footnotesize, minimum height=8mm, inner sep=3pt},
-  cpu/.style={box, fill=orange!12}, gpu/.style={box, fill=blue!10}, ctl/.style={box, fill=green!12},
-  shared/.style={box, fill=yellow!15, dashed}, off/.style={box, fill=gray!10, densely dotted},
-  arr/.style={-{Stealth[length=2mm]}, semithick}, flow/.style={arr, dashed}]
-  \node[ctl] (uci) at (0,0) {UCI front end (mode = option)};
-  \node[ctl] (coord) at (0,-1.5) {Coordinator thread: arbiter, budgets, telemetry};
-  \node[cpu, text width=52mm] (ab) at (-4.3,-3.4) {Alpha-beta: Stockfish 19 search + NNUE\\all $T$ CPU threads, Hash 2 GB};
-  \node[gpu, text width=52mm] (mcts) at (4.3,-3.4) {MCTS controller + one worker\\PUCT, 128-byte nodes, NN cache};
-  \node[shared, text width=52mm] (abst) at (-4.3,-5.3) {\texttt{ABSharedState}\\best move, score, depth, PV};
-  \node[shared, text width=52mm] (mcst) at (4.3,-5.3) {\texttt{MCTSSharedState}\\best move, $Q$, visits, top moves};
-  \node[gpu, text width=52mm] (nn) at (4.3,-7.0) {BT4 transformer on the GPU\\MPSGraph executable, FP16, batch 1};
-  \node[off, text width=116mm] (offs) at (0,-8.6) {Present but off by default: AB$\to$MCTS policy boost, shared transposition table, Core ML/ANE root probe, pawn-lever and quiet-attack tie-break overrides};
-  \draw[arr] (uci) -- (coord);
-  \draw[arr] (coord.south) -- ++(0,-0.4) -| (ab.north);
-  \draw[arr] (coord.south) -- ++(0,-0.4) -| (mcts.north);
-  \draw[arr] (mcts) -- (nn);
-  \draw[arr] (ab) -- (abst);
-  \draw[arr] (mcts) -- (mcst);
-  \draw[flow] (abst.west) -- ++(-0.5,0) |- (coord.west);
-  \draw[flow] (mcst.east) -- ++(0.5,0) |- (coord.east);
-  \draw[flow] (mcst.west) -- node[above, font=\scriptsize, align=center]{root-order hints (top 8)\\candidate verification} (abst.east);
-\end{tikzpicture}
-\caption{The hybrid runtime as frozen. The coordinator launches the Stockfish-derived alpha-beta search with all $T$ CPU threads and one MCTS worker that blocks on batch-1 GPU inference (\texttt{HybridOversubscribe}); both publish root state through 128-byte-aligned shared structures; the MCTS top moves pre-order the alpha-beta root and are verified by a short alpha-beta sub-search; the arbiter plays alpha-beta's move unless one of the gated override predicates fires. Dotted: features present but off by default.}
+\includegraphics[width=\linewidth]{hybrid-architecture.pdf}
+\caption{The hybrid runtime as frozen. The coordinator starts the Stockfish-derived alpha-beta search on all $T$ CPU threads and one MCTS worker that blocks on batch-1 GPU inference (\texttt{HybridOversubscribe}); both publish their root state, which the coordinator reads to choose the final move; the MCTS top moves are passed to the alpha-beta root as ordering hints and are verified by a short alpha-beta sub-search; the arbiter plays alpha-beta's move unless one of the gated override predicates fires. Present but off by default: the AB$\to$MCTS policy boost, a shared transposition table, the Core ML/ANE root probe and the pawn-lever and quiet-attack tie-break overrides.}
 \label{fig:arch}
 \end{figure}
 

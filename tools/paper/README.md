@@ -16,6 +16,7 @@ experiment manifest: `docs/paper_v2/experiments.json`.
 | `make_bib.py` | Builds `docs/paper_v2/paper/refs.bib` from the verified reference map (Crossref for DOIs, arXiv API for arXiv IDs, `refs_manual.bib` for web/software/notes); exits non-zero if any citable row has no entry; `--offline` uses the cached fetches. |
 | `make_deposit.py` | Assembles the Zenodo deposit directory (cells, gates, microbenchmarks, oracle study, plan package, tools; logs gzipped; CHECKSUMS.sha256; zenodo.json metadata). Nothing is uploaded; `--dry-run` lists the plan. |
 | `bundle_dylibs.py` | Copies the Homebrew dynamic libraries a Mach-O binary depends on next to it and rewrites the load commands (`install_name_tool`, ad-hoc re-sign), so a later `brew upgrade` cannot break a frozen measurement binary (03 C19). |
+| `diagram_pdf.py` | Exports diagram-design HTML schematics to one-page vector PDFs at their viewBox size (96 px/in) with headless Chromium; runs in `~/.venvs/diagram-design` (Playwright). Called by `make_figures.py`. |
 
 Calibration artifacts (fastchess self-match of Stockfish 19 used to validate `penta_stats.py`)
 live under `results/paper_v2/calibration/` (gitignored).
