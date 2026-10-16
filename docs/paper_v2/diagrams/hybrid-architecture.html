@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hybrid runtime as frozen</title>
+  <!-- diagram-design (MIT) architecture type, profile metalfish-paper: print white paper, system fonts (no network) -->
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #ffffff;
+      --color-ink:     #1f2328;
+      --color-muted:   #4b5563;
+      --color-accent:  #bf4520;
+      --font-sans:     'Helvetica Neue', Helvetica, Arial, sans-serif;
+      --font-serif:    'Times New Roman', Times, serif;
+      --font-mono:     Menlo, ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1200px; width: 100%; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+    svg { width: 100%; min-width: 624px; display: block; }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · MetalFish</p>
+    <h1>Hybrid runtime as frozen</h1>
+    <div class="diagram-container">
+      <svg viewBox="0 0 624 544" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="hybrid-architecture-title hybrid-architecture-desc">
+        <title id="hybrid-architecture-title">Hybrid runtime as frozen</title>
+        <desc id="hybrid-architecture-desc">The coordinator runs a Stockfish 19 alpha-beta search on all CPU threads and one MCTS worker whose BT4 evaluations run on the GPU; both publish root state that the coordinator reads to choose the final move, and the MCTS top moves are passed to the alpha-beta search as root-ordering hints.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4b5563"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#ffffff"/>
+
+        <!-- ===== Connectors (drawn before nodes) ===== -->
+        <!-- UCI -> coordinator: go -->
+        <line x1="296" y1="72" x2="296" y2="112" stroke="#4b5563" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <rect x="270" y="86" width="20" height="12" rx="2" fill="#ffffff"/>
+        <text x="280" y="95" fill="#5b6472" font-size="9" font-family="Menlo, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">GO</text>
+        <!-- coordinator -> UCI: final move (accent) -->
+        <line x1="328" y1="112" x2="328" y2="72" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+        <rect x="334" y="86" width="52" height="12" rx="2" fill="#ffffff"/>
+        <text x="360" y="95" fill="#bf4520" font-size="9" font-family="Menlo, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">BESTMOVE</text>
+        <!-- alpha-beta root state -> coordinator: read (dashed) -->
+        <path d="M 132,212 V 148 Q 132,140 140,140 H 196" fill="none" stroke="#4b5563" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+        <!-- MCTS root state -> coordinator: read (dashed) -->
+        <path d="M 492,212 V 148 Q 492,140 484,140 H 428" fill="none" stroke="#4b5563" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+        <!-- alpha-beta search -> its root state: publish -->
+        <line x1="132" y1="316" x2="132" y2="268" stroke="#4b5563" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <rect x="138" y="286" width="48" height="12" rx="2" fill="#ffffff"/>
+        <text x="162" y="295" fill="#5b6472" font-size="9" font-family="Menlo, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">PUBLISH</text>
+        <!-- MCTS worker -> its root state: publish -->
+        <line x1="492" y1="316" x2="492" y2="268" stroke="#4b5563" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <rect x="498" y="286" width="48" height="12" rx="2" fill="#ffffff"/>
+        <text x="522" y="295" fill="#5b6472" font-size="9" font-family="Menlo, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">PUBLISH</text>
+        <!-- MCTS root state -> alpha-beta search: root-ordering hints (read, dashed) -->
+        <path d="M 384,256 H 320 Q 312,256 312,264 V 336 Q 312,344 304,344 H 240" fill="none" stroke="#4b5563" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+        <rect x="318" y="294" width="36" height="12" rx="2" fill="#ffffff"/>
+        <text x="336" y="303" fill="#5b6472" font-size="9" font-family="Menlo, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">HINTS</text>
+        <!-- MCTS worker -> BT4 on the GPU: evaluation -->
+        <line x1="492" y1="372" x2="492" y2="420" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+        <rect x="498" y="390" width="32" height="12" rx="2" fill="#ffffff"/>
+        <text x="514" y="399" fill="#2e5aa8" font-size="9" font-family="Menlo, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">EVAL</text>
+
+        <!-- ===== Nodes ===== -->
+        <!-- UCI front end (input) -->
+        <rect x="232" y="16" width="160" height="56" rx="6" fill="#ffffff"/>
+        <rect x="232" y="16" width="160" height="56" rx="6" fill="rgba(75,85,99,0.10)" stroke="#5b6472" stroke-width="1"/>
+        <rect x="240" y="22" width="20" height="14" rx="2" fill="none" stroke="rgba(91,100,114,0.40)" stroke-width="0.8"/>
+        <text x="250" y="32" fill="#5b6472" font-size="9" font-family="Menlo, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">IO</text>
+        <text x="312" y="52" fill="#1f2328" font-size="13" font-weight="600" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">UCI front end</text>
+        <text x="312" y="66" fill="#4b5563" font-size="10" font-family="Menlo, ui-monospace, monospace" text-anchor="middle">mode = UCI option</text>
+
+        <!-- Coordinator (focal) -->
+        <rect x="196" y="112" width="232" height="56" rx="6" fill="#ffffff"/>
+        <rect x="196" y="112" width="232" height="56" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1.2"/>
+        <rect x="204" y="118" width="24" height="14" rx="2" fill="none" stroke="rgba(191,69,32,0.40)" stroke-width="0.8"/>
+        <text x="216" y="128" fill="#bf4520" font-size="9" font-family="Menlo, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CPU</text>
+        <text x="312" y="148" fill="#1f2328" font-size="13" font-weight="600" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">Coordinator</text>
+        <text x="312" y="162" fill="#4b5563" font-size="10" font-family="Menlo, ui-monospace, monospace" text-anchor="middle">arbiter · budgets · telemetry</text>
+
+        <!-- Alpha-beta root state (store) -->
+        <rect x="24" y="212" width="216" height="56" rx="6" fill="#ffffff"/>
+        <rect x="24" y="212" width="216" height="56" rx="6" fill="rgba(31,35,40,0.05)" stroke="#4b5563" stroke-width="1"/>
+        <rect x="32" y="218" width="36" height="14" rx="2" fill="none" stroke="rgba(75,85,99,0.40)" stroke-width="0.8"/>
+        <text x="50" y="228" fill="#4b5563" font-size="9" font-family="Menlo, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+        <text x="132" y="248" fill="#1f2328" font-size="13" font-weight="600" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">Alpha-beta root state</text>
+        <text x="132" y="262" fill="#4b5563" font-size="10" font-family="Menlo, ui-monospace, monospace" text-anchor="middle">move · score · depth · PV</text>
+
+        <!-- MCTS root state (store) -->
+        <rect x="384" y="212" width="216" height="56" rx="6" fill="#ffffff"/>
+        <rect x="384" y="212" width="216" height="56" rx="6" fill="rgba(31,35,40,0.05)" stroke="#4b5563" stroke-width="1"/>
+        <rect x="392" y="218" width="36" height="14" rx="2" fill="none" stroke="rgba(75,85,99,0.40)" stroke-width="0.8"/>
+        <text x="410" y="228" fill="#4b5563" font-size="9" font-family="Menlo, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+        <text x="492" y="248" fill="#1f2328" font-size="13" font-weight="600" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">MCTS root state</text>
+        <text x="492" y="262" fill="#4b5563" font-size="10" font-family="Menlo, ui-monospace, monospace" text-anchor="middle">move · Q · visits · top 8</text>
+
+        <!-- Alpha-beta search (backend) -->
+        <rect x="24" y="316" width="216" height="56" rx="6" fill="#ffffff"/>
+        <rect x="24" y="316" width="216" height="56" rx="6" fill="#ffffff" stroke="#1f2328" stroke-width="1"/>
+        <rect x="32" y="322" width="40" height="14" rx="2" fill="none" stroke="rgba(31,35,40,0.40)" stroke-width="0.8"/>
+        <text x="52" y="332" fill="#1f2328" font-size="9" font-family="Menlo, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CPU ×T</text>
+        <text x="132" y="352" fill="#1f2328" font-size="13" font-weight="600" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">Alpha-beta search</text>
+        <text x="132" y="366" fill="#4b5563" font-size="10" font-family="Menlo, ui-monospace, monospace" text-anchor="middle">Stockfish 19 + NNUE</text>
+
+        <!-- MCTS worker (backend) -->
+        <rect x="384" y="316" width="216" height="56" rx="6" fill="#ffffff"/>
+        <rect x="384" y="316" width="216" height="56" rx="6" fill="#ffffff" stroke="#1f2328" stroke-width="1"/>
+        <rect x="392" y="322" width="40" height="14" rx="2" fill="none" stroke="rgba(31,35,40,0.40)" stroke-width="0.8"/>
+        <text x="412" y="332" fill="#1f2328" font-size="9" font-family="Menlo, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CPU ×1</text>
+        <text x="492" y="352" fill="#1f2328" font-size="13" font-weight="600" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">MCTS worker</text>
+        <text x="492" y="366" fill="#4b5563" font-size="10" font-family="Menlo, ui-monospace, monospace" text-anchor="middle">PUCT · 128-byte nodes</text>
+
+        <!-- BT4 transformer on the GPU (external device) -->
+        <rect x="384" y="420" width="216" height="56" rx="6" fill="#ffffff"/>
+        <rect x="384" y="420" width="216" height="56" rx="6" fill="rgba(31,35,40,0.03)" stroke="rgba(31,35,40,0.30)" stroke-width="1"/>
+        <rect x="392" y="426" width="24" height="14" rx="2" fill="none" stroke="rgba(46,90,168,0.50)" stroke-width="0.8"/>
+        <text x="404" y="436" fill="#2e5aa8" font-size="9" font-family="Menlo, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">GPU</text>
+        <text x="492" y="456" fill="#1f2328" font-size="13" font-weight="600" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">BT4 transformer</text>
+        <text x="492" y="470" fill="#4b5563" font-size="10" font-family="Menlo, ui-monospace, monospace" text-anchor="middle">MPSGraph · FP16 · batch 1</text>
+
+        <!-- ===== Legend strip ===== -->
+        <line x1="24" y1="500" x2="600" y2="500" stroke="rgba(31,35,40,0.14)" stroke-width="0.8"/>
+        <text x="24" y="524" fill="#5b6472" font-size="9" font-family="Menlo, ui-monospace, monospace" letter-spacing="0.14em">LEGEND</text>
+        <line x1="96" y1="520" x2="120" y2="520" stroke="#4b5563" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <text x="128" y="524" fill="#5b6472" font-size="9" font-family="Menlo, ui-monospace, monospace" letter-spacing="0.06em">DATA / CONTROL</text>
+        <line x1="224" y1="520" x2="248" y2="520" stroke="#4b5563" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+        <text x="256" y="524" fill="#5b6472" font-size="9" font-family="Menlo, ui-monospace, monospace" letter-spacing="0.06em">READS STATE</text>
+        <line x1="344" y1="520" x2="368" y2="520" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+        <text x="376" y="524" fill="#5b6472" font-size="9" font-family="Menlo, ui-monospace, monospace" letter-spacing="0.06em">GPU EVAL</text>
+        <line x1="448" y1="520" x2="472" y2="520" stroke="#bf4520" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+        <text x="480" y="524" fill="#5b6472" font-size="9" font-family="Menlo, ui-monospace, monospace" letter-spacing="0.06em">FINAL MOVE</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>
