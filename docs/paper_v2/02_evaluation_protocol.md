@@ -424,3 +424,15 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
    external CPU above 300%; games played before the logger existed carry no samples and are kept.
    The fraction of pairs removed is reported; a difference between the two estimates larger than the
    primary estimate's standard error is reported and discussed as a threat to validity.
+9. **2026-10-16 — the load gate also acts during a chunk.** Amendment 8 checks the host only
+   before a chunk starts; a spike that begins inside a chunk is not stopped. Between 11:19 and
+   11:30 local on 2026-10-16, with other processes using 4 to 10 cores, four games of RQ1a block 1
+   were lost on time (three by the alpha-beta arm, one by the hybrid), taking the cell's forfeit
+   rate to 1.1%, above the 0.5% health limit. From the next chunk on: chunks are 4 pairs instead of
+   10, and a watchdog (`results/paper_v2/load_watchdog.sh`) stops the running chunk at the next
+   completed game pair (no game is cut short and no pair is split) when the external CPU averaged
+   over the last 2 minutes exceeds 450%; the gate then waits as before. Games, openings, seed,
+   order and binary are unchanged; every game played stays in the record as played (forfeits
+   included), the primary estimate keeps every game, and the sensitivity estimate of amendment 8
+   removes the pairs that overlapped high load, which covers these four games. Fixed before any
+   cell is interpreted.

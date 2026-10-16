@@ -147,3 +147,12 @@ is unrelated to the engines (the host's reset log records six resets from 2026-1
 measurements started). RQ2b block 0 held 174 games (87 complete pairs, none unpaired) and resumed
 from pair 88 when the queue was relaunched at 17:29 local; `results/paper_v2/resume_queue.sh`
 restarts the logger, queue and chain idempotently after any further reboot.
+
+Forfeit health, 2026-10-16: RQ1a stands at 6 time forfeits in 534 games (1.1%), above the 0.5%
+health limit. Four of them fell in block 1 between 11:19 and 11:30 local, while other processes used
+4 to 10 cores (three by the alpha-beta arm, one by the hybrid; the last-move node rates were 0.96–2.2 M
+nodes/s against the usual 14–22 M). The gate of amendment 8 only checks before a chunk, so protocol
+amendment 9 adds a watchdog (`results/paper_v2/load_watchdog.sh`) that stops a running chunk at the
+next completed pair when the 2-minute external CPU exceeds 450%, and shrinks chunks to 4 pairs;
+deployed at 13:43 local with the queue idle behind the gate (closed since 11:40 local, external CPU
+600–1,000%). The forfeited games stay in the record; the sensitivity estimate removes their pairs.
