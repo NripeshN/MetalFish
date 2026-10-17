@@ -101,42 +101,63 @@ def classify_termination(g: Dict) -> str:
     return "normal"
 
 
-def compute(games: List[Dict], engine: str) -> Dict:
-    # A pair is the two games of one fastchess round. fastchess restarts round numbers at 1 in
-    # every invocation, and a cell is played in several invocations (blocks, resumes), so the
-    # round number alone collides; the opening FEN disambiguates (blocks draw disjoint openings).
-    by_round: Dict[tuple, List[Dict]] = defaultdict(list)
-    for g in games:
-        by_round[(g["round"], g["fen"])].append(g)
+def make_pairs(games: List[Dict]):
+    """Indices of colour-swapped game pairs, and of unpaired games.
 
+    At concurrency 1 the two games of a pair are consecutive in the PGN, so consecutive games with
+    the same round and opening and swapped colours pair first; this stays correct when a resumed
+    invocation restarts its round numbers and replays an opening whose partner game was lost. Games
+    still unpaired (interleaved games at concurrency > 1) then pair by (round, opening) when exactly
+    two remain."""
+    used = [False] * len(games)
+    pairs = []
+    i = 0
+    while i + 1 < len(games):
+        a, b = games[i], games[i + 1]
+        if (
+            a["round"] == b["round"]
+            and a["fen"] == b["fen"]
+            and a["white"] != b["white"]
+        ):
+            pairs.append((i, i + 1))
+            used[i] = used[i + 1] = True
+            i += 2
+        else:
+            i += 1
+    groups: Dict[tuple, List[int]] = defaultdict(list)
+    for j, g in enumerate(games):
+        if not used[j]:
+            groups[(g["round"], g["fen"])].append(j)
+    for idx in groups.values():
+        if len(idx) == 2 and games[idx[0]]["white"] != games[idx[1]]["white"]:
+            pairs.append((idx[0], idx[1]))
+            used[idx[0]] = used[idx[1]] = True
+    return pairs, [j for j in range(len(games)) if not used[j]]
+
+
+def compute(games: List[Dict], engine: str) -> Dict:
     pair_scores: List[float] = []
     penta = [0, 0, 0, 0, 0]
     wl_pairs = 0
     dd_pairs = 0
-    unpaired = 0
     per_game = Counter()
     terminations = Counter()
-    for rnd, gs in by_round.items():
-        for g in gs:
-            terminations[classify_termination(g)] += 1
-            sc = score_for(engine, g)
-            if sc is None:
-                per_game["unfinished"] += 1
-            elif sc == 1.0:
-                per_game["win"] += 1
-            elif sc == 0.0:
-                per_game["loss"] += 1
-            else:
-                per_game["draw"] += 1
-        if len(gs) != 2:
-            unpaired += len(gs)
-            continue
-        scores = [score_for(engine, g) for g in gs]
+    for g in games:
+        terminations[classify_termination(g)] += 1
+        sc = score_for(engine, g)
+        if sc is None:
+            per_game["unfinished"] += 1
+        elif sc == 1.0:
+            per_game["win"] += 1
+        elif sc == 0.0:
+            per_game["loss"] += 1
+        else:
+            per_game["draw"] += 1
+    pairs, singles = make_pairs(games)
+    unpaired = len(singles)
+    for i, j in pairs:
+        scores = [score_for(engine, games[i]), score_for(engine, games[j])]
         if any(s is None for s in scores):
-            unpaired += 2
-            continue
-        colours_swapped = gs[0]["white"] != gs[1]["white"]
-        if not colours_swapped:
             unpaired += 2
             continue
         total = scores[0] + scores[1]  # 0 .. 2

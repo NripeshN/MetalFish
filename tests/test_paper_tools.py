@@ -346,6 +346,61 @@ class HostLoadSensitivityTest(unittest.TestCase):
         self.assertEqual(mf.high_load_games(games, samples, threshold=500), set())
 
 
+class UnpairedGameAccountingTest(unittest.TestCase):
+    """Pins the runner's opening accounting and the statistics tool's pairing when unpaired games
+    (a partner game lost to an interruption) sit anywhere in a block."""
+
+    def test_block_openings_consumed(self):
+        import run_cell as rc
+
+        k = lambda r, w, f: (str(r), w, f)  # noqa: E731
+        pair = lambda r, f: [k(r, "A", f), k(r, "B", f)]  # noqa: E731
+        trailing = pair(1, "f1") + pair(2, "f2") + [k(3, "A", "f3")]
+        self.assertEqual(rc.block_openings_consumed(trailing, 0), 2)  # f3 is replayed
+        replayed = trailing + pair(1, "f3") + pair(2, "f4")
+        self.assertEqual(rc.block_openings_consumed(replayed, 0), 4)
+        skipped = pair(1, "f1") + [k(2, "A", "f2")] + pair(1, "f3")
+        self.assertEqual(
+            rc.block_openings_consumed(skipped, 0), 3
+        )  # f2 counted as used
+        self.assertEqual(rc.block_openings_consumed(replayed, 0, 4), 2)
+        hist = [{"block": 0, "games_before": 0}, {"block": 1, "games_before": 9}]
+        self.assertEqual(rc.block_end_index(hist, 0, 0), 9)
+        self.assertIsNone(rc.block_end_index(hist, 1, 9))
+
+    def test_pairs_survive_round_number_collisions(self):
+        def g(rnd, white, fen, result="1/2-1/2"):
+            black = "B" if white == "A" else "A"
+            return {
+                "round": str(rnd),
+                "white": white,
+                "black": black,
+                "result": result,
+                "termination": "",
+                "fen": fen,
+                "plycount": "",
+                "comment_tail": "",
+                "start_time": "",
+                "end_time": "",
+            }
+
+        # an unpaired game at round 1 of one invocation and the replay of the same opening at
+        # round 1 of the next invocation share the key (1, fen): consecutive pairing keeps the replay
+        games = [
+            g(1, "A", "f1", "1-0"),
+            g(1, "A", "f1"),
+            g(1, "B", "f1"),
+            g(2, "A", "f2"),
+            g(2, "B", "f2"),
+        ]
+        st = penta_stats.compute(games, "A")
+        self.assertEqual((st["pairs"], st["unpaired_games"]), (2, 1))
+        # interleaved games (concurrency > 1) still pair by key
+        inter = [g(1, "A", "f1"), g(2, "A", "f2"), g(1, "B", "f1"), g(2, "B", "f2")]
+        st = penta_stats.compute(inter, "A")
+        self.assertEqual((st["pairs"], st["unpaired_games"]), (2, 0))
+
+
 class OracleSamplingTest(unittest.TestCase):
     """Pins the stratified sampler of tools/paper/oracle_probe.py (protocol §11.6)."""
 

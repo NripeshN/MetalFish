@@ -400,6 +400,67 @@ def block_start_index(history: List[Dict], block: int) -> Optional[int]:
     return None
 
 
+def pgn_game_keys(path: pathlib.Path) -> List[tuple]:
+    """(Round, White, FEN) of every game in a PGN, in file order, from the header lines only."""
+    keys: List[tuple] = []
+    cur: Dict[str, str] = {}
+    if not path.exists():
+        return keys
+    with open(path, errors="replace") as fh:
+        for line in fh:
+            if line.startswith("[Event "):
+                if cur:
+                    keys.append((cur.get("Round"), cur.get("White"), cur.get("FEN")))
+                cur = {}
+            elif (
+                line.startswith("[Round ")
+                or line.startswith("[White ")
+                or line.startswith("[FEN ")
+            ):
+                tag, _, rest = line[1:].partition(" ")
+                cur[tag] = rest.strip().rstrip("]").strip().strip('"')
+    if cur:
+        keys.append((cur.get("Round"), cur.get("White"), cur.get("FEN")))
+    return keys
+
+
+def block_end_index(history: List[Dict], block: int, start: int) -> Optional[int]:
+    """PGN index where the next block began (the first later invocation of another block)."""
+    later = [
+        int(e["games_before"])
+        for e in history or []
+        if e.get("block") != block
+        and e.get("games_before") is not None
+        and int(e["games_before"]) > start
+    ]
+    return min(later) if later else None
+
+
+def block_openings_consumed(
+    keys: List[tuple], start: int, end: Optional[int] = None
+) -> int:
+    """Openings a block has used, from its games keys[start:]: the distinct opening positions,
+    less one when the block's last game is unpaired (its opening is replayed on resume). A game
+    pairs with the next one when both have the same round and opening and swapped colours (games
+    of a pair are consecutive at concurrency 1). Robust to unpaired games anywhere in the block.
+    """
+    games = keys[start:end]
+    if not games:
+        return 0
+    fens = {g[2] for g in games}
+    i, last_unpaired = 0, False
+    while i < len(games):
+        a = games[i]
+        b = games[i + 1] if i + 1 < len(games) else None
+        if b is not None and b[0] == a[0] and b[2] == a[2] and b[1] != a[1]:
+            i += 2
+            last_unpaired = False
+        else:
+            i += 1
+            last_unpaired = True
+    return len(fens) - (1 if last_unpaired else 0)
+
+
 def games_done_in_block(
     played: int, history: List[Dict], block: int, per_block: int
 ) -> int:
@@ -505,12 +566,26 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
         resumed = None
         played = count_pgn_games(out / "games.pgn")
+        try:
+            hist_now = load_manifest(out / "manifest.json").get("history") or []
+        except Exception:  # noqa: BLE001
+            hist_now = []
+        first_now = block_start_index(hist_now, b)
+        # Openings used so far in this block (exact under unpaired games); None -> old arithmetic.
+        consumed = (
+            block_openings_consumed(
+                pgn_game_keys(out / "games.pgn"),
+                first_now,
+                block_end_index(hist_now, b, first_now),
+            )
+            if first_now is not None
+            else (0 if hist_now else None)
+        )
         if args.status:
-            try:
-                hist = load_manifest(out / "manifest.json").get("history") or []
-            except Exception:  # noqa: BLE001
-                hist = []
-            done = games_done_in_block(played, hist, b, per_block) // 2
+            if consumed is not None:
+                done = consumed
+            else:
+                done = games_done_in_block(played, hist_now, b, per_block) // 2
             print(
                 json.dumps(
                     {
@@ -530,6 +605,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 history = []
             done_games = games_done_in_block(played, history, b, per_block)
             pairs_done, orphan = done_games // 2, done_games % 2
+            if consumed is not None:
+                pairs_done = consumed
             if pairs_done >= pairs:
                 print(
                     f"[{args.cell_id}] block {b}: already complete ({pairs_done} pairs); skipped"

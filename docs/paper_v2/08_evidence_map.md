@@ -156,3 +156,15 @@ amendment 9 adds a watchdog (`results/paper_v2/load_watchdog.sh`) that stops a r
 next completed pair when the 2-minute external CPU exceeds 450%, and shrinks chunks to 4 pairs;
 deployed at 13:43 local with the queue idle behind the gate (closed since 11:40 local, external CPU
 600–1,000%). The forfeited games stay in the record; the sensitivity estimate removes their pairs.
+
+Bookkeeping fix, 2026-10-17 07:00 local: RQ1a block 0 ended with an unpaired game (501 games), which
+inverted the game-count parity the amendment-9 watchdog used to find pair boundaries in block 1; one
+watchdog stop (at 616 games) split a pair, and the runner, which counted a block's progress as half
+its games, then skipped that pair's opening. Of RQ1a block 1's 149 games so far, 73 form complete
+pairs and 3 are unpaired (two from host reboots, whose openings were replayed, and this one, whose
+opening was not), so the cell loses one of its 1,000 pairs. Fixed before any cell is interpreted: the
+watchdog counts parity from the current chunk's start (`games_before` in the manifest history); the
+runner counts a block's progress as the openings it has used (distinct opening positions, less one
+when the block's last game is unpaired, which is then replayed); `penta_stats.py` pairs consecutive
+games first (falling back to round/opening keys for interleaved games). Recomputed statistics of every
+cell and gate are unchanged.
