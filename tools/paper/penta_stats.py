@@ -142,8 +142,16 @@ def compute(games: List[Dict], engine: str) -> Dict:
     dd_pairs = 0
     per_game = Counter()
     terminations = Counter()
+    forfeits_by = (
+        Counter()
+    )  # time forfeits by the side that lost on time (protocol amendment 10)
     for g in games:
-        terminations[classify_termination(g)] += 1
+        kind = classify_termination(g)
+        terminations[kind] += 1
+        if kind == "time_forfeit":
+            loser = {"1-0": g["black"], "0-1": g["white"]}.get(g["result"])
+            if loser:
+                forfeits_by[loser] += 1
         sc = score_for(engine, g)
         if sc is None:
             per_game["unfinished"] += 1
@@ -183,6 +191,7 @@ def compute(games: List[Dict], engine: str) -> Dict:
         "wl_pairs": wl_pairs,
         "dd_pairs": dd_pairs,
         "terminations": dict(terminations),
+        "time_forfeits_by": dict(forfeits_by),
     }
     if n == 0:
         return out
