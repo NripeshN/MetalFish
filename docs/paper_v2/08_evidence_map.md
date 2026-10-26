@@ -168,3 +168,13 @@ runner counts a block's progress as the openings it has used (distinct opening p
 when the block's last game is unpaired, which is then replayed); `penta_stats.py` pairs consecutive
 games first (falling back to round/opening keys for interleaved games). Recomputed statistics of every
 cell and gate are unchanged.
+
+Resumption and forfeits, 2026-10-26: the queue had not run since the host reboot of 2026-10-20 18:48
+BST (no one resumed it; further reboots 2026-10-20 18:55, 2026-10-22 07:20 and a clean restart
+2026-10-26 10:51 GMT); RQ1a then stood at 834 games. It was resumed at 11:41 GMT, and a login agent
+(`~/Library/LaunchAgents/org.metalfish.paper-v2.plist`, opening `resume_queue.sh` through Terminal,
+which has access to the project folder) now restarts it after any reboot. RQ1a's seventh time forfeit
+(game 835, alpha-beta arm, 0.2 s over) came during a 4.2-core load spike below the amendment-9
+trigger: RQ1a stands at 7 forfeits in 874 games (0.8%), six by the alpha-beta arm and one by the
+hybrid. Amendment 10 lowers the watchdog trigger to 300%, the gate's threshold (watchdog restarted
+15:14 GMT with no chunk running).
