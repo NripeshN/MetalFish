@@ -436,3 +436,12 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
    included), the primary estimate keeps every game, and the sensitivity estimate of amendment 8
    removes the pairs that overlapped high load, which covers these four games. Fixed before any
    cell is interpreted.
+10. **2026-10-26 — the in-chunk watchdog uses the gate's threshold.** Amendment 9 stopped a chunk
+    when the 2-minute external CPU exceeded 450%. On 2026-10-26 game 835 of RQ1a was lost on time
+    (by 0.2 s) during a spike to 418%, below that trigger; across RQ1a six of the seven time forfeits
+    so far were by the alpha-beta arm, so load-induced forfeits can bias the primary estimate in the
+    hybrid's favour as well as add noise. The watchdog now stops a chunk at the next completed pair
+    when the 2-minute external CPU exceeds 300%, the same threshold as the gate and the sensitivity
+    analysis (12 cores less the engines' ~9). Everything else in amendments 8 and 9 is unchanged; the
+    forfeited games stay in the record and the per-arm forfeit counts are reported with each cell.
+    Fixed before any cell is interpreted.
