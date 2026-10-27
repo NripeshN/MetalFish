@@ -631,10 +631,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                     try:
                         eng.configure({k: v})
                     except Exception as exc:  # noqa: BLE001
-                        print(
-                            f"warning: {name} option {k}={v} rejected: {exc}",
-                            file=sys.stderr,
-                        )
+                        # a judge without its configured options is not the judge the
+                        # protocol names (e.g. Lc0 with smart pruning on): stop here
+                        for e in [*judges.values(), eng]:
+                            e.quit()
+                        sys.exit(f"error: {name} option {k}={v} rejected: {exc}")
             judges[name] = eng
 
         rows = list(done)
