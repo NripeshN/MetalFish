@@ -22,7 +22,7 @@ colour-swapped pairs, Fishtest adjudication (draw 34/8/20, resign 3/600 two-side
 | `L13_hybrid_nullfallback_nopreload_vs_ab8_10p01` | Same without preload (footprint = plain) vs AB(8) | 10+0.1, Hash 1024 | 301 | −10.4 ± 16.8 Elo | bit-identical fixed-node searches (12/12); runner overhead 0 ms both arms |
 | `L14_hybrid_lean_vs_ab8_30p03` | Hybrid lean (C18 NN-cache cap, main 365f36a) vs AB(8), same binary | 30+0.3, Hash 2048 | 101 | **+13.9 ± 30.3 Elo**, LOS 82% | GPU active 50%, median 31 evals, MCTS move chosen 0 times |
 
-Interim, RQ1a block 0 (2026-10-14): the detached MUST queue (`queue_must_cells.sh`, started 09:09 UTC)
+Interim, RQ1a block 0 (2026-10-14): the detached MUST queue (`queue_must_cells.sh`, started 09:09 local time, 08:09 UTC; first game 08:09:06 UTC)
 and its fastchess/engine processes disappeared at 11:37 UTC with RQ1a block 0 at 128 games
 (64 complete pairs; 0 forfeits; no thermal warnings; no crash report, kernel memory event or
 signal in the system log; the block's exit was never logged, so the shell itself was killed).
@@ -219,3 +219,25 @@ engines' own GPU use), `gpu_mem_mb` (GPU in-use system memory), `mem_level` (`ke
 21:20:37, gpu_util 2%, gpu_mem_mb 315, mem_level 80%, pageouts 78,012, swapouts 12,986,612. The
 logger was restarted under the same name, so the gate and the watchdog are unchanged; one minute
 went unsampled during the swap.
+
+Trace of the frozen build's gate L14, parsed 2026-10-27 for the manuscript (`parse_hybrid_trace.py` on
+`sprt/L14_hybrid_lean_vs_ab8_30p03/engines.log.gz` → `moves.jsonl`): 6,855 hybrid decisions;
+3,413 time-safety fallbacks, 2,098 agreements, 1,344 disagreements with the transformer enabled
+(1,026 rejected by the alpha-beta root verification, 318 alpha-beta default), MCTS move chosen 0 times.
+The RQ1a pilot (`RQ1a_pilot/moves.jsonl`): 6,549 decisions, 1,165 such disagreements, MCTS move chosen 0
+times. Protocol time stamps (GitHub server side): frozen protocol merged 2026-10-14 06:46:26 UTC (PR #77,
+tag `paper-v2-protocol-freeze`); the first confirmatory game started 08:09:06 UTC (RQ1a rc1, first
+`GameStartTime`). The pilot used RQ1a's seed (`-srand 20261007`, first 50 openings); the gates used
+`-srand 20261012`.
+
+Arbiter and timing facts of the frozen source (manuscript §3.3 and the arbiter appendix):
+`docs/paper_v2/arbiter_reference.md`, compiled from `git show 365f36a` with `path:line` references and
+checked against the source for the verification budget (min(240 ms, budget/8), budget >= 1 s), the clock
+restart after verification, the single-candidate checks (80-160 ms, queen on the board), the reported
+score, the veto, the join grace (budget/4 within 1-5 s), the agreement stop and the preload before
+`readyok`; the dynamic ladder writes 37 reasons (the veto and 36 predicates, 31 reachable under the
+arm's settings: 24 lift the veto, 2 lift it in a narrower form, 4 are blocked by it, 1 needs depth < 10).
+L14 log counts (`sprt/L14_hybrid_lean_vs_ab8_30p03/engines.log.gz`, counted 2026-10-27): 3,442
+`HybridTrace` lines and 3,413 time-safety lines; `subsearch stop grace expired` 0; `engines agree,
+stopping early` 0; each game's first `isready` answered `readyok` after the preload (2.5 s in the first
+game) and before the first `go`, which carried the full clock.
