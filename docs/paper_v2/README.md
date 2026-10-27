@@ -13,7 +13,7 @@ toolchain (fastchess + Ordo + Stockfish 19 + Lc0 0.32.1 + UHO books + test suite
 | --- | --- |
 | Title | Hybrid Chess Search: Combining Alpha-Beta and Monte Carlo Tree Search on Unified Memory Architectures |
 | Author | Nripesh Niketan (ORCID 0009-0008-2066-1937) |
-| Venue | Intelligent Systems and Applications (IntelliSys 2026, Vol. 2), Lecture Notes in Networks and Systems, Springer Nature Switzerland, Cham |
+| Venue | Intelligent Systems and Applications (IntelliSys 2026), Lecture Notes in Networks and Systems vol. 2078, Springer Nature Switzerland, Cham (volume read from the SpringerLink chapter page, 2026-10-27) |
 | DOI | 10.1007/978-3-032-32726-0_39 |
 | Pages | 653–664, published online 2026-08-14 (print year 2027) |
 | ISBN | 978-3-032-32725-3 (print), 978-3-032-32726-0 (online) |

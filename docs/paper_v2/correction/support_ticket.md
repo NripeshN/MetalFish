@@ -1,7 +1,7 @@
 # Springer Nature support ticket — author-initiated Correction (text to paste)
 
 **Filing is the author's action.** Nothing in this directory has been sent anywhere. Steps and
-the text to paste are below; fill the four `{{…}}` fields in `correction_note.md` first.
+the text to paste are below; fill the three remaining `{{…}}` fields in `correction_note.md` first.
 
 ## Where to file (verified 2026-10-14)
 
@@ -40,10 +40,9 @@ support.
 Hybrid Chess Search: Combining Alpha-Beta and Monte Carlo Tree Search on Unified Memory Architectures
 
 **DOI**
-10.1007/978-3-032-32726-0_39 (chapter 39 of "Intelligent Systems and Applications. Proceedings
-of the 2026 Intelligent Systems Conference (IntelliSys), Volume 2", eds. K. Arai and P. Lorenz,
-Lecture Notes in Networks and Systems, Springer Nature Switzerland, pp. 653–664, published
-online 14 August 2026; book DOI 10.1007/978-3-032-32726-0; ISBN 978-3-032-32725-3 (print),
+10.1007/978-3-032-32726-0_39 (chapter 39 of "Intelligent Systems and Applications. IntelliSys
+2026", eds. K. Arai and P. Lorenz, Lecture Notes in Networks and Systems, vol. 2078, Springer,
+Cham, pp. 653–664, published online 14 August 2026; book DOI 10.1007/978-3-032-32726-0; ISBN 978-3-032-32725-3 (print),
 978-3-032-32726-0 (online))
 
 **Corresponding author name & email address**
