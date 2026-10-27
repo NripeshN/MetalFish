@@ -13,8 +13,12 @@ shipped behaviour.
 
 ## 0. As-built summary (replaces §3 of the paper)
 
-Two snapshots. The first is the shipped v1.0.0 engine the published chapter described
-(verified against `b935e66` on 2026-10-07; full audit in `01_published_paper_audit.md` §C).
+Two snapshots. The first is the shipped engine (version string 1.0.0) at `b935e66`
+(2026-07-09), the starting point of this study (verified on 2026-10-07; full audit in
+`01_published_paper_audit.md` §C). The published chapter described an earlier state, commit
+`ec1dee5` (2026-05-11; `correction/error_list.md`), which differs from `b935e66` in, among
+other things, the transformer's low-time fallback (a fixed 5,000 ms constant) and the absence of
+the root tie-break overrides (no `PawnLever` code at `ec1dee5`; 2026-10-27 check).
 The second is the engine frozen for this paper's measurements (`main` 365f36a, tags
 `paper-v2-freeze-rc1` / `paper-v2-protocol-freeze`, 2026-10-14) after the strength programme in
 `07_engine_strength_program.md`; every difference between the two was game-gated.
@@ -40,7 +44,8 @@ The second is the engine frozen for this paper's measurements (`main` 365f36a, t
   MCTS→AB root-order hints (top-8) and a 240 ms AB candidate-verification sub-search are
   on; AB→MCTS policy boost and shared TT are off. Final decision: AB's move unless one of
   ~30 gated MCTS-override predicates fires and `HybridABRootRejectsMCTS` does not veto;
-  agreement early-stop exists but never fired in telemetry; the position classifier only
+  agreement early-stop exists but never fired in the July 2026 telemetry (0 of 209 decisions;
+  it fires rarely in the frozen engine's games); the position classifier only
   lengthens budgets and sets a node minimum. Transformer disabled per move when the
   estimated budget < 400 ms or time left < 3 s.
 
