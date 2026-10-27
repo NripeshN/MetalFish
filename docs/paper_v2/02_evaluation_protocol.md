@@ -506,3 +506,7 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     pair scores is reported as a robustness interval. RQ1b, like every cell other than RQ1a, is
     exploratory and carries no alpha of its own. If RQ5a is played, its Lc0 reference gets the
     same 50 ms move overhead as the MetalFish arm.
+    (h) **Openings played before RQ1a.** The pilot used RQ1a's seed and so played the openings of
+    RQ1a's first 50 pairs (with the pre-freeze build), and the 183 games set aside by amendment 7
+    played its first 92 openings. RQ1a is therefore also reported without its first 92 openings, and
+    the 183 set-aside games are reported on their own; the gating matches used another seed.
