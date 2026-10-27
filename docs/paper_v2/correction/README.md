@@ -17,7 +17,11 @@ see `support_ticket.md` for the exact steps. Before filing, fill the three remai
 | `{{PREPRINT}}` | arXiv identifier of the follow-up paper (Phase B) | pending |
 | `{{ZENODO_DOI}}` | Zenodo deposit of `results/paper_v2` (Phase A, after the cells) | pending |
 
-Everything else in the note is final and cites an existing artifact.
+Everything else in the note is final and cites an existing artifact. Items 8–10 were revised on
+2026-10-27 after the manuscript's integrity check: the throughput comparison with Lc0 is now
+stated per batch size, and the early-stop and arbiter statements are scoped to the records they
+come from. Before filing, re-check items 8 and 9 against the final RQ1a/RQ1b telemetry
+(`moves.jsonl`) and say so if the complete cells show a different picture.
 
 ## Files
 
@@ -48,7 +52,8 @@ Stockfish and the 100% agreement validates nothing. Nodes are 128 bytes, not 64;
 speedup, the 1.26×/5.5× throughput advantage over Lc0, the M1 Ultra figures and the 7.24×
 scaling have no records and are withdrawn; the NN-cache, transposition-table and NNUE figures
 are corrected; the position classifier does not weight the decision and Fig. 1's routing is
-wrong; the agreement stop never fired and the "10–40%" saving is unsupported; the hybrid's final
+wrong; the agreement stop never fired in the chapter-era telemetry and the "10–40%" saving is
+unsupported; the hybrid's final
 move was the alpha-beta move in 207/209 logged decisions; two related-work characterisations
 are corrected; the hybrid does not use the Lc0-style time manager; and the omitted time-safety
 rule is stated. The controlled replacement measurement (hybrid vs AB(8)) is reported in the

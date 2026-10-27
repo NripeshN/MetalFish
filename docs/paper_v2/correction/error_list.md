@@ -27,14 +27,17 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
 - **Corrected**: all ratings, the ΔElo column, Fig. 2 and the "∼435 Elo" statements are
   withdrawn. Method: per match, Elo difference = −400·log10(1/p − 1) from a 5-game score p,
   clamped to ±400 at p ∈ {0, 1}; rating = mean over anchor opponents of (assumed anchor rating +
-  difference). Anchors were constants (`expected_elo`: Stockfish 3800, Berserk 3722, Patricia
-  3415, Lc0 3700, skill levels 3551/3304…), not measurements. Game records were not retained.
+  difference). Anchors were assumed constants (`expected_elo`: Stockfish 3800, Berserk 3722,
+  Patricia 3415, Lc0 3700; Stockfish skill levels 5–16 at 2800–3584 as shown in Fig. 2), not
+  measurements. Game records were not retained.
   Replacement: the pre-registered hybrid-vs-AB(8) measurement (RQ1a, 30+0.3, 1,000 pairs) —
   **pending**; interim same-binary readings on the frozen engine: L14 +13.9 ± 30.3 Elo over 101
   games at 30+0.3 (`results/paper_v2/sprt/L14_hybrid_lean_vs_ab8_30p03/partial_stats.json`).
 - **Evidence**: `ec1dee5:tools/run_tournament_live.py` lines 326–330 (clamped logistic
   difference) and 591–605 (anchor average); `ec1dee5:tools/engines_config.json` (`expected_elo`
-  constants); no PGN/JSON of the 322-game run anywhere in the repository (audit A1, A4);
+  constants for the named engines; the skill-level anchors the chapter's Fig. 2 shows, levels
+  5–16 at 2800–3584, are not in that file); no PGN/JSON of the 322-game run anywhere in the
+  repository (audit A1, A4);
   Lc0 BT4 Metal throughput `results/paper_v2/micro/nn_latency.json` (165–725 nps). Audit A1–A6.
 
 ### E2 — Provenance of the alpha-beta engine · Wrong (overstated) / Misleading
@@ -146,10 +149,15 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
 - **Corrected**: the stop exists but requires a clock search, `agreement_count ≥ 3` consecutive
   coordinator polls (~1.5 ms apart), elapsed > 25% of budget, MCTS playouts ≥ max(100,
   `min_mcts_nodes`), AB depth ≥ 10. It fired 0 of 209 times in the July 2026 telemetry
-  (median 45 playouts < 100). No time-saving measurement exists; "10–40%" withdrawn.
+  (median 45 playouts < 100); in the current engine it fires rarely (3 of the 3,278 moves with
+  the transformer active in the October 2026 30+0.3 pilot; also in some gate matches). No
+  time-saving measurement exists; "10–40%" withdrawn.
 - **Evidence**: `ec1dee5:src/hybrid/hybrid_search.cpp` lines 640–702 (`agreement_count`,
   gate at 695); `results/tournament_20260701_212250/results.json` parsed with
-  `tools/paper/parse_hybrid_trace.py` (0 agreement stops; `../08_evidence_map.md` §C). Audit C5.
+  `tools/paper/parse_hybrid_trace.py` (0 agreement stops; `../08_evidence_map.md` §C); current
+  engine: "engines agree, stopping early" lines in `results/paper_v2/RQ1a_pilot/engines.log.gz`
+  (3) and `results/paper_v2/sprt/*/engines.log.gz`; message at
+  `365f36a:src/hybrid/hybrid_search.cpp` 4077–4081. Audit C5.
 
 ### E9 — Hybrid–Lc0 agreement inference; Bratko–Kopec as a ranking · Misleading
 
@@ -160,7 +168,9 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
   network component has significant influence on move selection."
 - **Corrected**: final move = AB's move in 207/209 hybrid decisions (July 2026, 20+0.2; MCTS
   move chosen 2/209; reasons: engines_agree 131, ab_root_rejects_mcts 49, ab_default 27,
-  tie-break 2). Frozen engine at 30+0.3: MCTS move chosen 0 times (L14; RQ1a pilot). The BK suite
+  tie-break 2). Current engine at 30+0.3: MCTS move chosen in 0 of 1,165 disagreements (RQ1a
+  pilot, build 8777b99) and 0 times in the frozen build's 101-game gate (L14); re-check against
+  the final RQ1a cell before filing. The BK suite
   is at ceiling (2026-06-30 run at 5 s: AB 20, MCTS 24, Hybrid 24, Lc0 18, SF 20) and was used as
   a tuning target (~1,500 BK/puzzle runs under `results/`), so Tables 2–3 cannot rank engines.
 - **Evidence**: `results/tournament_20260701_212250/results.json` (+ `parse_hybrid_trace.py`);
@@ -174,10 +184,15 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
 - **As published**: "MetalFish achieves 1.26× higher average throughput, with the largest
   advantage in middlegame positions (5.5×)"; Table 4 "Complex middlegame 77 14 5.50×",
   "Average 172 136 1.26×"; "our throughput is 1.26× higher at 2 threads".
-- **Corrected**: 4 positions × 10 s; Lc0 at 14 nps is a harness fault. Idle-machine sweep,
-  2026-10-14, same BT4 network: MetalFish MPSGraph FP16 b1 7.40 ms = 135 pos/s, b8 407, b16 446,
-  b64 538 pos/s; Lc0 0.32.1 Metal `benchmark` mb1 165, mb8 294, mb16 606, mb32 725 nps.
-  MetalFish is not faster at any batch size (0.82× at b1, ≈0.74× at the best sizes).
+- **Corrected**: 4 positions × 10 s; Lc0 at 14 nps is a harness fault. Sweep of 2026-10-13
+  (no game running; build 8777b99, whose network code is identical to the frozen engine's), same
+  BT4 network: MetalFish MPSGraph FP16 b1 7.40 ms = 135 pos/s, b2 224, b4 326, b8 407, b16 446,
+  b32 531, b64 538 pos/s; Lc0 0.32.1 Metal `benchmark` (search nodes/s) mb1 165, mb2 163,
+  mb4 189, mb8 294, mb16 606, mb32 725, mb64 530. MetalFish is slower at batch 1, the setting it
+  plays with (0.82×), and at each program's best batch size (538 vs 725, 0.74×); the two tools
+  count different things (network evaluations vs search nodes), so the intermediate sizes, where
+  MetalFish's raw rate exceeds Lc0's search rate, are not compared. The chapter's advantage is
+  not supported.
 - **Evidence**: `results/paper_v2/micro/nn_latency.json` (fields `metalfish[*].median_ms`,
   `median_positions_per_second`; `lc0[*].nps_steady_median`); `../06_environment_and_baselines.md`
   (2026-10-07 sweep, consistent). Audit B4.
@@ -187,9 +202,10 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
 - **Where**: Sect. 3.1 (p. 3); Sect. 3.2 (p. 4).
 - **As published**: "9.8M NPS on M1 Ultra, demonstrating near-linear scaling (7.24× on 8
   threads)"; "achieving ∼382 NPS on M1 Ultra's 64 GPU cores".
-- **Corrected**: no record exists for any M1 Ultra figure or for 7.24×; withdrawn. Frozen engine
-  on M2 Max, depth 16, Hash 1024, median of 5: 1T 1,532,277 nps; 8T 11,810,163 (7.71×); 12T
-  13,518,150. (The abstract's "7.6M nodes per second on 8 threads" is an in-game average and is
+- **Corrected**: no record exists for any M1 Ultra figure or for 7.24×; withdrawn. On M2 Max
+  (2026-10-13, build 8777b99, which differs from the frozen engine only in an 8-line option
+  default in `src/uci/uci.cpp`), depth 16, Hash 1024, median of 5: 1T 1,532,277 nps; 8T
+  11,810,163 (7.71×); 12T 13,518,150. (The abstract's "7.6M nodes per second on 8 threads" is an in-game average and is
   not corrected.)
 - **Evidence**: `results/paper_v2/micro/ab_scaling.json` (`aggregate` medians,
   `speedup_vs_first`). Audit B5, C11.

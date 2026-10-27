@@ -1,5 +1,5 @@
 {
-  "cover": "AUTHOR-INITIATED CORRECTION REQUEST (draft 2026-10-14). Highlighted passages carry a note with the corrected statement; item numbers E1-E14 refer to correction_note.md and error_list.md in the author's repository (docs/paper_v2/correction/). Page numbers are those of this camera-ready copy; the published chapter is pp. 653-664.",
+  "cover": "AUTHOR-INITIATED CORRECTION REQUEST (draft 2026-10-14, revised 2026-10-27). Highlighted passages carry a note with the corrected statement; item numbers E1-E14 refer to correction_note.md and error_list.md in the author's repository (docs/paper_v2/correction/). Page numbers are those of this camera-ready copy; the published chapter is pp. 653-664.",
   "items": [
     {
       "id": "E1",
@@ -185,7 +185,7 @@
     {
       "id": "E8",
       "title": "Early termination: no time saving measured",
-      "note": "Corrected: the agreement stop exists but is gated (clock games only; three consecutive coordinator polls about 1.5 ms apart, not iterations; more than 25% of the budget elapsed; at least 100 MCTS playouts; AB depth at least 10). It fired 0 of 209 times in the retained July 2026 telemetry. No time-saving measurement exists; '10-40%' is withdrawn.",
+      "note": "Corrected: the agreement stop exists but is gated (clock games only; three consecutive coordinator polls about 1.5 ms apart, not iterations; more than 25% of the budget elapsed; at least 100 MCTS playouts; AB depth at least 10). It fired 0 of 209 times in the retained July 2026 telemetry; in the current engine it fires rarely (3 of the 3,278 moves with the transformer active in a 30+0.3 pilot, October 2026). No time-saving measurement exists; '10-40%' is withdrawn.",
       "anchors": [
         {
           "page": 5,
@@ -204,7 +204,7 @@
     {
       "id": "E9",
       "title": "NN influence inference wrong; BK suite at ceiling",
-      "note": "Corrected: in the retained telemetry the hybrid's final move was the alpha-beta move in 207 of 209 decisions (20+0.2, July 2026) and, in the current release at 30+0.3, the MCTS move was selected in none. Agreement with Lc0 reflects Stockfish/Lc0 agreement on these positions. The 24-position suite is at ceiling (a later 5 s run: AB 20, MCTS 24, Hybrid 24, Lc0 18, Stockfish 20) and was used during tuning; Tables 2-3 are not a ranking.",
+      "note": "Corrected: in the retained telemetry the hybrid's final move was the alpha-beta move in 207 of 209 decisions (20+0.2, July 2026); in a 100-game 30+0.3 pilot of the current engine (October 2026) the MCTS move was selected in none of the 1,165 decisions where the two searches disagreed. Agreement with Lc0 reflects Stockfish/Lc0 agreement on these positions. The 24-position suite is at ceiling (a later 5 s run: AB 20, MCTS 24, Hybrid 24, Lc0 18, Stockfish 20) and was used during tuning; Tables 2-3 are not a ranking.",
       "anchors": [
         {
           "page": 7,
@@ -223,7 +223,7 @@
     {
       "id": "E10",
       "title": "Throughput vs Lc0 withdrawn",
-      "note": "Corrected: Table 4 rests on four 10 s positions and Lc0's 14 nps in the 'Complex middlegame' row indicates a harness fault. Idle-machine measurement with the same BT4 network (2026-10-14): MetalFish Metal FP16 135 positions/s at batch 1 (7.4 ms) and 538 at batch 64; Lc0 0.32.1 Metal 165 nps at minibatch 1 and 725 at minibatch 32. MetalFish's inference throughput is not higher than Lc0's at any batch size.",
+      "note": "Corrected: Table 4 rests on four 10 s positions and Lc0's 14 nps in the 'Complex middlegame' row indicates a harness fault. Measured on M2 Max with no game running and the same BT4 network (2026-10-13): MetalFish Metal FP16 135 positions/s at batch 1 (7.4 ms), the setting it plays with, and at best 538 (batch 64); an Lc0 0.32.1 Metal search 165 nodes/s at minibatch 1 and at best 725 (minibatch 32). MetalFish is slower at batch 1 and at each program's best batch size; the tools count different things, so intermediate sizes are not compared. The 1.26x advantage is withdrawn.",
       "anchors": [
         {
           "page": 8,
@@ -242,7 +242,7 @@
     {
       "id": "E11",
       "title": "M1 Ultra figures and 7.24x scaling unsupported",
-      "note": "Corrected: no measurement record exists for 9.8M NPS, 7.24x scaling or ~382 NPS on M1 Ultra; withdrawn. Measured on M2 Max (fixed depth 16, median of five runs, 1 GB hash): 1.53M nps on one thread, 11.81M on eight (7.7x), 13.52M on twelve.",
+      "note": "Corrected: no measurement record exists for 9.8M NPS, 7.24x scaling or ~382 NPS on M1 Ultra; withdrawn. Measured on M2 Max (2026-10-13; fixed depth 16, median of five runs, 1 GB hash): 1.53M nps on one thread, 11.81M on eight (7.7x), 13.52M on twelve.",
       "anchors": [
         {
           "page": 3,

@@ -4,7 +4,8 @@
 IntelliSys 2026*, Lecture Notes in Networks and Systems, vol. 2078, Springer, Cham, pp. 653–664.
 https://doi.org/10.1007/978-3-032-32726-0_39
 
-> Status: **draft for an author-initiated Correction** (prepared 2026-10-14). Fields in double
+> Status: **draft for an author-initiated Correction** (prepared 2026-10-14, revised 2026-10-27
+> after the manuscript's integrity check: items 8–10). Fields in double
 > braces are filled before filing: `{{RQ1A_RESULT}}` (from `results/paper_v2/RQ1a/summary.json` when the cell completes),
 > `{{PREPRINT}}` (arXiv identifier of the follow-up paper), `{{ZENODO_DOI}}`. Nothing else
 > in this note depends on pending work; every other number cites an existing artifact
@@ -110,16 +111,19 @@ concern how its components and its results were characterised.
    "saving 10–40% of allocated time" are unsupported. The stop exists but is gated: clock
    games only; three consecutive coordinator polls (about 1.5 ms apart, not search
    iterations); more than a quarter of the budget elapsed; at least 100 MCTS playouts; and
-   alpha-beta depth of at least 10. In the retained game telemetry it never fired (0 of 209
-   hybrid decisions at 20 s + 0.2 s, July 2026; median 45 MCTS playouts per move). No
-   measurement of a time saving exists; the "10–40%" figure is withdrawn.
+   alpha-beta depth of at least 10. In the game telemetry retained from the chapter's period it
+   never fired (0 of 209 hybrid decisions at 20 s + 0.2 s, July 2026; median 45 MCTS playouts
+   per move); in the current engine it fires rarely (on 3 of the 3,278 moves with the
+   transformer active in a 100-game 30 s + 0.3 s pilot, October 2026). No measurement of a time
+   saving exists; the "10–40%" figure is withdrawn.
 
 9. **Influence of the neural-network component** (Sect. 5.2; Sect. 6.1; Tables 2 and 3).
    "The 95.8% agreement between the hybrid engine and Lc0 suggests the hybrid's
    decision-making is heavily influenced by its neural network component" is an incorrect
    inference. In the retained telemetry the hybrid's final move was the alpha-beta move in
-   207 of 209 hybrid decisions (July 2026, 20 s + 0.2 s), and in the current release's games at
-   30 s + 0.3 s the MCTS move was selected in none of the hybrid decisions. The agreement with
+   207 of 209 hybrid decisions (July 2026, 20 s + 0.2 s), and in a 100-game pilot of the current
+   engine at 30 s + 0.3 s (October 2026) the MCTS move was selected in none of the 1,165 decisions
+   in which the two searches disagreed. The agreement with
    Lc0 on the Bratko–Kopec positions reflects agreement between Stockfish's search and Lc0 on
    those positions. The 24-position suite is also at ceiling for these engines (a later run at
    5 s per position gave AB 20, MCTS 24, Hybrid 24, Lc0 18 and Stockfish 20 of 24) and had been
@@ -131,11 +135,14 @@ concern how its components and its results were characterised.
     and "our throughput is 1.26× higher at 2 threads" are withdrawn. Table 4 rests on four
     positions of 10 s each, and the Lc0 value of 14 nodes per second in the "Complex
     middlegame" row indicates a harness fault rather than engine behaviour. Measured on an
-    otherwise idle Apple M2 Max with the same BT4 network (14 October 2026), MetalFish's Metal
-    inference runs at 135 positions/s at batch size 1 (7.4 ms per evaluation, FP16) and
-    538 positions/s at batch size 64, whereas the Metal backend of Lc0 0.32.1 reaches
-    165 nodes/s at minibatch 1 and 725 nodes/s at minibatch 32. MetalFish's inference
-    throughput is therefore not higher than Lc0's at any batch size tested.
+    Apple M2 Max with no game running and the same BT4 network (13 October 2026, with the
+    engine's network code as later frozen), MetalFish's Metal inference runs at 135 positions/s
+    at batch size 1 (7.4 ms per evaluation, FP16), the setting it plays with, and at best
+    538 positions/s (batch size 64), whereas a search with the Metal backend of Lc0 0.32.1
+    reaches 165 nodes/s at minibatch 1 and at best 725 nodes/s (minibatch 32). MetalFish is
+    therefore slower at batch size 1 and at each program's best batch size; the two tools count
+    different things (network evaluations against search nodes), so no comparison is made at
+    the intermediate sizes. The chapter's throughput advantage is not supported.
 
 11. **M1 Ultra figures and thread scaling** (Sect. 3.1; Sect. 3.2). No measurement record
     exists for "9.8M NPS on M1 Ultra", "near-linear scaling (7.24× on 8 threads)" or
