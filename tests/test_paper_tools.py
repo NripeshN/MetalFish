@@ -98,6 +98,18 @@ class PentaStatsTest(unittest.TestCase):
         self.assertEqual(s["terminations"].get("time_forfeit"), 1)
         self.assertEqual(s["unfinished"], 1)
 
+    def test_time_forfeits_by_arm(self):
+        # the side that lost on time: Black after 1-0, White after 0-1 (protocol amendment 10)
+        text = (
+            pgn_game(1, "A", "B", "1-0", "time forfeit")
+            + pgn_game(1, "B", "A", "1-0", "time forfeit")
+            + pgn_game(2, "A", "B", "0-1", "time forfeit")
+            + pgn_game(2, "B", "A", "1/2-1/2")
+        )
+        s = self._stats(text)
+        self.assertEqual(s["time_forfeits_by"], {"B": 1, "A": 2})
+        self.assertEqual(s["terminations"]["time_forfeit"], 3)
+
 
 class TraceParserTest(unittest.TestCase):
     SPLIT = "info string Hybrid thread split: MCTS=1 AB=6 (search workers=7, +1 coordinator, total=8)"

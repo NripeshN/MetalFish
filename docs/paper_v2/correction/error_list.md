@@ -7,7 +7,8 @@ DOI 10.1007/978-3-032-32726-0_39. Quotations are verbatim from the author's came
 runs pp. 653–664 with Springer's pagination). The item numbers (E1–E14) match
 `correction_note.md` and the annotations in `chapter_annotated.pdf`. Audit IDs refer to
 `../01_published_paper_audit.md`. Commit `ec1dee5` (2026-05-11) is the engine the chapter
-described; `365f36a` is the frozen engine of the follow-up paper (tag `paper-v2-freeze-rc1`).
+described; `365f36a` is the frozen engine source of the follow-up paper (tag `paper-v2-freeze-rc1`; the
+binary was re-linked from the same source as `paper-v2-freeze-rc2`).
 
 Verdicts: **Wrong** (contradicted by code or records), **Unsupported** (no record exists; the
 measurement cannot be reproduced), **Misleading** (true words, wrong inference), **Omission**.

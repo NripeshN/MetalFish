@@ -178,3 +178,18 @@ which has access to the project folder) now restarts it after any reboot. RQ1a's
 trigger: RQ1a stands at 7 forfeits in 874 games (0.8%), six by the alpha-beta arm and one by the
 hybrid. Amendment 10 lowers the watchdog trigger to 300%, the gate's threshold (watchdog restarted
 15:14 GMT with no chunk running).
+
+Health and host-load tables, 2026-10-26 (no cell outcome read): `make_figures.py` also writes
+`tables/health.md` (per cell: complete pairs, unpaired games, time forfeits by arm as amendment 10
+requires, how many forfeits with a host-load sample overlapped a minute above 300%, adjudications,
+other terminations; `penta_stats.py` now records `time_forfeits_by`) and `tables/hostload.md` with
+`tables/hostload_macros.tex` (external CPU over every logged minute and over the minutes that overlap
+a game, overall and per scheduling regime taken from the queue log), which the manuscript's methods
+and threats sections read. At 878 RQ1a games: 437 pairs and 4 unpaired games; time forfeits hybrid 1,
+alpha-beta 6; the 5 forfeits with a load sample all overlapped a minute above 300% (games 366 and 385
+predate the logger; see §A). Host load to 2026-10-26: median 9.02 cores over 8,577 logged minutes,
+81% of them above 3 cores; over the 2,029 minutes that overlap a game, median 2.35 cores (95th
+percentile 7.3) and 38% above 3 cores: 25% (158 of 630) before the gate, 48% (377 of 791) with the
+gate alone, 40% (238 of 601) with the 450% watchdog, 3 of 7 so far with the 300% watchdog. The gate
+alone did not keep in-game load low (it checks only before a chunk starts), which is what amendments
+9 and 10 address; the sensitivity analysis covers the remainder.

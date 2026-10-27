@@ -333,6 +333,190 @@ def write_sensitivity_table(cells, results: pathlib.Path, out: pathlib.Path):
     (tdir / "sensitivity.tex").write_text("\n".join(tex) + "\n")
 
 
+FORFEIT_LIMIT = 0.005  # protocol §6 health limit on time forfeits per cell
+
+
+def write_health_table(cells, results: pathlib.Path, out: pathlib.Path):
+    """Health checks per cell from games.pgn: pairs, unpaired games, time forfeits by arm (protocol
+    amendment 10) and how many of those with a host-load sample overlapped a high-load minute,
+    adjudications and every other termination."""
+    sys.path.insert(0, str(REPO / "tools" / "paper"))
+    import penta_stats  # noqa: E402
+
+    tdir = out / "tables"
+    tdir.mkdir(parents=True, exist_ok=True)
+    esc = lambda t: str(t).replace("_", "\\_")  # noqa: E731
+    samples = parse_hostload(results / "hostload.log")
+    md = [
+        f"| Cell | Games | Pairs | Unpaired games | Time forfeits by arm | Forfeit rate | Forfeits in a minute above {LOAD_THRESHOLD_PCT}% (of those with a load sample) | Adjudicated | Other terminations |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    tex = [
+        "\\begin{tabular}{lrrrrrrr}",
+        "\\toprule",
+        "Cell & Games & Pairs & Unpaired & Forfeits (first / second arm) & Forfeit rate & In high load & Adjudicated \\\\",
+        "\\midrule",
+    ]
+    for c in cells:
+        pgn = results / c["dir"] / "games.pgn"
+        if not pgn.exists() or not c["arm_a"]:
+            continue
+        games = penta_stats.read_games(str(pgn))
+        st = penta_stats.compute(games, c["arm_a"])
+        ff = {
+            i
+            for i, g in enumerate(games)
+            if penta_stats.classify_termination(g) == "time_forfeit"
+        }
+        # threshold -1 flags every game with at least one sample in its window
+        sampled = ff & high_load_games(games, samples, threshold=-1)
+        loaded = ff & high_load_games(games, samples)
+        under = f"{len(loaded)} of {len(sampled)}" if sampled else "—"
+        by = st.get("time_forfeits_by") or {}
+        fa, fb = by.get(c["arm_a"], 0), by.get(c["arm_b"], 0)
+        names = arms_text(c).split(",")[0].split(" vs ")
+        na, nb = names if len(names) == 2 else (c["arm_a"], c["arm_b"])
+        term = dict(st.get("terminations") or {})
+        forfeits = term.pop("time_forfeit", 0)
+        adjudicated = term.pop("adjudication", 0)
+        term.pop("normal", None)
+        other = ", ".join(f"{k} {v}" for k, v in sorted(term.items())) or "none"
+        rate = forfeits / st["games"] if st.get("games") else 0.0
+        flag = " (above limit)" if rate > FORFEIT_LIMIT else ""
+        md.append(
+            f"| {c['cell']} | {st.get('games')} | {st.get('pairs')} | {st.get('unpaired_games')} | "
+            f"{na} {fa}, {nb} {fb} | {rate*100:.1f}%{flag} | {under} | {adjudicated} | {other} |"
+        )
+        tex.append(
+            f"{esc(c['cell'])} & {st.get('games')} & {st.get('pairs')} & {st.get('unpaired_games')} & "
+            f"{fa} / {fb} & {rate*100:.1f}\\%{flag} & {under} & {adjudicated} \\\\"
+        )
+    tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "health.md").write_text("\n".join(md) + "\n")
+    (tdir / "health.tex").write_text("\n".join(tex) + "\n")
+
+
+def scheduling_regimes(results: pathlib.Path):
+    """[(label, start)] from the queue log: the first start of the load gate (protocol amendment 8)
+    and of the in-chunk watchdog at 450% (amendment 9) and at 300% (amendment 10)."""
+    import datetime as dt
+    import re
+
+    log = results / "queue_paper_log.txt"
+    if not log.exists():
+        return []
+    lines = log.read_text(errors="replace").splitlines()
+    out = []
+    for label, pat in (
+        ("gate", r"gated MUST queue started"),
+        ("gate + watchdog at 450%", r"\[watchdog\] started \(threshold 450%"),
+        ("gate + watchdog at 300%", r"\[watchdog\] started \(threshold 300%"),
+    ):
+        for line in lines:
+            if re.search(pat, line):
+                try:
+                    stamp = dt.datetime.strptime(line.split()[0], "%Y-%m-%dT%H:%M:%S%z")
+                except ValueError:
+                    continue
+                out.append((label, stamp))
+                break
+    return out
+
+
+def write_hostload_summary(cells, results: pathlib.Path, out: pathlib.Path):
+    """External CPU (protocol amendment 8) over the whole logging period and over the minutes that
+    overlap a game of any cell (same overlap rule as the sensitivity analysis), the latter also per
+    scheduling regime, as a table and as LaTeX macros for the text."""
+    import datetime as dt
+    import statistics
+    from bisect import bisect_left, bisect_right
+
+    sys.path.insert(0, str(REPO / "tools" / "paper"))
+    import penta_stats  # noqa: E402
+
+    samples = parse_hostload(results / "hostload.log")
+    if not samples:
+        return
+    times = [t for t, _ in samples]
+    in_game = set()
+    for c in cells:
+        pgn = results / c["dir"] / "games.pgn"
+        if not pgn.exists():
+            continue
+        for g in penta_stats.read_games(str(pgn)):
+            iv = game_interval(g)
+            if not iv:
+                continue
+            lo = bisect_left(times, iv[0])
+            hi = bisect_right(times, iv[1] + dt.timedelta(seconds=60))
+            in_game.update(range(lo, hi))
+
+    def summary(vals):
+        # 95th percentile rather than the maximum: ps's decaying %CPU can sum past the core count
+        return {
+            "n": len(vals),
+            "median": statistics.median(vals) / 100 if vals else None,
+            "p95": (
+                statistics.quantiles(vals, n=20, method="inclusive")[18] / 100
+                if len(vals) > 1
+                else None
+            ),
+            "over": (
+                sum(v > LOAD_THRESHOLD_PCT for v in vals) / len(vals) if vals else None
+            ),
+        }
+
+    rows = {
+        "log": summary([v for _, v in samples]),
+        "game": summary([samples[i][1] for i in sorted(in_game)]),
+    }
+    first, last = samples[0][0].date().isoformat(), samples[-1][0].date().isoformat()
+    tdir = out / "tables"
+    tdir.mkdir(parents=True, exist_ok=True)
+    md = [
+        f"| Minutes | Samples | Median (cores) | 95th percentile (cores) | Above {LOAD_THRESHOLD_PCT // 100} cores |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    labelled = [
+        (f"all logged ({first} to {last})", rows["log"]),
+        ("overlapping a game", rows["game"]),
+    ]
+    regimes = scheduling_regimes(results)
+    bounds = [("before the gate", None)] + regimes
+    for i, (name, start) in enumerate(bounds):
+        end = bounds[i + 1][1] if i + 1 < len(bounds) else None
+        vals = [
+            samples[j][1]
+            for j in sorted(in_game)
+            if (start is None or samples[j][0] >= start)
+            and (end is None or samples[j][0] < end)
+        ]
+        labelled.append((f"overlapping a game: {name}", summary(vals)))
+    for name, r in labelled:
+        if r["n"]:
+            p95 = f"{r['p95']:.1f}" if r["p95"] is not None else "—"
+            md.append(
+                f"| {name} | {r['n']} | {r['median']:.2f} | {p95} | {r['over']*100:.0f}% ({round(r['over'] * r['n'])}) |"
+            )
+    (tdir / "hostload.md").write_text("\n".join(md) + "\n")
+    macros = [
+        "% generated by tools/paper/make_figures.py from results/paper_v2/hostload.log",
+        f"\\newcommand{{\\HostLogFirst}}{{{first}}}",
+        f"\\newcommand{{\\HostLogLast}}{{{last}}}",
+    ]
+    for k, name in (("log", "Log"), ("game", "Game")):
+        r = rows[k]
+        if not r["n"]:
+            continue
+        macros += [
+            f"\\newcommand{{\\Host{name}Samples}}{{{r['n']:,}}}".replace(",", "{,}"),
+            f"\\newcommand{{\\Host{name}MedianCores}}{{{r['median']:.2f}}}",
+            f"\\newcommand{{\\Host{name}PninetyfiveCores}}{{{r['p95']:.1f}}}",
+            f"\\newcommand{{\\Host{name}OverPct}}{{{r['over']*100:.0f}}}",
+        ]
+    (tdir / "hostload_macros.tex").write_text("\n".join(macros) + "\n")
+
+
 def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
     """T6 compute per cell, the telemetry table (M3-M5, RQ6a) and per-block consistency."""
     tdir = out / "tables"
@@ -729,6 +913,8 @@ def main(argv=None):
     write_extra_tables(cells, results, out)
     write_therm_table(cells, results, out)
     write_sensitivity_table(cells, results, out)
+    write_health_table(cells, results, out)
+    write_hostload_summary(cells, results, out)
     plot_forest(cells, out)
     plot_reasons(cells, out)
     plot_telemetry(cells, results, out)
