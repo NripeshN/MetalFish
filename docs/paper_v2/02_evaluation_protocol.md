@@ -455,3 +455,48 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     re-scheduled or analysed differently because of them, and the final analysis is the one
     pre-registered here. Amendments 8–10, which change scheduling only, were written after the
     first of these readings (block 0 of RQ1a and RQ2a). The paper reports the readings as such.
+12. **2026-10-27 — pre-reading clarifications after a pre-submission review (written after the
+    interim readings of amendment 11).** A five-seat review of the manuscript's design and methods,
+    with every result withheld, asked for the following to be fixed before any cell is read. None
+    changes a cell's games, size, seed, order, binary or primary statistic.
+    (a) **Reading of RQ1a.** The decision rule stays the sign of the 95% interval. If the interval
+    spans zero, RQ1a is reported as inconclusive at the planned N, together with the range of
+    effects the interval excludes; no equivalence margin is introduced, because a margin chosen
+    after interim readings could not be justified independently of them. What each outcome is
+    taken to mean is fixed now: an interval above zero means the concurrent GPU search adds
+    strength at equal `Threads` on this machine, and the telemetry and RQ6 say through which
+    channel; an interval spanning zero means no effect was detected at this N, so the GPU path
+    does not pay for itself at this budget on this machine; an interval below zero means the hybrid
+    costs strength, and RQ2, the telemetry and the host-load analyses bound how much of that is
+    thread or contention cost. RQ5c is read the same way as a parity interval, with no equivalence
+    claim.
+    (b) **Host load and forfeits.** Besides the exclusion analysis of amendment 8, every cell is
+    reported (i) with a pair-level regression of the pair score on the fraction of the pair's
+    logged minutes above 300% of outside load, giving the slope and the estimate at zero load;
+    (ii) with the load-log coverage per block (block 0 of RQ1a and RQ2a predates the logger);
+    (iii) with the pairs that contain a time forfeit removed, and with forfeits re-scored as draws.
+    If the primary estimate and any of these differ by more than the primary standard error, both
+    are reported and the result is called load-sensitive.
+    (c) **GPU and memory covariates.** From 2026-10-27 21:20 UTC the host-load logger also records,
+    every minute, the GPU's device utilisation and in-use memory (`ioreg`, engines included), the
+    kernel's memory-status level and the cumulative page-outs and swap-outs. They are reported per
+    cell as covariates. The gate is not extended to them, because during a chunk the engines' own
+    GPU use cannot be separated from outside use. The hybrid's in-game MCTS evaluation rate from
+    the traces is reported per block as a measure of GPU health.
+    (d) **Oracle study (RQ6b).** Both judges stay (Stockfish 19, and Lc0 with the BT4 network), and
+    their lineage overlaps are stated: the Stockfish judge runs the alpha-beta candidate's search
+    with more time, and the Lc0 judge uses the MCTS candidate's network, so each judge is expected
+    to favour one candidate. Results are reported per judge, with the judges' agreement, and the
+    arbiter bound is also computed on the positions where both judges agree, disagreements
+    counted as undecided. The Lc0 judge scores each candidate with equal effort, by evaluating the
+    position after the candidate move with the same node budget, instead of one `searchmoves`
+    search whose visits favour one move. Rates over all disagreements are reweighted by the
+    recorded stratum population counts. Expected score uses the logistic conversion with 250 cp
+    per unit of log-odds, and the projected Elo of the bound is the logistic Elo of the
+    expected-score difference and is labelled as such. Positions are selected by stratum only,
+    never by a judge's verdict.
+    (e) **RQ6d** switches off the hints and the verification sub-search together, so it measures
+    that combined channel, against AB(8) at 30+0.3 over 500 pairs; it is described as such, and its
+    comparison with RQ1a is an across-match contrast reported with propagated uncertainty.
+    (f) **"Interpreted"** in §11 means read for any purpose other than the health monitoring of
+    amendment 11; each cell is interpreted once, after its last block.

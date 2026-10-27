@@ -211,3 +211,11 @@ thermal log: 1,685 samples, no warning. Over the 232 in-game minutes since the 3
 external load exceeded 3 cores in 17% (40); the crash-looping `openclaw` gateway, a steady ~1 core of
 outside load, was stopped on 2026-10-27 at 16:23 UTC when the author freed the machine for the
 measurements.
+
+Host-load logger extended, 2026-10-27 21:20 UTC (amendment 12c): every line of `hostload.log` now also
+carries `gpu_util` (IOAccelerator "Device Utilization %", an instantaneous sample that includes the
+engines' own GPU use), `gpu_mem_mb` (GPU in-use system memory), `mem_level` (`kern.memorystatus_level`,
+% of memory available) and the cumulative `pageouts` and `swapouts` since boot. First extended line:
+21:20:37, gpu_util 2%, gpu_mem_mb 315, mem_level 80%, pageouts 78,012, swapouts 12,986,612. The
+logger was restarted under the same name, so the gate and the watchdog are unchanged; one minute
+went unsampled during the swap.
