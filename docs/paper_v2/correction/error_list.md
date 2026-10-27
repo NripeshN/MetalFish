@@ -1,7 +1,7 @@
 # Error list for the Springer Correction — each chapter statement with its corrected statement and evidence
 
 Chapter: Niketan, N., "Hybrid Chess Search: Combining Alpha-Beta and Monte Carlo Tree Search on
-Unified Memory Architectures", IntelliSys 2026 Vol. 2, LNNS, pp. 653–664,
+Unified Memory Architectures", IntelliSys 2026, LNNS vol. 2078, pp. 653–664,
 DOI 10.1007/978-3-032-32726-0_39. Quotations are verbatim from the author's camera-ready PDF
 (`chapter_camera_ready.pdf`, 13 pp.; "p." below is the camera-ready page; the published chapter
 runs pp. 653–664 with Springer's pagination). The item numbers (E1–E14) match

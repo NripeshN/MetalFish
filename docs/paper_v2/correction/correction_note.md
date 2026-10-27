@@ -1,13 +1,11 @@
 # Correction to: Hybrid Chess Search: Combining Alpha-Beta and Monte Carlo Tree Search on Unified Memory Architectures
 
 **Correction to:** Chapter 39 in: K. Arai, P. Lorenz (eds.), *Intelligent Systems and Applications.
-Proceedings of the 2026 Intelligent Systems Conference (IntelliSys), Volume 2*, Lecture Notes in
-Networks and Systems {{LNNS_VOLUME}}, Springer Nature Switzerland, pp. 653–664.
+IntelliSys 2026*, Lecture Notes in Networks and Systems, vol. 2078, Springer, Cham, pp. 653–664.
 https://doi.org/10.1007/978-3-032-32726-0_39
 
 > Status: **draft for an author-initiated Correction** (prepared 2026-10-14). Fields in double
-> braces are filled before filing: `{{LNNS_VOLUME}}` (from the book's front matter),
-> `{{RQ1A_RESULT}}` (from `results/paper_v2/RQ1a/summary.json` when the cell completes),
+> braces are filled before filing: `{{RQ1A_RESULT}}` (from `results/paper_v2/RQ1a/summary.json` when the cell completes),
 > `{{PREPRINT}}` (arXiv identifier of the follow-up paper), `{{ZENODO_DOI}}`. Nothing else
 > in this note depends on pending work; every other number cites an existing artifact
 > (see `error_list.md`).
