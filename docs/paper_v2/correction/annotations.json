@@ -185,7 +185,7 @@
     {
       "id": "E8",
       "title": "Early termination: no time saving measured",
-      "note": "Corrected: the agreement stop exists but is gated (clock games only; three consecutive coordinator polls about 1.5 ms apart, not iterations; more than 25% of the budget elapsed; at least 100 MCTS playouts; AB depth at least 10). It fired 0 of 209 times in the retained July 2026 telemetry; in the current engine it fires rarely (3 of the 3,278 moves with the transformer active in a 30+0.3 pilot, October 2026). No time-saving measurement exists; '10-40%' is withdrawn.",
+      "note": "Corrected: the agreement stop exists but is gated (clock games only; three consecutive coordinator polls about 1.5 ms apart, not iterations; more than 25% of the budget elapsed; at least 100 MCTS playouts; AB depth at least 10). It fired 0 of 209 times in the retained July 2026 telemetry (a build later than the chapter's); in the current engine it fires rarely (3 of the 3,278 moves with the transformer active in a 30+0.3 pilot, October 2026). No time-saving measurement exists; '10-40%' is withdrawn.",
       "anchors": [
         {
           "page": 5,
@@ -223,7 +223,7 @@
     {
       "id": "E10",
       "title": "Throughput vs Lc0 withdrawn",
-      "note": "Corrected: Table 4 rests on four 10 s positions and Lc0's 14 nps in the 'Complex middlegame' row indicates a harness fault. Measured on M2 Max with no game running and the same BT4 network (2026-10-13): MetalFish Metal FP16 135 positions/s at batch 1 (7.4 ms), the setting it plays with, and at best 538 (batch 64); an Lc0 0.32.1 Metal search 165 nodes/s at minibatch 1 and at best 725 (minibatch 32). MetalFish is slower at batch 1 and at each program's best batch size; the tools count different things, so intermediate sizes are not compared. The 1.26x advantage is withdrawn.",
+      "note": "Corrected: Table 4 rests on four 10 s positions and Lc0's 14 nps in the 'Complex middlegame' row indicates a harness fault. Measured on M2 Max with no game running and the same BT4 network (2026-10-13): MetalFish Metal FP16 135 positions/s at batch 1 (7.4 ms), the setting it plays with, and at best 538 (batch 64); an Lc0 0.32.1 Metal search 165 nodes/s at minibatch 1 and at best 725 (minibatch 32). MetalFish's evaluation rate is below Lc0's search rate at batch 1 and at each program's best batch size (above at batch 2-8, below at 16 and 32, about equal at 64); the tools count different things, so the comparison is indicative only. The 1.26x advantage is withdrawn.",
       "anchors": [
         {
           "page": 8,
@@ -276,7 +276,7 @@
     {
       "id": "E13",
       "title": "Time manager not used by the hybrid",
-      "note": "Corrected: the Lc0-style smooth time manager (mu 45.2, sigma 5.93, 0.73 cap, 12% piggybank) is used by the stand-alone MCTS mode only; inside the hybrid the MCTS component receives a fixed per-move budget from the coordinator.",
+      "note": "Corrected: the Lc0-style smooth time manager is used by the stand-alone MCTS mode only. Within the hybrid at the chapter's commit, Stockfish's time manager set the move time and the MCTS component ran until the alpha-beta search finished (hard cap at 76% of the remaining time).",
       "anchors": [
         {
           "page": 4,

@@ -52,7 +52,7 @@ Stockfish and the 100% agreement validates nothing. Nodes are 128 bytes, not 64;
 speedup, the 1.26×/5.5× throughput advantage over Lc0, the M1 Ultra figures and the 7.24×
 scaling have no records and are withdrawn; the NN-cache, transposition-table and NNUE figures
 are corrected; the position classifier does not weight the decision and Fig. 1's routing is
-wrong; the agreement stop never fired in the chapter-era telemetry and the "10–40%" saving is
+wrong; the agreement stop never fired in the July 2026 telemetry and the "10–40%" saving is
 unsupported; the hybrid's final
 move was the alpha-beta move in 207/209 logged decisions; two related-work characterisations
 are corrected; the hybrid does not use the Lc0-style time manager; and the omitted time-safety

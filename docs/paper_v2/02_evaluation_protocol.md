@@ -1,8 +1,8 @@
 # 02 — Pre-registered evaluation protocol
 
-Status: DRAFT for author approval. Once approved, this file is frozen by tagging the
-commit (`paper-v2-protocol-freeze`); any later change is recorded in §11 (amendments)
-with a date and reason, never silently.
+Status: frozen on 2026-10-14 (tag `paper-v2-protocol-freeze`). Changes to the design after
+the freeze are recorded in §11 (amendments) with a date and reason, never silently; §10 also
+records the outcome of the pilot and the freeze, and this header was updated on 2026-10-27.
 
 ## 0. Principles
 
