@@ -28,6 +28,7 @@
 \newif\ifanon
 \anonfalse
 \ifdefined\ANON\anontrue\fi
+\newcommand{\depositcite}{\ifanon\cite{anonarchive}\else\cite{zenodo}\fi}
 \newcommand{\pending}[1]{\iffinal\PackageError{paper}{Pending content: #1}{Fill it from the artifact before the final build.}\else\textcolor{red}{[PENDING: #1]}\fi}
 \newcommand{\elo}[2]{$#1 \pm #2$}
 \newcommand{\MF}{MetalFish}
@@ -65,7 +66,7 @@
 
 Two search paradigms dominate computer chess. Alpha-beta search with efficiently updatable neural-network evaluation (NNUE), exemplified by Stockfish~\cite{stockfish,nasu2018}, searches tens of millions of nodes per second on a CPU; Monte Carlo tree search (MCTS) guided by a deep policy--value network, exemplified by AlphaZero~\cite{silver2018} and Leela Chess Zero (Lc0)~\cite{lc0,monroe2024}, evaluates a few hundred to a few thousand positions per second on a GPU and compensates with the quality of each evaluation. Consumer systems-on-chip with unified memory, such as Apple's M-series~\cite{applem2}, place a capable GPU next to the CPU with no transfer bottleneck, which makes it cheap to run both searches on the same position at the same time and to arbitrate between their answers. Whether that arbitration adds playing strength to a Stockfish-class CPU search is an empirical question, and it has not been answered with a controlled measurement.
 
-\ifanon An earlier conference chapter~\cite{niketan2026chapter} described such a system, \MF{}, and reported ratings for its three modes. Re-examination of that chapter by its author\else Our earlier conference chapter~\cite{niketan2026chapter} described such a system, \MF{}, and reported ratings for its three modes. Re-examination of that chapter\fi against the engine's source code and the retained records showed that its quantitative claims do not hold: the ratings were computed by averaging assumed opponent ratings and five-game match scores, the alpha-beta component is Stockfish's own search, and several implementation statements were wrong (Section~\ref{sec:chapter} lists each one; a Correction has been prepared). This paper is the controlled study the chapter lacked. It keeps the system, freezes it, and asks one pre-registered question with everything else held equal:
+\ifanon An earlier conference chapter~\cite{niketan2026chapter} described such a system, \MF{}, and reported ratings for its three modes. Re-examination of that chapter\else Our earlier conference chapter~\cite{niketan2026chapter} described such a system, \MF{}, and reported ratings for its three modes. Re-examination of that chapter\fi against the engine's source code and the retained records showed that its quantitative claims do not hold: the ratings were computed by averaging assumed opponent ratings and five-game match scores, the alpha-beta component is Stockfish's own search, and several implementation statements were wrong (Section~\ref{sec:chapter} lists each one; a Correction has been prepared). This paper is the controlled study the chapter lacked. It keeps the system, freezes it, and asks one pre-registered question with everything else held equal:
 
 \begin{quote}
 \emph{Does running an Lc0-class transformer MCTS on the GPU concurrently with a Stockfish-class alpha-beta search on the CPU, with a final arbiter, change playing strength relative to the alpha-beta search alone, at equal wall-clock and equal CPU-thread budget on one machine?}
@@ -107,7 +108,7 @@ Elo differences between near-equal engines are small relative to game-to-game no
 \section{The system as built}
 \label{sec:system}
 
-\MF{} is a single UCI binary with three modes selected by options: plain alpha-beta (\texttt{AB}), stand-alone transformer MCTS, and the hybrid that runs both concurrently. This section describes the engine as frozen for this study (repository tag \texttt{paper-v2-freeze-rc2}; the engine source is that of commit \texttt{365f36a}, re-linked once against a system library as described in Section~\ref{sec:amend}); Section~\ref{sec:chapter} lists where the earlier chapter's description differed. Figure~\ref{fig:arch} shows the threads and data flows.
+\MF{} is a single UCI binary with three modes selected by options: plain alpha-beta (\texttt{AB}), stand-alone transformer MCTS, and the hybrid that runs both concurrently. This section describes the engine as frozen for this study (\ifanon source and binary in the archive~\depositcite{}; the binary was re-linked once against a system library as described in Section~\ref{sec:amend}\else repository tag \texttt{paper-v2-freeze-rc2}; the engine source is that of commit \texttt{365f36a}, re-linked once against a system library as described in Section~\ref{sec:amend}\fi); Section~\ref{sec:chapter} lists where the earlier chapter's description differed. Figure~\ref{fig:arch} shows the threads and data flows.
 
 \begin{figure}[t]
 \centering
@@ -132,7 +133,7 @@ On every move the coordinator starts the alpha-beta search and the MCTS search o
 
 \subsection{Engine preparation and freeze}
 \label{sec:prep}
-The engine was not tuned for strength during the study, but four defects found while instrumenting it were fixed before the freeze, each gated by a same-binary match (exploratory, reported in full in the programme record~\cite{zenodo}): the alpha-beta core was moved from a January 2026 Stockfish development snapshot to Stockfish 19 (+\elo{62.0}{28.2} over the old base at 10+0.1, 136 games); %src: 08 §A sf19port_vs_preport_ab_10p01_v2
+The engine was not tuned for strength during the study, but four defects found while instrumenting it were fixed before the freeze, each gated by a same-binary match (exploratory, reported in full in the programme record~\depositcite{}): the alpha-beta core was moved from a January 2026 Stockfish development snapshot to Stockfish 19 (+\elo{62.0}{28.2} over the old base at 10+0.1, 136 games); %src: 08 §A sf19port_vs_preport_ab_10p01_v2
 the Stockfish thread pool was kept alive across hybrid moves and Stockfish's time manager was given the clock, with the tie-break overrides turned off (+\elo{74.1}{30.5} over the previous hybrid at 20+0.2, 100 games); %src: 08 §A L7b
 alpha-beta was allowed to keep all eight threads with the MCTS worker oversubscribed (+\elo{15.1}{17.0} over the 6+1 split, 300 games); %src: 08 §A L9
 and the hybrid's network-output cache was capped at 100{,}000 entries after a 100-game pilot of the study's main cell read \elo{-41.9}{25.1} for a hybrid whose 6 GB footprint made the 32 GB host page (the lean configuration read +\elo{13.9}{30.3} over 101 games under the same conditions; a null control in which the hybrid never engaged the transformer read \elo{-20.9}{28.5}, and the same control without preloading the network read \elo{-10.4}{16.8} over 301 games at 10+0.1). %src: 08 §A RQ1a_pilot, L14, L12, L13
@@ -144,7 +145,7 @@ The frozen binary's SHA-256 is recorded in every cell manifest.
 \label{sec:method}
 
 \subsection{Principles and fair-resource policy}
-The alpha-beta component is Stockfish, so its strength is not a contribution and is never compared across machines. Every primary comparison is \emph{same binary, same machine, same wall-clock, same total CPU-thread budget}, with the GPU search switched on or off. The protocol~\cite{zenodo} fixed the hypotheses, cells, sample sizes, statistics and decision rules before data collection and was amended only by numbered entries written before the affected cell was interpreted (ten amendments; Section~\ref{sec:amend}). All games, engine logs, traces, manifests with hashes and seeds, and thermal logs are retained, and every figure and table is generated from them by a script.
+The alpha-beta component is Stockfish, so its strength is not a contribution and is never compared across machines. Every primary comparison is \emph{same binary, same machine, same wall-clock, same total CPU-thread budget}, with the GPU search switched on or off. The protocol~\depositcite{} fixed the hypotheses, cells, sample sizes, statistics and decision rules before data collection and was amended only by numbered entries written before the affected cell was interpreted (ten amendments; Section~\ref{sec:amend}). All games, engine logs, traces, manifests with hashes and seeds, and thermal logs are retained, and every figure and table is generated from them by a script.
 
 \subsection{Environment}
 All measurements were taken on one Apple M2 Max (8 performance and 4 efficiency CPU cores, 38-core GPU, 32 GB unified memory) running macOS 27.2 and prevented from sleeping. The protocol assumed an otherwise idle machine; the host was in fact shared with other work, so the CPU used by other processes was logged every minute and games were scheduled around it (amendments 8--10 in Section~\ref{sec:amend}). Games were managed by fastchess v1.8.2-alpha at concurrency 1. Reference engines were Stockfish 19 (tag \texttt{sf\_19}, PGO build) and Lc0 0.32.1 with the Metal backend and the same BT4 weights. Syzygy 3--4--5 tablebases were available only to the oracle judges of Section~\ref{sec:oracle}, never to the engines under test.
@@ -303,7 +304,7 @@ Table~\ref{tab:compute} lists the machine time per cell from the cell manifests.
 % =====================================================================================
 \section{Relation to the IntelliSys 2026 chapter}
 \label{sec:chapter}
-The chapter~\cite{niketan2026chapter}\ifanon{} (by the author of this paper)\fi{} described the same system and reported ratings of about 4048, 3724 and 3289 Elo for its alpha-beta, hybrid and MCTS modes, a 74$\times$ MCTS speed-up, a 1.26$\times$ throughput advantage over Lc0, and a position classifier that weighted the final decision. Table~\ref{tab:corrections} lists the statements that do not hold and what replaces them; a Correction has been prepared for the publisher~\cite{correction}.
+The chapter~\cite{niketan2026chapter} described the same system and reported ratings of about 4048, 3724 and 3289 Elo for its alpha-beta, hybrid and MCTS modes, a 74$\times$ MCTS speed-up, a 1.26$\times$ throughput advantage over Lc0, and a position classifier that weighted the final decision. Table~\ref{tab:corrections} lists the statements that do not hold and what replaces them; a Correction has been prepared for the publisher~\cite{correction}.
 
 \begin{table}[t]
 \centering
@@ -337,7 +338,7 @@ The root causes were a confounded contribution (the alpha-beta component's stren
 \pending{conclusion after the results: what was learned, conditions under which a concurrent GPU search is worth it, CUDA and other GPUs, learned arbiters}
 
 \section*{Data and code availability}
-The engine at the frozen commit, every game record, engine log, manifest, thermal log, microbenchmark output and the scripts that produce every figure and table of this paper are deposited at \ifanon an anonymised archive link supplied to the editors\else\pending{Zenodo DOI} and in the repository tag \texttt{paper-v2-freeze-rc2}\fi. The pre-registered protocol with its amendments, the audit of the earlier chapter and the prepared Correction are part of the deposit.
+The engine at the frozen commit, every game record, engine log, manifest, thermal log, microbenchmark output and the scripts that produce every figure and table of this paper are deposited at \ifanon an anonymised archive whose link is supplied to the editors~\depositcite{}\else\pending{Zenodo DOI} and in the repository tag \texttt{paper-v2-freeze-rc2}\fi. The pre-registered protocol with its amendments\ifanon{} and the audit of the earlier chapter are\else, the audit of the earlier chapter and the prepared Correction are\fi{} part of the deposit.
 
 \bibliographystyle{unsrtnat}
 \bibliography{refs}
