@@ -323,6 +323,50 @@ class RunnerBookkeepingTest(unittest.TestCase):
         self.assertEqual(self.mf.pgn_game_durations(pathlib.Path(path)), (3690.0, 2))
 
 
+FAKE_UCI = """
+import sys
+buf = bytearray(64 << 20)  # 64 MB that the footprint must see
+for line in sys.stdin:
+    cmd = line.split()
+    if not cmd:
+        continue
+    if cmd[0] == "uci":
+        print("id name fake", flush=True)
+        print("uciok", flush=True)
+    elif cmd[0] == "isready":
+        buf[:: 4096] = b"x" * len(buf[:: 4096])
+        print("readyok", flush=True)
+    elif cmd[0] == "go":
+        print("info depth 1 score cp 10 pv e2e4", flush=True)
+        print("bestmove e2e4", flush=True)
+    elif cmd[0] == "quit":
+        break
+"""
+
+
+@unittest.skipUnless(sys.platform == "darwin", "vmmap is macOS-only")
+class FootprintTest(unittest.TestCase):
+    """M4: the footprint tool drives a UCI engine and reads vmmap and ps."""
+
+    def test_measures_a_fake_engine(self):
+        import footprint
+
+        with tempfile.TemporaryDirectory() as tmp:
+            script = pathlib.Path(tmp) / "fake_uci.py"
+            script.write_text(FAKE_UCI)
+            r = footprint.measure([sys.executable, str(script)], {"Hash": "16"}, 200)
+        self.assertGreater(r["after_isready"]["bytes"], 64 << 20)
+        self.assertGreater(r["max_rss_bytes"], 64 << 20)
+        self.assertGreaterEqual(r["rss_samples"], 1)
+
+    def test_parses_vmmap_sizes(self):
+        import footprint
+
+        self.assertEqual(footprint.parse_size("4.4G"), int(4.4 * (1 << 30)))
+        self.assertEqual(footprint.parse_size("512K"), 512 << 10)
+        self.assertIsNone(footprint.parse_size("n/a"))
+
+
 class MicrobenchFailureTest(unittest.TestCase):
     """A sweep whose engine produced no measurement must not exit 0."""
 

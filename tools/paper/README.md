@@ -12,6 +12,7 @@ experiment manifest: `docs/paper_v2/experiments.json`.
 | `oracle_probe.py` | Judge AB vs MCTS moves on disagreement positions with reference engines (Stockfish 19, optionally Lc0); loss per candidate, oracle-arbiter upper bound, bootstrap CIs. |
 | `suite_runner.py` | EPD suites (bm/am) and Lichess puzzle samples for any UCI engine; Wilson intervals; per-rating-band puzzle accuracy. |
 | `microbench.py` | `nn`: BT4 latency/throughput vs batch size (MetalFish FP16/FP32 and Lc0); `ab`: `bench` NPS vs thread count. |
+| `footprint.py` | M4: physical footprint (`vmmap -summary`) and peak resident set of AB(8), Hybrid(8) and MCTS(1), configured as the cells configure them, after `isready` and after a fixed search. |
 | `annotate_chapter.py` | Highlights every corrected passage of the published chapter's camera-ready PDF with the corrected statement (from `docs/paper_v2/correction/annotations.json`); exits non-zero if an anchor is missing. Needs PyMuPDF. |
 | `make_bib.py` | Builds `docs/paper_v2/paper/refs.bib` from the verified reference map (Crossref for DOIs, arXiv API for arXiv IDs, `refs_manual.bib` for web/software/notes); exits non-zero if any citable row has no entry; `--offline` uses the cached fetches. |
 | `make_deposit.py` | Assembles the Zenodo deposit directory (cells, gates, microbenchmarks, oracle study, plan package, tools; logs gzipped; CHECKSUMS.sha256; zenodo.json metadata). Nothing is uploaded; `--dry-run` lists the plan. |
