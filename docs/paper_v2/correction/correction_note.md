@@ -111,8 +111,8 @@ concern how its components and its results were characterised.
    "saving 10–40% of allocated time" are unsupported. The stop exists but is gated: clock
    games only; three consecutive coordinator polls (about 1.5 ms apart, not search
    iterations); more than a quarter of the budget elapsed; at least 100 MCTS playouts; and
-   alpha-beta depth of at least 10. In the game telemetry retained from the chapter's period it
-   never fired (0 of 209 hybrid decisions at 20 s + 0.2 s, July 2026; median 45 MCTS playouts
+   alpha-beta depth of at least 10. In the retained July 2026 telemetry (a build later than the
+   chapter's) it never fired (0 of 209 hybrid decisions at 20 s + 0.2 s; median 45 MCTS playouts
    per move); in the current engine it fires rarely (on 3 of the 3,278 moves with the
    transformer active in a 100-game 30 s + 0.3 s pilot, October 2026). No measurement of a time
    saving exists; the "10–40%" figure is withdrawn.
@@ -139,10 +139,11 @@ concern how its components and its results were characterised.
     engine's network code as later frozen), MetalFish's Metal inference runs at 135 positions/s
     at batch size 1 (7.4 ms per evaluation, FP16), the setting it plays with, and at best
     538 positions/s (batch size 64), whereas a search with the Metal backend of Lc0 0.32.1
-    reaches 165 nodes/s at minibatch 1 and at best 725 nodes/s (minibatch 32). MetalFish is
-    therefore slower at batch size 1 and at each program's best batch size; the two tools count
-    different things (network evaluations against search nodes), so no comparison is made at
-    the intermediate sizes. The chapter's throughput advantage is not supported.
+    reaches 165 nodes/s at minibatch 1 and at best 725 nodes/s (minibatch 32). MetalFish's
+    evaluation rate is therefore below Lc0's search rate at batch size 1 and at each program's
+    best batch size (it is above at intermediate sizes); the two tools count different things
+    (network evaluations against search nodes), so the comparison is indicative only. The
+    chapter's throughput advantage is not supported.
 
 11. **M1 Ultra figures and thread scaling** (Sect. 3.1; Sect. 3.2). No measurement record
     exists for "9.8M NPS on M1 Ultra", "near-linear scaling (7.24× on 8 threads)" or
@@ -159,8 +160,9 @@ concern how its components and its results were characterised.
     on Kalah, Breakthrough and Lines of Action.
 
 13. **Time management within the hybrid** (Sect. 3.2; Sect. 4.3). The Lc0-style smooth time
-    manager is used by the stand-alone MCTS mode only. Within the hybrid, the MCTS component
-    receives a fixed per-move budget set by the coordinator.
+    manager is used by the stand-alone MCTS mode only. Within the hybrid at the commit the
+    chapter described, Stockfish's time manager set the move time and the MCTS component ran
+    until the alpha-beta search finished, with a hard cap at 76% of the remaining time.
 
 14. **Omitted time-safety rule** (Sect. 3.3). The chapter does not state that the hybrid
     disables its transformer component, and plays the alpha-beta move, whenever the remaining

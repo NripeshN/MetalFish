@@ -56,7 +56,7 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
   heuristic. The 100% BK agreement is expected, not a validation. All MetalFish-AB strength
   statements are statements about Stockfish.
 - **Evidence**: token-level diff vs `reference/stockfish` (audit C1); `../03_codebase_changes.md`
-  §0 and C0 (Stockfish 19 port, bench signature); `results/paper_v2/calibration/build_final.log`;
+  §0 and C0 (Stockfish 19 port, bench signature); `results/paper_v2/queue_paper_log.txt` bench lines 25, 60, 98, 105;
   `results/ab_vs_sf/match.log` (0W-0L-22D vs Stockfish dev at 20+0.5). Audit C1, B2.
 
 ### E3 — MCTS node size · Wrong
@@ -188,11 +188,11 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
   (no game running; build 8777b99, whose network code is identical to the frozen engine's), same
   BT4 network: MetalFish MPSGraph FP16 b1 7.40 ms = 135 pos/s, b2 224, b4 326, b8 407, b16 446,
   b32 531, b64 538 pos/s; Lc0 0.32.1 Metal `benchmark` (search nodes/s) mb1 165, mb2 163,
-  mb4 189, mb8 294, mb16 606, mb32 725, mb64 530. MetalFish is slower at batch 1, the setting it
-  plays with (0.82×), and at each program's best batch size (538 vs 725, 0.74×); the two tools
-  count different things (network evaluations vs search nodes), so the intermediate sizes, where
-  MetalFish's raw rate exceeds Lc0's search rate, are not compared. The chapter's advantage is
-  not supported.
+  mb4 189, mb8 294, mb16 606, mb32 725, mb64 530. MetalFish's evaluation rate is below Lc0's search
+  rate at batch 1, the setting it plays with (0.82×), and at each program's best batch size (538
+  vs 725, 0.74×), and above it at the intermediate sizes; the two tools count different things
+  (network evaluations vs search nodes), so the comparison is indicative only. The chapter's
+  advantage is not supported.
 - **Evidence**: `results/paper_v2/micro/nn_latency.json` (fields `metalfish[*].median_ms`,
   `median_positions_per_second`; `lc0[*].nps_steady_median`); `../06_environment_and_baselines.md`
   (2026-10-07 sweep, consistent). Audit B4.
@@ -228,10 +228,14 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
 - **As published**: "We ported Lc0's smooth time manager … (52% initial, capped at 73%), and a
   piggybank mechanism that saves 12%" (presented as part of the system used in the evaluation).
 - **Corrected**: μ = 45.2, σ = 5.93, 0.73 cap and 12% piggybank hold for the stand-alone MCTS
-  mode; the hybrid gives its MCTS component a fixed `movetime` budget and does not use this
-  manager.
-- **Evidence**: `ec1dee5:src/mcts/search.cpp` lines 389–390, 437, 483; hybrid fixed budget
-  `src/hybrid/hybrid_search.cpp` (audit C10, lines 586–612 at `b935e66`). Audit C10.
+  mode. The hybrid at the chapter's commit does not use this manager: Stockfish's time manager
+  sets the move time (the alpha-beta search gets the real clock) and the MCTS component runs
+  until the alpha-beta search finishes, with a hard cap at 76% of the remaining time. (By
+  July 2026, `b935e66`, the coordinator gave MCTS a fixed per-move budget instead.)
+- **Evidence**: `ec1dee5:src/mcts/search.cpp` lines 389–390, 437, 483;
+  `ec1dee5:src/hybrid/hybrid_search.cpp` lines 308 ("time manager is the master clock"),
+  327–328 (76% cap), 383 (`mcts_limits.infinite = 1`), 531 (`ab_limits = limits_`), 646;
+  later fixed budget at `b935e66:src/hybrid/hybrid_search.cpp` 586–612 (audit C10). Audit C10.
 
 ### E14 — Omitted time-safety fallback · Omission
 

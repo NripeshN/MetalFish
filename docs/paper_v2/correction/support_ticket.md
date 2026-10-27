@@ -70,15 +70,15 @@ text; the attached Correction note lists all fourteen items. In summary:
    set (108.9 MB and 3.5 MB; FullThreats + HalfKAv2_hm) were misstated.
 7. The position classifier does not adjust the decision weighting, and Fig. 1's routing through
    the classifier is wrong (mode selection is by UCI option).
-8. The agreement-based early stop never fired in the telemetry retained from the chapter's
-   period (0 of 209 decisions) and fires rarely in the current engine; the "10–40% time
+8. The agreement-based early stop never fired in the retained July 2026 telemetry (0 of 209
+   decisions) and fires rarely in the current engine; the "10–40% time
    savings" figure is unsupported.
 9. The inference that the hybrid is "heavily influenced by its neural network component" is
    wrong: the final move was the alpha-beta move in 207 of 209 logged decisions; the
    Bratko–Kopec suite is at ceiling and was used during tuning.
 10. The "1.26× / 5.5× higher throughput than Lc0" result is withdrawn; controlled measurements
-    show MetalFish's inference slower than Lc0 at batch size 1, the setting it plays with, and at
-    each program's best batch size.
+    put MetalFish's evaluation rate below Lc0's search rate at batch size 1, the setting it plays
+    with, and at each program's best batch size (an indicative comparison).
 11. The M1 Ultra figures (9.8M NPS, 7.24× scaling, ∼382 NPS) have no record; withdrawn.
 12. Two related-work characterisations (Baier & Winands; Lanctot et al.) are wrong.
 13. The hybrid does not use the Lc0-style time manager; 14. the chapter omits the time-safety
