@@ -500,3 +500,9 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     comparison with RQ1a is an across-match contrast reported with propagated uncertainty.
     (f) **"Interpreted"** in §11 means read for any purpose other than the health monitoring of
     amendment 11; each cell is interpreted once, after its last block.
+    (g) **Further analysis rules.** The oracle's bootstrap intervals resample games as clusters
+    within strata, and the number of games contributing positions is reported. Block consistency
+    is tested with Cochran's Q over the four block estimates (3 df), and a block bootstrap of the
+    pair scores is reported as a robustness interval. RQ1b, like every cell other than RQ1a, is
+    exploratory and carries no alpha of its own. If RQ5a is played, its Lc0 reference gets the
+    same 50 ms move overhead as the \MF{} arm.
