@@ -445,3 +445,13 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     analysis (12 cores less the engines' ~9). Everything else in amendments 8 and 9 is unchanged; the
     forfeited games stay in the record and the per-arm forfeit counts are reported with each cell.
     Fixed before any cell is interpreted.
+11. **2026-10-27 — interim readings recorded after each block (disclosure).** §5 RQ1 allows no
+    peeking beyond fastchess's periodic printout. Since 2026-10-15 an interim reading of each MUST
+    cell has been recorded in `08_evidence_map.md` §E after each completed block, as the
+    programme's hand-off instructions (`09_handoff_goal.md`) require for monitoring: the
+    pentanomial estimate fastchess also prints, plus the per-block split, the host-load
+    sensitivity estimate of amendment 8, the hybrid telemetry and the health counts. No decision
+    rule is attached to these readings: no cell has been or will be stopped, extended,
+    re-scheduled or analysed differently because of them, and the final analysis is the one
+    pre-registered here. Amendments 8–10, which change scheduling only, were written after the
+    first of these readings (block 0 of RQ1a and RQ2a). The paper reports the readings as such.
