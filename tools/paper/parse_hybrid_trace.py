@@ -7,7 +7,10 @@ Record fields (missing fields are omitted): source, engine, reason, selected, ab
 mcts_move, ab_score, ab_depth, mcts_q, mcts_cp, mcts_playouts, mcts_evals,
 mcts_best_visits, mcts_root_visits, gpu_active, fallback_budget_ms, thread_split
 (dict), plus every other ``Key=value`` scalar in the trace (lower_snake_case) and the
-bracketed lists ``mcts_top``/``ab_root``/``ab_hints`` as parsed lists.
+bracketed lists ``mcts_top``/``ab_root``/``ab_hints`` as parsed lists. Records from an engine
+log also carry ``game`` (the game's ordinal for that engine in the log; a new game starts when the
+``position`` command's base position changes or its move list stops extending the previous one)
+and ``opening`` (the base position: the book FEN, or ``startpos``).
 
 Usage:
     python3 tools/paper/parse_hybrid_trace.py engines.log --out moves.jsonl
@@ -138,15 +141,45 @@ def iter_lines(path: str) -> Iterable[Dict]:
                 yield {"engine": None, "text": line}
 
 
+def split_position(cmd: str):
+    """(base, moves) of a UCI ``position`` command; base is ``startpos`` or the FEN."""
+    toks = cmd.split()
+    end = toks.index("moves") if "moves" in toks else len(toks)
+    base = " ".join(toks[1:end])
+    if base.startswith("fen "):
+        base = base[4:]
+    return base, toks[end + 1 :]
+
+
 def parse(path: str) -> List[Dict]:
-    records: List[Dict] = []
+    return list(iter_records(path))
+
+
+def iter_records(path: str) -> Iterable[Dict]:
+    """Yield the records of `path` one at a time (see the module docstring)."""
     current_split: Dict[Optional[str], Dict] = {}
     last_position: Dict[Optional[str], str] = {}
+    game_state: Dict[Optional[str], tuple] = {}
+    game_no: Dict[Optional[str], int] = {}
+
+    def tag_game(rec: Dict, item: Dict, eng: Optional[str]) -> None:
+        if item.get("ply") is not None:
+            rec["ply"] = item["ply"]
+            rec["game"] = item.get("game")
+        elif eng in game_state:
+            rec["game"] = game_no[eng]
+            rec["opening"] = game_state[eng][0]
+
     for item in iter_lines(path):
         text = item["text"]
         eng = item.get("engine")
         if text.startswith("position "):
             last_position[eng] = text
+            base, moves = split_position(text)
+            prev = game_state.get(eng)
+            if prev is None or prev[0] != base or moves[: len(prev[1])] != prev[1]:
+                game_no[eng] = game_no.get(eng, 0) + 1
+            game_state[eng] = (base, moves)
             continue
         sm = SPLIT_RE.search(text)
         if sm:
@@ -169,14 +202,12 @@ def parse(path: str) -> List[Dict]:
                 "fallback_budget_ms": int(bm.group(1)) if bm else None,
                 "fallback_text": fm.group(1)[:160],
             }
-            if item.get("ply") is not None:
-                rec["ply"] = item["ply"]
-                rec["game"] = item.get("game")
+            tag_game(rec, item, eng)
             if item.get("fen"):
                 rec["fen"] = item["fen"]
             elif eng in last_position:
                 rec["fen"] = fen_from_position_command(last_position[eng])
-            records.append(rec)
+            yield rec
             continue
         tm = TRACE_RE.search(text)
         if tm:
@@ -185,15 +216,12 @@ def parse(path: str) -> List[Dict]:
             rec["engine"] = eng
             if eng in current_split:
                 rec["thread_split"] = current_split[eng]
-            if item.get("ply") is not None:
-                rec["ply"] = item["ply"]
-                rec["game"] = item.get("game")
+            tag_game(rec, item, eng)
             if item.get("fen"):
                 rec["fen"] = item["fen"]
             elif eng in last_position:
                 rec["fen"] = fen_from_position_command(last_position[eng])
-            records.append(rec)
-    return records
+            yield rec
 
 
 def fen_from_position_command(cmd: str) -> Optional[str]:
@@ -267,13 +295,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--out", help="write JSONL records here")
     ap.add_argument("--summary", action="store_true", help="print a summary")
     args = ap.parse_args(argv)
+    if args.out and not args.summary:  # stream: engine logs run to gigabytes
+        with open(args.out, "w") as fh:
+            for r in iter_records(args.input):
+                fh.write(json.dumps(r) + "\n")
+        return 0
     records = parse(args.input)
     if args.out:
         with open(args.out, "w") as fh:
             for r in records:
                 fh.write(json.dumps(r) + "\n")
-    if args.summary or not args.out:
-        print(json.dumps(summarise(records), indent=2))
+    print(json.dumps(summarise(records), indent=2))
     return 0
 
 
