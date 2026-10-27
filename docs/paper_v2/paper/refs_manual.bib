@@ -12,25 +12,42 @@
 
 @misc{nasu2018,
   author = {Nasu, Yu},
-  title = {Efficiently updatable neural-network-based evaluation functions for computer shogi},
-  howpublished = {The 28th World Computer Shogi Championship appeal document, \url{https://www.apply.computer-shogi.org/wcsc28/appeal/the_end_of_genesis_T.N.K.evolution_turbo_type_D/nnue.pdf}},
+  title = {{NNUE}: Efficiently updatable neural-network-based evaluation functions for computer shogi},
+  howpublished = {The 28th World Computer Shogi Championship appeal document, 28 April 2018, \url{https://www.apply.computer-shogi.org/wcsc28/appeal/the_end_of_genesis_T.N.K.evolution_turbo_type_D/nnue.pdf}},
   year = {2018},
-  note = {Accessed 2026-10-14}
+  note = {In Japanese, with English title and abstract; accessed 2026-10-27}
+}
+
+@misc{sf12,
+  author = {{The Stockfish team}},
+  title = {Stockfish 12},
+  howpublished = {Stockfish blog, 2 September 2020, \url{https://stockfishchess.org/blog/2020/stockfish-12/}},
+  year = {2020},
+  note = {``Stockfish will use NNUE by default''; accessed 2026-10-27}
 }
 
 @misc{lc0,
-  author = {{Leela Chess Zero project}},
+  author = {Monroe, Daniel},
   title = {Transformer progress},
   howpublished = {Leela Chess Zero blog, 28 February 2024, \url{https://lczero.org/blog/2024/02/transformer-progress/}},
   year = {2024},
-  note = {Accessed 2026-10-14}
+  note = {Accessed 2026-10-27}
+}
+
+% The ICLR 2026 paper supersedes arXiv:2409.12272 (monroe2024), as the Lc0 post above now says.
+@inproceedings{monroe2026,
+  author = {Monroe, Daniel and Eilender, George and Chalmers, Philip and Tang, Zhenwei and Anderson, Ashton},
+  title = {Chessformer: A unified architecture for chess modeling},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year = {2026},
+  note = {arXiv:2605.19091}
 }
 
 @misc{scorpio,
   author = {Shawul, Daniel},
   title = {Scorpio chess engine},
   howpublished = {\url{https://github.com/dshawul/Scorpio}; \url{https://www.chessprogramming.org/Scorpio}},
-  note = {Software (alpha-beta rollouts inside MCTS with neural-network evaluation); accessed 2026-10-14}
+  note = {Software (MCTS with optional alpha-beta rollouts; with networks, network-guided MCTS combined with alpha-beta searches); accessed 2026-10-27}
 }
 
 @misc{komodo,
@@ -43,9 +60,9 @@
 @misc{sfmcts2017,
   author = {Nicolet, St{\'e}phane},
   title = {A branch to test the {Monte Carlo} algorithm in {Stockfish}},
-  howpublished = {FishCooking mailing list, 6 December 2017, \url{https://groups.google.com/g/fishcooking/c/AE4EgWQ20dY}; code at \url{https://github.com/snicolet/Stockfish/tree/montecarlo}},
+  howpublished = {Code at \url{https://github.com/snicolet/Stockfish/tree/montecarlo} (commit 0269784, 21 December 2017); announced on the FishCooking mailing list, 6 December 2017, \url{https://groups.google.com/g/fishcooking/c/AE4EgWQ20dY} (sign-in may be required)},
   year = {2017},
-  note = {Accessed 2026-10-14}
+  note = {Accessed 2026-10-27}
 }
 
 @misc{lc0sfhybrid,
@@ -57,9 +74,9 @@
 
 @misc{ceres,
   author = {Elliott, David},
-  title = {Ceres: an {MCTS} chess engine on {Lc0} network backends},
+  title = {Ceres: an {MCTS} chess engine for research and recreation},
   howpublished = {\url{https://github.com/dje-dev/Ceres}; \url{https://www.chessprogramming.org/Ceres}},
-  note = {Software; accessed 2026-10-14}
+  note = {Software running on {Lc0} network backends; accessed 2026-10-27}
 }
 
 @misc{allie,
@@ -115,8 +132,9 @@
 @misc{uhocritique,
   author = {{Talkchess forum}},
   title = {The trouble with {UHO}},
-  howpublished = {Discussion thread, \url{https://talkchess.com/viewtopic.php?p=939914}},
-  note = {Accessed 2026-10-14}
+  howpublished = {Computer Chess Club: General Topics, thread started 20 December 2022, \url{https://talkchess.com/viewtopic.php?t=81175}; replies by user lkaufman, \url{https://talkchess.com/viewtopic.php?p=939901} and \url{https://talkchess.com/viewtopic.php?p=939905}},
+  year = {2022},
+  note = {Accessed 2026-10-27}
 }
 
 @misc{bayeselo,
@@ -141,8 +159,8 @@
 }
 
 @misc{sts,
-  author = {Dann Corbit and Swaminathan},
-  title = {Strategic test suite ({STS})},
+  author = {Corbit, Dann and Natarajan, Swaminathan},
+  title = {{Strategic Test Suite} ({STS})},
   howpublished = {\url{https://sites.google.com/site/strategictestsuite}; rating tool by Ferdinand Mosca, \url{https://github.com/fsmosca/STS-Rating}},
   note = {Accessed 2026-10-14}
 }
@@ -150,8 +168,9 @@
 @misc{arasan,
   author = {Dart, Jon},
   title = {Arasan test suite (2023 revision)},
-  howpublished = {\url{https://github.com/jdart1/arasan-chess}},
-  note = {Software; accessed 2026-10-14}
+  howpublished = {\url{https://github.com/jdart1/arasan-chess/blob/33cbf7e/tests/arasan2023.epd} (commit 33cbf7e, 6 August 2023)},
+  year = {2023},
+  note = {Accessed 2026-10-27}
 }
 
 @misc{lichesspuzzles,
@@ -169,9 +188,16 @@
   note = {Accessed 2026-10-14}
 }
 
+@misc{appleunified,
+  author = {{Apple Inc.}},
+  title = {Choosing a resource storage mode for {Apple} {GPUs}},
+  howpublished = {Apple Developer Documentation, \url{https://developer.apple.com/documentation/metal/choosing-a-resource-storage-mode-for-apple-gpus}},
+  note = {``Apple GPUs have a unified memory model in which the CPU and the GPU share system memory''; accessed 2026-10-27}
+}
+
 @misc{mpsgraph,
   author = {{Apple Inc.}},
-  title = {Metal Performance Shaders Graph},
+  title = {{Metal Performance Shaders Graph}},
   howpublished = {Apple Developer Documentation, \url{https://developer.apple.com/documentation/metalperformanceshadersgraph}},
   note = {Accessed 2026-10-14}
 }
@@ -184,27 +210,28 @@
   number = {3},
   pages = {136--156},
   year = {2025},
-  doi = {10.1177/13896911251360654},
   url = {https://journals.sagepub.com/doi/10.1177/13896911251360654},
-  note = {Published online 22 August 2025}
+  note = {Published online 22 August 2025; the DOI shown by the publisher, 10.1177/13896911251360654, did not resolve at doi.org on 2026-10-14 or 2026-10-27}
 }
 
 @incollection{bratko1982,
-  author = {Bratko, Ivan and Kopec, Danny},
-  title = {A test for comparison of human and computer performance in chess},
+  author = {Kopec, Danny and Bratko, Ivan},
+  title = {The {Bratko-Kopec} experiment: a comparison of human and computer performance in chess},
   booktitle = {Advances in Computer Chess 3},
   editor = {Clarke, M. R. B.},
+  pages = {57--72},
   publisher = {Pergamon Press},
   address = {Oxford},
-  year = {1982}
+  year = {1982},
+  doi = {10.1016/B978-0-08-026898-9.50009-7}
 }
 
 @misc{eret,
   author = {Eigenmann, Walter},
-  title = {Computerschach: Testaufgaben f{\"u}r Engines ({Eigenmann} Rapid Engine Test, {ERET})},
+  title = {Computerschach: 111 {Testaufgaben} f{\"u}r {Programme}},
   howpublished = {Glarean Magazin, March 2017, \url{https://glarean-magazin.ch/2017/03/05/computerschach-testaufgaben-engines-eigenmann-rapid-engine-test-eret/}; summary at \url{https://www.chessprogramming.org/Eigenmann_Rapid_Engine_Test}},
   year = {2017},
-  note = {111 positions; accessed 2026-10-14}
+  note = {The Eigenmann Rapid Engine Test ({ERET}), 111 positions; accessed 2026-10-27}
 }
 
 % As cited on the SpringerLink chapter page (read 2026-10-27): LNNS vol. 2078, Springer, Cham,
@@ -226,7 +253,7 @@
 @misc{correction,
   author = {Niketan, Nripesh},
   title = {Correction to: Hybrid chess search: combining alpha-beta and {Monte Carlo} tree search on unified memory architectures},
-  howpublished = {Author-initiated Correction prepared for Springer Nature; text in the data deposit},
+  howpublished = {Author-initiated Correction prepared for Springer Nature},
   year = {2026},
   note = {Filing pending}
 }
@@ -290,6 +317,7 @@
   title = {A rollout-based search algorithm unifying {MCTS} and alpha-beta},
   booktitle = {Computer Games (CGW/GIGA 2016)},
   series = {Communications in Computer and Information Science},
+  volume = {705},
   pages = {57--70},
   publisher = {Springer},
   year = {2017},
@@ -306,4 +334,39 @@
   publisher = {Springer},
   year = {2024},
   doi = {10.1007/978-3-031-54968-7_6}
+}
+
+% Overrides of fetched records, checked 2026-10-27: proper-name capitalisation (haworth2020), a
+% spelling error in the publisher's metadata (baier2013), and the AAMAS version of cohen2023 (the
+% IFAAMAS proceedings PDF; DBLP was not reachable).
+@article{haworth2020,
+  author = {Haworth, Guy and Hernandez, Nelson},
+  title = {The 17th {Top Chess Engine Championship}, {TCEC17}},
+  journal = {ICGA Journal},
+  volume = {42},
+  number = {2--3},
+  pages = {181--191},
+  year = {2020},
+  doi = {10.3233/ICG-200152}
+}
+
+@inproceedings{baier2013,
+  author = {Baier, Hendrik and Winands, Mark H. M.},
+  title = {{Monte-Carlo} tree search and minimax hybrids},
+  booktitle = {2013 IEEE Conference on Computational Intelligence in Games (CIG)},
+  pages = {1--8},
+  publisher = {IEEE},
+  year = {2013},
+  doi = {10.1109/CIG.2013.6633630}
+}
+
+@inproceedings{cohen2023,
+  author = {Cohen-Solal, Quentin and Cazenave, Tristan},
+  title = {Minimax strikes back},
+  booktitle = {Proceedings of the 22nd International Conference on Autonomous Agents and Multiagent Systems (AAMAS 2023)},
+  editor = {Ricci, A. and Yeoh, W. and Agmon, N. and An, B.},
+  pages = {1923--1931},
+  publisher = {IFAAMAS},
+  year = {2023},
+  url = {https://www.ifaamas.org/Proceedings/aamas2023/pdfs/p1923.pdf}
 }
