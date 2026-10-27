@@ -190,7 +190,7 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
   b32 531, b64 538 pos/s; Lc0 0.32.1 Metal `benchmark` (search nodes/s) mb1 165, mb2 163,
   mb4 189, mb8 294, mb16 606, mb32 725, mb64 530. MetalFish's evaluation rate is below Lc0's search
   rate at batch 1, the setting it plays with (0.82×), and at each program's best batch size (538
-  vs 725, 0.74×), and above it at the intermediate sizes; the two tools count different things
+  vs 725, 0.74×), while it is above at batch 2–8, below at 16 and 32 and about equal at 64; the two tools count different things
   (network evaluations vs search nodes), so the comparison is indicative only. The chapter's
   advantage is not supported.
 - **Evidence**: `results/paper_v2/micro/nn_latency.json` (fields `metalfish[*].median_ms`,

@@ -141,7 +141,8 @@ concern how its components and its results were characterised.
     538 positions/s (batch size 64), whereas a search with the Metal backend of Lc0 0.32.1
     reaches 165 nodes/s at minibatch 1 and at best 725 nodes/s (minibatch 32). MetalFish's
     evaluation rate is therefore below Lc0's search rate at batch size 1 and at each program's
-    best batch size (it is above at intermediate sizes); the two tools count different things
+    best batch size (it is above at batch sizes 2 to 8, below at 16 and 32 and about equal at 64);
+    the two tools count different things
     (network evaluations against search nodes), so the comparison is indicative only. The
     chapter's throughput advantage is not supported.
 

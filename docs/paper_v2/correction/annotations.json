@@ -223,7 +223,7 @@
     {
       "id": "E10",
       "title": "Throughput vs Lc0 withdrawn",
-      "note": "Corrected: Table 4 rests on four 10 s positions and Lc0's 14 nps in the 'Complex middlegame' row indicates a harness fault. Measured on M2 Max with no game running and the same BT4 network (2026-10-13): MetalFish Metal FP16 135 positions/s at batch 1 (7.4 ms), the setting it plays with, and at best 538 (batch 64); an Lc0 0.32.1 Metal search 165 nodes/s at minibatch 1 and at best 725 (minibatch 32). MetalFish's evaluation rate is below Lc0's search rate at batch 1 and at each program's best batch size (above at intermediate sizes); the tools count different things, so the comparison is indicative only. The 1.26x advantage is withdrawn.",
+      "note": "Corrected: Table 4 rests on four 10 s positions and Lc0's 14 nps in the 'Complex middlegame' row indicates a harness fault. Measured on M2 Max with no game running and the same BT4 network (2026-10-13): MetalFish Metal FP16 135 positions/s at batch 1 (7.4 ms), the setting it plays with, and at best 538 (batch 64); an Lc0 0.32.1 Metal search 165 nodes/s at minibatch 1 and at best 725 (minibatch 32). MetalFish's evaluation rate is below Lc0's search rate at batch 1 and at each program's best batch size (above at batch 2-8, below at 16 and 32, about equal at 64); the tools count different things, so the comparison is indicative only. The 1.26x advantage is withdrawn.",
       "anchors": [
         {
           "page": 8,
