@@ -3,7 +3,8 @@
 
 M1: python3 tools/paper/microbench.py nn --out results/paper_v2/micro/nn_latency.json
     Runs build/metalfish_nn_probe (Metal, FP16 and FP32 via METALFISH_METAL_FP16) over batch sizes and,
-    if lc0 is available, `lc0 benchmark` over minibatch sizes with the same weights.
+    if lc0 is available, `lc0 benchmark` over minibatch sizes with the same weights (search
+    nodes/s) and `lc0 backendbench` at the same batch sizes (network evaluations/s, the probe's unit).
 M2: python3 tools/paper/microbench.py ab --out results/paper_v2/micro/ab_scaling.json
     Runs `metalfish bench <hash> <threads> <depth>` for several thread counts, N repeats each; reports
     nodes/s and wall time. Depth-limited so the node count is fixed per thread count (reported too).
@@ -37,6 +38,28 @@ def run(
         env={**os.environ, **(env or {})},
     )
     return p.stdout + p.stderr
+
+
+def parse_backendbench(txt: str, batch: int) -> Dict:
+    """The row of `lc0 backendbench` output for `batch` (CSV columns: size, mean nps, mean ms,
+    sdev, cv, max nps, median, min nps; "nps" there counts network evaluations)."""
+    row: Dict = {"batch": batch}
+    for line in txt.splitlines():
+        cols = [c.strip() for c in line.split(",")]
+        if len(cols) >= 8 and cols[0] == str(batch):
+            try:
+                row.update(
+                    {
+                        "mean_eps": float(cols[1]),
+                        "mean_ms": float(cols[2]),
+                        "median_eps": float(cols[6]),
+                    }
+                )
+            except ValueError:
+                pass
+    if "median_eps" not in row:
+        row["error"] = txt[-300:]
+    return row
 
 
 def nn_sweep(batches: List[int], iterations: int, lc0: Optional[str]) -> Dict:
@@ -97,6 +120,26 @@ def nn_sweep(batches: List[int], iterations: int, lc0: Optional[str]) -> Dict:
                 }
             )
             print(f"lc0 minibatch={mb}: {nps}")
+        # network evaluations per second of Lc0's own Metal backend, the probe's unit; a parse
+        # failure is recorded but does not fail the sweep (the search benchmark above is the M1
+        # measurement the protocol names)
+        out["lc0_backendbench"] = []
+        for b in batches:
+            txt = run(
+                [
+                    lc0,
+                    "backendbench",
+                    f"--weights={WEIGHTS}",
+                    "--backend=metal",
+                    f"--start-batch-size={b}",
+                    f"--max-batch-size={b}",
+                    "--batches=100",
+                ],
+                timeout=600,
+            )
+            row = parse_backendbench(txt, b)
+            out["lc0_backendbench"].append(row)
+            print(f"lc0 backendbench batch={b}: {row.get('median_eps')} evals/s")
     return out
 
 

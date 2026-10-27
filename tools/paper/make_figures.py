@@ -34,6 +34,10 @@ def stats_of(obj: dict) -> dict:
     return obj.get("stats", obj)
 
 
+def fmt_num(x, nd=1):
+    return "—" if x is None else f"{x:.{nd}f}"
+
+
 def fmt_pm(x, pm, nd=1):
     if x is None or pm is None:
         return "—"
@@ -512,13 +516,13 @@ def write_hostload_summary(cells, results: pathlib.Path, out: pathlib.Path):
     ]
     for k, name in (("log", "Log"), ("game", "Game")):
         r = rows[k]
-        if not r["n"]:
-            continue
+        # every macro is defined, as "--" when there is no sample, so the text always compiles
+        num = lambda v, fmt: "--" if v is None else format(v, fmt)  # noqa: E731
         macros += [
             f"\\newcommand{{\\Host{name}Samples}}{{{r['n']:,}}}".replace(",", "{,}"),
-            f"\\newcommand{{\\Host{name}MedianCores}}{{{r['median']:.2f}}}",
-            f"\\newcommand{{\\Host{name}PninetyfiveCores}}{{{r['p95']:.1f}}}",
-            f"\\newcommand{{\\Host{name}OverPct}}{{{r['over']*100:.0f}}}",
+            f"\\newcommand{{\\Host{name}MedianCores}}{{{num(r['median'], '.2f')}}}",
+            f"\\newcommand{{\\Host{name}PninetyfiveCores}}{{{num(r['p95'], '.1f')}}}",
+            f"\\newcommand{{\\Host{name}OverPct}}{{{num(None if r['over'] is None else r['over'] * 100, '.0f')}}}",
         ]
     (tdir / "hostload_macros.tex").write_text("\n".join(macros) + "\n")
 
@@ -836,6 +840,15 @@ def plot_micro(results: pathlib.Path, out: pathlib.Path):
                     marker="o",
                     label=f"MetalFish MPSGraph {prec.upper()}",
                 )
+        bb = [r for r in d.get("lc0_backendbench", []) if r.get("median_eps")]
+        if bb:
+            a2.plot(
+                [r["batch"] for r in bb],
+                [r["median_eps"] for r in bb],
+                marker="^",
+                ls="-.",
+                label="Lc0 Metal backend (evaluations/s)",
+            )
         lc = [r for r in d.get("lc0", []) if r.get("nps_steady_median")]
         if lc:
             a2.plot(
@@ -916,12 +929,487 @@ def export_diagrams(out: pathlib.Path) -> None:
     )
 
 
+HOSTLOAD_RE = {
+    "ext_cpu": r"ext_cpu=(\d+)%",
+    "gpu_util": r"gpu_util=(\d+)%",
+    "gpu_mem_mb": r"gpu_mem_mb=(\d+)",
+    "mem_level": r"mem_level=(\d+)%",
+    "pageouts": r"pageouts=(\d+)",
+}
+
+
+def parse_hostload_full(path: pathlib.Path):
+    """[(aware datetime, {field: value}, top process label, top process CPU %)] from hostload.log,
+    with the GPU and memory fields of amendment 12 (c) where the line carries them."""
+    import datetime as dt
+    import re
+
+    out = []
+    if not path.exists():
+        return out
+    bst = dt.timezone(dt.timedelta(hours=1))
+    for line in open(path, errors="replace"):
+        stamp = line.split(" ", 1)[0]
+        try:
+            if re.search(r"[+-]\d{4}$", stamp):
+                t = dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S%z")
+            else:
+                t = dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=bst)
+        except ValueError:
+            continue
+        fields = {}
+        for k, pat in HOSTLOAD_RE.items():
+            m = re.search(pat, line)
+            if m:
+                fields[k] = int(m.group(1))
+        if "ext_cpu" not in fields:
+            continue
+        m = re.search(r"top_ext=([\d.]+) (\S+)", line)
+        label, pct = None, None
+        if m:
+            pct = float(m.group(1))
+            path_tok = m.group(2)
+            label = (
+                "Virtualization.framework (virtual machine)"
+                if "Virtualization" in path_tok
+                else path_tok.rstrip("/").split("/")[-1]
+            )
+        out.append((t, fields, label, pct))
+    out.sort(key=lambda r: r[0])
+    return out
+
+
+def in_game_indices(games, times):
+    """Indices of host-load samples whose minute overlaps one of `games`."""
+    import bisect
+    import datetime as dt
+
+    idx = set()
+    for g in games:
+        iv = game_interval(g)
+        if not iv:
+            continue
+        lo = bisect.bisect_left(times, iv[0])
+        hi = bisect.bisect_right(times, iv[1] + dt.timedelta(seconds=60))
+        idx.update(range(lo, hi))
+    return idx
+
+
+def count_log_lines(path: pathlib.Path, patterns):
+    """Occurrences of each substring in a (possibly gzipped) engine log, streamed."""
+    import gzip
+
+    counts = {p: 0 for p in patterns}
+    if not path.exists():
+        gz = path.with_name(path.name + ".gz")
+        if not gz.exists():
+            return None
+        path = gz
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt", errors="replace") as fh:
+        for line in fh:
+            for p in patterns:
+                if p in line:
+                    counts[p] += 1
+    return counts
+
+
+def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
+    """Final-reading analyses of amendment 12 and of the review (tools/paper/robustness.py):
+    load regression, forfeit and opening variants with the load-sensitivity verdict, block
+    heterogeneity and the chunk bootstrap, load-log coverage, derived RQ2c, the set-aside games,
+    time per move by arm, adjudications, the arbiter's flags, GPU and memory covariates, the
+    outside processes and the oracle summary. Run only for the final reading (--final-analyses).
+    """
+    import statistics
+
+    sys.path.insert(0, str(REPO / "tools" / "paper"))
+    import penta_stats  # noqa: E402
+    import robustness  # noqa: E402
+
+    tdir = out / "tables"
+    tdir.mkdir(parents=True, exist_ok=True)
+    pmtex = lambda x, pm: f"${fmt_pm(x, pm).replace('±', '\\pm')}$"  # noqa: E731
+    esc = lambda t: str(t).replace("_", "\\_").replace("%", "\\%")  # noqa: E731
+    samples = parse_hostload(results / "hostload.log")
+    times = [t for t, _ in samples]
+    try:
+        nblocks = int(
+            load(REPO / "docs" / "paper_v2" / "experiments.json")["defaults"].get(
+                "blocks", 4
+            )
+        )
+    except (OSError, KeyError, ValueError):
+        nblocks = 4
+    pairs_by_cell = {}
+    rob_md = [
+        "| Cell | Primary | Zero outside load (regression) | Low-load pairs only | Forfeit pairs removed | Forfeits as draws | Without first 92 openings | Load-sensitive |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    rob_tex = [
+        "\\begin{tabular}{lllllll}",
+        "\\toprule",
+        "Cell & Primary & Zero load & Low-load pairs & No forfeit pairs & Forfeits drawn & Load-sensitive \\\\",
+        "\\midrule",
+    ]
+    blk_md = [
+        "| Cell | Block estimates | Cochran's Q (df) | p | Chunks | Chunk-bootstrap 95% interval | Load-log coverage by block |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    adj_md = [
+        "| Cell | Adjudicated draws | Adjudicated wins (first arm / second arm) |",
+        "| --- | --- | --- |",
+    ]
+    for c in cells:
+        d = results / c["dir"]
+        pgn, man = d / "games.pgn", d / "manifest.json"
+        if not pgn.exists() or not c["arm_a"]:
+            continue
+        games = penta_stats.read_games(str(pgn))
+        prim = penta_stats.compute(games, c["arm_a"])
+        pairs = robustness.pair_records(games, c["arm_a"])
+        pairs_by_cell[c["cell"]] = pairs
+        se = (prim.get("elo_pm") or 0) / 1.96
+        reg = robustness.load_regression(games, pairs, samples, LOAD_THRESHOLD_PCT)
+        flagged = high_load_games(games, samples)
+        bad = {(games[i]["round"], games[i]["fen"]) for i in flagged}
+        low = penta_stats.compute(
+            [g for g in games if (g["round"], g["fen"]) not in bad], c["arm_a"]
+        )
+        ff = robustness.forfeit_variants(games, c["arm_a"])
+        variants = [
+            ("zero load", reg.get("elo_at_zero_load")),
+            ("low-load pairs", low.get("elo")),
+            ("forfeit pairs removed", ff["removed"].get("elo")),
+            ("forfeits as draws", ff["as_draws"].get("elo")),
+        ]
+        first92 = None
+        if c["cell"] == "RQ1a":
+            first92 = penta_stats.compute(
+                robustness.without_first_openings(games, 92), c["arm_a"]
+            )
+            variants.append(("without the first 92 openings", first92.get("elo")))
+        moved = [
+            name
+            for name, v in variants
+            if v is not None
+            and prim.get("elo") is not None
+            and se
+            and abs(v - prim["elo"]) > se
+        ]
+        verdict = ("yes: " + ", ".join(moved)) if moved else "no"
+        rob_md.append(
+            f"| {c['cell']} | {fmt_pm(prim.get('elo'), prim.get('elo_pm'))} | "
+            f"{fmt_pm(reg.get('elo_at_zero_load'), reg.get('elo_at_zero_load_pm'))} "
+            f"({reg['pairs_exposed']} of {reg['pairs_with_samples']} logged pairs exposed) | "
+            f"{fmt_pm(low.get('elo'), low.get('elo_pm'))} | "
+            f"{fmt_pm(ff['removed'].get('elo'), ff['removed'].get('elo_pm'))} | "
+            f"{fmt_pm(ff['as_draws'].get('elo'), ff['as_draws'].get('elo_pm'))} | "
+            f"{fmt_pm(first92.get('elo'), first92.get('elo_pm')) if first92 else '—'} | {verdict} |"
+        )
+        rob_tex.append(
+            f"{esc(c['cell'])} & {pmtex(prim.get('elo'), prim.get('elo_pm'))} & "
+            f"{pmtex(reg.get('elo_at_zero_load'), reg.get('elo_at_zero_load_pm'))} & "
+            f"{pmtex(low.get('elo'), low.get('elo_pm'))} & "
+            f"{pmtex(ff['removed'].get('elo'), ff['removed'].get('elo_pm'))} & "
+            f"{pmtex(ff['as_draws'].get('elo'), ff['as_draws'].get('elo_pm'))} & "
+            f"{'yes' if moved else 'no'} \\\\"
+        )
+        # blocks: Cochran's Q on the block estimates, the chunk bootstrap and load-log coverage
+        blocks = [0] * len(pairs)
+        ests, ses, chunk_starts = [], [], []
+        try:
+            m = load(man)
+            pairs_total = int(m["cell"]["pairs"])
+            per_block = -(-pairs_total // nblocks)
+            chunk_starts = [h.get("games_before", 0) for h in m.get("history") or []]
+            for b, first, end in block_ranges(m, len(games), per_block, nblocks):
+                st = penta_stats.compute(games[first:end], c["arm_a"])
+                if st.get("elo") is not None and st.get("elo_pm"):
+                    ests.append(st["elo"])
+                    ses.append(st["elo_pm"] / 1.96)
+                for k, p in enumerate(pairs):
+                    if first <= p["i"] < end:
+                        blocks[k] = b
+        except (OSError, KeyError, TypeError, ValueError):
+            pass
+        q = robustness.cochran_q(ests, ses)
+        chunks = robustness.chunk_of_pairs(pairs, chunk_starts)
+        boot = robustness.chunk_bootstrap(pairs, chunks)
+        cov = robustness.load_coverage(games, pairs, samples, blocks)
+        q_txt = f"{q['q']:.2f} ({q['df']})" if q else "—"
+        p_txt = f"{q['p']:.3f}" if q else "—"
+        n_chunks = boot["chunks"] if boot else "—"
+        boot_txt = f"[{boot['ci95'][0]:+.1f}, {boot['ci95'][1]:+.1f}]" if boot else "—"
+        cov_txt = ", ".join(f"{b}: {w}/{n}" for b, (w, n) in cov.items())
+        est_txt = ", ".join(f"{e:+.1f}" for e in ests)
+        blk_md.append(
+            f"| {c['cell']} | {est_txt} | {q_txt} | {p_txt} | {n_chunks} | {boot_txt} | {cov_txt} |"
+        )
+        adj = robustness.adjudications(games, [c["arm_a"], c["arm_b"]])
+        adj_md.append(
+            f"| {c['cell']} | {adj['draws']} | {adj['wins'].get(c['arm_a'], 0)} / {adj['wins'].get(c['arm_b'], 0)} |"
+        )
+    rob_tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "robustness.md").write_text("\n".join(rob_md) + "\n")
+    (tdir / "robustness.tex").write_text("\n".join(rob_tex) + "\n")
+    (tdir / "blocks_q.md").write_text("\n".join(blk_md) + "\n")
+    (tdir / "adjudications.md").write_text("\n".join(adj_md) + "\n")
+
+    # derived RQ2c = RQ2b + RQ2a (shared openings), and the direct cell if it was played
+    md = ["| Quantity | Elo | Shared openings |", "| --- | --- | --- |"]
+    if "RQ2a" in pairs_by_cell and "RQ2b" in pairs_by_cell:
+        der = robustness.linear_combination(
+            [(pairs_by_cell["RQ2b"], 1.0), (pairs_by_cell["RQ2a"], 1.0)]
+        )
+        if der:
+            md.append(
+                f"| RQ2c derived (RQ2b + RQ2a) | {fmt_pm(der['elo'], der['elo_pm'])} | {der['shared_openings'][0]} |"
+            )
+        if "RQ2c" in pairs_by_cell:
+            diff = robustness.linear_combination(
+                [
+                    (pairs_by_cell["RQ2b"], 1.0),
+                    (pairs_by_cell["RQ2a"], 1.0),
+                    (pairs_by_cell["RQ2c"], -1.0),
+                ]
+            )
+            if diff:
+                md.append(
+                    f"| derived minus direct RQ2c | {fmt_pm(diff['elo'], diff['elo_pm'])} | {', '.join(map(str, diff['shared_openings']))} |"
+                )
+    (tdir / "rq2c.md").write_text("\n".join(md) + "\n")
+
+    # the 183 games set aside by amendment 7, on their own
+    rc1 = results / "RQ1a_rc1_partial" / "games.pgn"
+    if rc1.exists():
+        g1 = penta_stats.read_games(str(rc1))
+        names = sorted({g["white"] for g in g1} | {g["black"] for g in g1})
+        hyb = next((n for n in names if "ybrid" in n), names[0] if names else None)
+        if hyb:
+            st = penta_stats.compute(g1, hyb)
+            (tdir / "setaside.md").write_text(
+                "| Games | Pairs | Unpaired | Elo (first arm) |\n| --- | --- | --- | --- |\n"
+                f"| {st.get('games')} | {st.get('pairs')} | {st.get('unpaired_games')} | {fmt_pm(st.get('elo'), st.get('elo_pm'))} ({hyb}) |\n"
+            )
+
+    # time per move, depth and nps by arm (PGN move comments); hybrid moves split by the traces
+    tim_md = [
+        "| Cell | Arm | Moves | Mean s | Median s | p90 s | p99 s | Max s | Median depth | Median nps | Mean s by own move number |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    tim_tex = [
+        "\\begin{tabular}{llrrrrr}",
+        "\\toprule",
+        "Cell & Arm (moves) & Moves & Mean s & p99 s & Depth & Mnps \\\\",
+        "\\midrule",
+    ]
+    flag_md = []
+    for c in cells:
+        d = results / c["dir"]
+        pgn = d / "games.pgn"
+        if not pgn.exists() or not c["arm_a"]:
+            continue
+        cls_of = {}
+        mj = d / "moves.jsonl"
+        if mj.exists() and (c["telemetry"] or {}).get("moves_total"):
+
+            def traced(fh, table=cls_of):
+                # one pass: the move class of every traced position, and the records streamed on
+                for line in fh:
+                    r = json.loads(line)
+                    if r.get("fen"):
+                        kind = (
+                            "time-safety"
+                            if r.get("reason") == "ab_fallback_time_safety"
+                            else "transformer-enabled"
+                        )
+                        table[r["fen"]] = (
+                            kind if table.get(r["fen"], kind) == kind else "ambiguous"
+                        )
+                    yield r
+
+            with open(mj) as fh:
+                fc = robustness.flag_counts(traced(fh))
+            logc = count_log_lines(
+                d / "engines.log",
+                ["subsearch stop grace expired", "engines agree, stopping early"],
+            )
+            flag_md.append(
+                f"## {c['cell']}\n\nTraced disagreements: {fc['disagreements']}; with root hints: "
+                f"{fc['with_hints']}; first hint = MCTS move: {fc['first_hint_is_mcts_move']}; "
+                f"first hint = alpha-beta move: {fc['first_hint_is_ab_move']}. Engine log: "
+                + (
+                    ", ".join(f"'{k}' {v}" for k, v in logc.items())
+                    if logc
+                    else "not found"
+                )
+                + ".\n\n| Flag | Disagreements on which it held |\n| --- | --- |\n"
+                + "\n".join(f"| {k} | {v} |" for k, v in fc["flags"].items())
+                + "\n"
+            )
+
+        def classify(m, hyb=c["arm_a"], table=cls_of):
+            if m["engine"] != hyb or not table:
+                return "all"
+            k = table.get(m.get("fen"))
+            return None if k in (None, "ambiguous") else k
+
+        st = robustness.move_stats(
+            robustness.iter_engine_moves(str(pgn), with_fen=bool(cls_of)), classify
+        )
+        for (eng, cls), v in sorted(st.items()):
+            prof = ", ".join(f"{k}: {t:.2f}" for k, t in v["time_by_index"].items())
+            label = eng if cls == "all" else f"{eng} ({cls})"
+            tim_tex.append(
+                f"{esc(c['cell'])} & {esc(label)} & {v['moves']} & {v['time_mean']:.2f} & "
+                f"{v['time_p99']:.2f} & {v['depth_p50']:.0f} & {(v['nps_p50'] or 0) / 1e6:.1f} \\\\"
+            )
+            tim_md.append(
+                f"| {c['cell']} | {eng}{'' if cls == 'all' else ' (' + cls + ')'} | {v['moves']} | "
+                f"{v['time_mean']:.3f} | {v['time_p50']:.3f} | {v['time_p90']:.3f} | {v['time_p99']:.3f} | "
+                f"{v['time_max']:.3f} | {v['depth_p50']:.0f} | {(v['nps_p50'] or 0):,.0f} | {prof} |"
+            )
+    tim_tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "timing.md").write_text("\n".join(tim_md) + "\n")
+    (tdir / "timing.tex").write_text("\n".join(tim_tex) + "\n")
+    (tdir / "flags.md").write_text("\n".join(flag_md) + "\n")
+
+    # outside processes and the GPU and memory covariates over in-game minutes
+    full = parse_hostload_full(results / "hostload.log")
+    ftimes = [r[0] for r in full]
+    all_games = []
+    cov_md = [
+        "| Cell | In-game minutes with GPU/memory fields | GPU utilisation median (p95) | GPU memory MB median | Memory available % median (min) | Page-outs during the cell's games |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for c in cells:
+        pgn = results / c["dir"] / "games.pgn"
+        if not pgn.exists():
+            continue
+        games = penta_stats.read_games(str(pgn))
+        all_games += games
+        idx = sorted(
+            i for i in in_game_indices(games, ftimes) if "gpu_util" in full[i][1]
+        )
+        if not idx:
+            continue
+        gu = sorted(full[i][1]["gpu_util"] for i in idx)
+        gm = [full[i][1].get("gpu_mem_mb", 0) for i in idx]
+        ml = [full[i][1].get("mem_level", 0) for i in idx]
+        po = sum(
+            max(0, full[i][1].get("pageouts", 0) - full[i - 1][1].get("pageouts", 0))
+            for i in idx
+            if i > 0 and "pageouts" in full[i - 1][1]
+        )
+        cov_md.append(
+            f"| {c['cell']} | {len(idx)} | {statistics.median(gu):.0f}% ({robustness.quantile(gu, 0.95):.0f}%) | "
+            f"{statistics.median(gm):.0f} | {statistics.median(ml):.0f}% ({min(ml)}%) | {po} |"
+        )
+    (tdir / "covariates.md").write_text("\n".join(cov_md) + "\n")
+    hot = [
+        full[i]
+        for i in in_game_indices(all_games, ftimes)
+        if full[i][1]["ext_cpu"] > LOAD_THRESHOLD_PCT and full[i][2]
+    ]
+    by = {}
+    for _, _, label, pct in hot:
+        by.setdefault(label, []).append(pct or 0.0)
+    rows = sorted(by.items(), key=lambda kv: -len(kv[1]))[:10]
+    (tdir / "outside_processes.md").write_text(
+        f"In-game minutes with outside CPU above {LOAD_THRESHOLD_PCT}%: {len(hot)}. Largest outside "
+        "process of each such minute:\n\n| Process | Minutes as the largest | Its median CPU % |\n| --- | --- | --- |\n"
+        + "\n".join(f"| {k} | {len(v)} | {statistics.median(v):.0f} |" for k, v in rows)
+        + "\n"
+    )
+
+    # oracle summary (RQ6b), written by tools/paper/oracle_probe.py
+    osum = results / "RQ6b" / "oracle.jsonl.summary.json"
+    if osum.exists():
+        o = load(osum)
+
+        def ci(st):
+            lo, hi = st.get("ci95") or (None, None)
+            return (
+                f"{st['estimate']:.3f} [{lo:.3f}, {hi:.3f}]"
+                if lo is not None
+                else f"{st['estimate']:.3f}"
+            )
+
+        md = [
+            f"Positions: {o['positions']} from {o['games']} games ({o['cluster_unit']} clusters); "
+            f"{o['method']['estimates']}; {o['method']['ci95']}; {o['method'].get('expected_score', '')}.",
+            "",
+            "| Judge | n | AB better | MCTS better | Tie | Loss AB − MCTS (ES) | Arbiter bound (ES) | Projected Elo of the bound | Realised accuracy |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for name, j in o["judges"].items():
+            st = j["stats"]
+            pe = j["projected_elo_of_bound"]
+            pe_ci = pe.get("ci95") or [None, None]
+            md.append(
+                f"| {name} | {j['n']} | {ci(st['frac_ab_better'])} | {ci(st['frac_mcts_better'])} | {ci(st['frac_tie'])} | "
+                f"{ci(st['loss_es_ab_minus_mcts'])} | {ci(st['arbiter_upper_bound_es'])} | "
+                f"{(pe['estimate'] or 0):.1f} [{(pe_ci[0] or 0):.1f}, {(pe_ci[1] or 0):.1f}] | {ci(st['realised_accuracy'])} |"
+            )
+        ag = o.get("agreement")
+        if ag:
+            st = ag["stats"]
+            md += [
+                "",
+                f"Judges' agreement on {ag['n']} positions: {ci(st['frac_judges_agree'])}, Cohen's kappa "
+                f"{fmt_num(ag.get('cohen_kappa_sample'), 2)}; consensus AB better {ci(st['frac_consensus_ab_better'])}, MCTS better "
+                f"{ci(st['frac_consensus_mcts_better'])}, undecided {ci(st['frac_undecided'])}; bound on agreed positions "
+                f"{ci(st['consensus_bound_es'])} (projected Elo {fmt_num(ag['projected_elo_of_consensus_bound']['estimate'], 1)}).",
+            ]
+        (tdir / "oracle.md").write_text("\n".join(md) + "\n")
+        tex = [
+            "\\begin{tabular}{lrlllll}",
+            "\\toprule",
+            "Judge & $n$ & MCTS better & AB better & Tie & Bound (ES) & Projected Elo \\\\",
+            "\\midrule",
+        ]
+        rows = [
+            (n, j["n"], j["stats"], j["projected_elo_of_bound"])
+            for n, j in o["judges"].items()
+        ]
+        if ag:
+            rows.append(
+                (
+                    "both agree",
+                    ag["n"],
+                    {
+                        "frac_mcts_better": ag["stats"]["frac_consensus_mcts_better"],
+                        "frac_ab_better": ag["stats"]["frac_consensus_ab_better"],
+                        "frac_tie": ag["stats"]["frac_consensus_tie"],
+                        "arbiter_upper_bound_es": ag["stats"]["consensus_bound_es"],
+                    },
+                    ag["projected_elo_of_consensus_bound"],
+                )
+            )
+        for name, n, st, pe in rows:
+            pe_ci = pe.get("ci95") or [None, None]
+            tex.append(
+                f"{esc(name)} & {n} & {ci(st['frac_mcts_better'])} & {ci(st['frac_ab_better'])} & "
+                f"{ci(st['frac_tie'])} & {ci(st['arbiter_upper_bound_es'])} & "
+                f"{fmt_num(pe['estimate'], 1)} [{fmt_num(pe_ci[0], 1)}, {fmt_num(pe_ci[1], 1)}] \\\\"
+            )
+        tex += ["\\bottomrule", "\\end{tabular}"]
+        (tdir / "oracle.tex").write_text("\n".join(tex) + "\n")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--results", default=str(REPO / "results" / "paper_v2"))
     ap.add_argument("--out", default=str(REPO / "docs" / "paper_v2"))
+    ap.add_argument(
+        "--final-analyses",
+        action="store_true",
+        help="also write the final-reading analyses (amendment 12; slow: parses every PGN move, "
+        "trace and engine log)",
+    )
     args = ap.parse_args(argv)
     results = pathlib.Path(args.results)
     out = pathlib.Path(args.out)
@@ -938,6 +1426,8 @@ def main(argv=None):
     plot_telemetry(cells, results, out)
     plot_micro(results, out)
     export_diagrams(out)
+    if args.final_analyses:
+        write_final_analyses(cells, results, out)
     print(
         f"cells: {len(cells)}, gates: {len(gates)} -> {out/'tables'}, {out/'figures'}"
     )
