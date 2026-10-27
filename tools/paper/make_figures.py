@@ -175,22 +175,28 @@ def write_tables(cells, gates, out: pathlib.Path):
     (tdir / "gates.md").write_text("\n".join(md) + "\n")
 
 
-def pgn_game_seconds(pgn: pathlib.Path) -> float:
-    """Sum of fastchess's [GameDuration "hh:mm:ss"] headers: machine time spent in games, robust to
-    interrupted and resumed invocations (summary.json only records the last invocation).
+def pgn_game_durations(pgn: pathlib.Path) -> tuple[float, int]:
+    """Sum and count of fastchess's [GameDuration "hh:mm:ss"] headers: machine time spent in games,
+    robust to interrupted and resumed invocations (summary.json only records the last invocation and
+    lags the PGN while a cell runs).
     """
-    total = 0.0
+    total, n = 0.0, 0
     if not pgn.exists():
-        return total
+        return total, n
     with open(pgn, errors="replace") as fh:
         for line in fh:
             if line.startswith("[GameDuration "):
                 try:
                     h, m, sec = line.split('"')[1].split(":")
                     total += int(h) * 3600 + int(m) * 60 + float(sec)
+                    n += 1
                 except (IndexError, ValueError):
                     pass
-    return total
+    return total, n
+
+
+def pgn_game_seconds(pgn: pathlib.Path) -> float:
+    return pgn_game_durations(pgn)[0]
 
 
 def block_ranges(manifest: dict, n_games: int, per_block: int, nblocks: int):
@@ -522,7 +528,7 @@ def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
     tdir = out / "tables"
     tdir.mkdir(parents=True, exist_ok=True)
     esc = lambda t: str(t).replace("_", "\\_").replace("%", "\\%")  # noqa: E731
-    # --- compute (hours from the blocks actually run)
+    # --- compute (hours of play: the sum of the PGN's game durations)
     md = [
         "| Cell | Games | Blocks | Hours | min/game |",
         "| --- | --- | --- | --- | --- |",
@@ -535,16 +541,19 @@ def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
     ]
     for c in cells:
         d = results / c["dir"]
-        hours = pgn_game_seconds(d / "games.pgn") / 3600
+        secs, timed = pgn_game_durations(d / "games.pgn")
+        hours = secs / 3600
         if not hours:
             s = load(d / "summary.json")
             hours = sum(b.get("elapsed_s", 0) for b in s.get("blocks_run") or []) / 3600
+            timed = c["games"]
         try:
             hist = load(d / "manifest.json").get("history") or []
             nb = len({h.get("block") for h in hist}) or c["blocks"]
         except (OSError, ValueError):
             nb = c["blocks"]
-        mpg = 60 * hours / c["games"] if c["games"] else 0
+        # per game of the same PGN the hours come from (summary.json's count lags a running cell)
+        mpg = 60 * hours / timed if timed else 0
         md.append(f"| {c['cell']} | {c['games']} | {nb} | {hours:.1f} | {mpg:.2f} |")
         tex.append(
             f"{esc(c['cell'])} & {c['games']} & {nb} & {hours:.1f} & {mpg:.2f} \\\\"
