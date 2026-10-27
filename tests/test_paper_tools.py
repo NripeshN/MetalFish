@@ -320,6 +320,32 @@ class RunnerBookkeepingTest(unittest.TestCase):
             fh.write('[GameDuration "00:01:30"]\n[GameDuration "01:00:00"]\n')
             path = fh.name
         self.assertEqual(self.mf.pgn_game_seconds(pathlib.Path(path)), 3690.0)
+        self.assertEqual(self.mf.pgn_game_durations(pathlib.Path(path)), (3690.0, 2))
+
+
+class MicrobenchFailureTest(unittest.TestCase):
+    """A sweep whose engine produced no measurement must not exit 0."""
+
+    def test_failed_measurements_exit_nonzero(self):
+        import microbench
+
+        saved = microbench.run
+        microbench.run = lambda *a, **k: "engine failed to start"
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                out = pathlib.Path(tmp) / "nn.json"
+                rc = microbench.main(
+                    ["nn", "--out", str(out), "--batches", "1", "--lc0", "/nonexistent"]
+                )
+                self.assertEqual(rc, 1)
+                self.assertIn("error", json.loads(out.read_text())["metalfish"][0])
+                out = pathlib.Path(tmp) / "ab.json"
+                rc = microbench.main(
+                    ["ab", "--out", str(out), "--threads", "1", "--repeats", "1"]
+                )
+                self.assertEqual(rc, 1)
+        finally:
+            microbench.run = saved
 
 
 class HostLoadSensitivityTest(unittest.TestCase):

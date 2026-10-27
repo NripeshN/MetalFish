@@ -180,6 +180,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     res["hardware"] = run(["sysctl", "-n", "machdep.cpu.brand_string"]).strip()
     with open(args.out, "w") as fh:
         json.dump(res, fh, indent=2)
+    # a measurement the engine or Lc0 failed to produce is written for diagnosis but fails the run,
+    # so the queue log records a non-zero exit instead of a sweep full of nulls
+    if args.which == "nn":
+        failed = [r for r in res["metalfish"] if r.get("median_ms") is None]
+        failed += [r for r in res["lc0"] if r.get("nps_steady_median") is None]
+    else:
+        failed = [r for r in res["rows"] if r.get("nps") is None]
+    if failed:
+        print(f"{len(failed)} measurement(s) failed; see {args.out}", file=sys.stderr)
+        return 1
     return 0
 
 
