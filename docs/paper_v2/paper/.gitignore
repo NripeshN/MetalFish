@@ -8,3 +8,5 @@
 *.fdb_latexmk
 *.synctex.gz
 build.log
+# arXiv source package (tools/paper/make_arxiv_source.py)
+arxiv/
