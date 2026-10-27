@@ -136,13 +136,13 @@ def write_tables(cells, gates, out: pathlib.Path):
     tdir.mkdir(parents=True, exist_ok=True)
     # Cells (markdown + LaTeX)
     md = [
-        "| Cell | Arms | Games | Elo (95% CI) | nElo | LOS | Pentanomial | GPU-active | MCTS evals/move |",
+        "| Cell | Arms | Games | Elo (95% CI) | nElo | LOS | Pentanomial | Transformer enabled | MCTS evals/move |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     tex = [
         "\\begin{tabular}{llrrrrl}",
         "\\toprule",
-        "Cell & Arms & Games & Elo & nElo & LOS & GPU-active \\\\",
+        "Cell & Arms & Games & Elo & nElo & LOS & Transformer enabled \\\\",
         "\\midrule",
     ]
     for c in cells:
@@ -563,13 +563,13 @@ def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
     (tdir / "compute.tex").write_text("\n".join(tex) + "\n")
     # --- telemetry (hybrid arms only)
     md = [
-        "| Cell | Hybrid moves | GPU-active | MCTS evals/move (median) | Playouts/move (median) | Disagreement rate | MCTS move chosen on disagreement | Reasons |",
+        "| Cell | Hybrid moves | Transformer enabled | MCTS evals/move (median) | Playouts/move (median) | Disagreement rate | MCTS move chosen on disagreement | Reasons |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     tex = [
         "\\begin{tabular}{lrrrrrr}",
         "\\toprule",
-        "Cell & Hybrid moves & GPU-active & Evals/move & Playouts/move & Disagree & MCTS chosen \\\\",
+        "Cell & Hybrid moves & Transformer enabled & Evals/move & Playouts/move & Disagree & MCTS chosen \\\\",
         "\\midrule",
     ]
     for c in cells:
@@ -686,8 +686,8 @@ def write_therm_table(cells, results: pathlib.Path, out: pathlib.Path):
 
 
 def plot_telemetry(cells, results: pathlib.Path, out: pathlib.Path):
-    """F4: GPU-active fraction per hybrid cell and the distribution of MCTS playouts per
-    transformer-active move (from moves.jsonl)."""
+    """F4: transformer-enabled fraction per hybrid cell and the distribution of MCTS playouts per
+    transformer-enabled move (from moves.jsonl)."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -705,7 +705,7 @@ def plot_telemetry(cells, results: pathlib.Path, out: pathlib.Path):
         [c["cell"] for c in rows],
         [100 * c["telemetry"]["gpu_active_fraction"] for c in rows],
     )
-    a1.set_ylabel("hybrid-engine moves with the transformer active (%)")
+    a1.set_ylabel("hybrid moves with the transformer enabled (%)")
     a1.set_ylim(0, 100)
     a1.tick_params(axis="x", rotation=20, labelsize=8)
     a1.grid(alpha=0.3, axis="y")
@@ -732,7 +732,7 @@ def plot_telemetry(cells, results: pathlib.Path, out: pathlib.Path):
         a2.boxplot(data, showfliers=False)
         a2.set_xticks(range(1, len(labels) + 1))
         a2.set_xticklabels(labels, rotation=20, fontsize=8)
-        a2.set_ylabel("MCTS playouts per transformer-active move")
+        a2.set_ylabel("MCTS playouts per transformer-enabled move")
         a2.grid(alpha=0.3, axis="y")
     fig.suptitle("Hybrid telemetry per cell")
     fig.tight_layout()
@@ -819,7 +819,8 @@ def plot_micro(results: pathlib.Path, out: pathlib.Path):
         nn = results / "micro" / "nn_latency.json"
     if nn.exists():
         d = load(nn)
-        fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 3.8))
+        plt.rcParams.update({"font.size": 11})
+        fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 4.2))
         for prec in ("fp16", "fp32"):
             rows = [r for r in d.get("metalfish", []) if r.get("precision") == prec]
             if rows:
@@ -842,16 +843,16 @@ def plot_micro(results: pathlib.Path, out: pathlib.Path):
                 [r["nps_steady_median"] for r in lc],
                 marker="s",
                 ls="--",
-                label="lc0 Metal (benchmark, steady-state nps)",
+                label="Lc0 Metal search (nodes/s, steady state)",
             )
         for a in (a1, a2):
             a.set_xscale("log", base=2)
             a.set_xlabel("batch size")
             a.grid(alpha=0.3)
         a1.set_ylabel("median latency per batch (ms)")
-        a2.set_ylabel("positions / s")
-        a2.legend(fontsize=8)
-        fig.suptitle(f"M1 — BT4 evaluation on {d.get('hardware', 'Apple Silicon')}")
+        a2.set_ylabel("evaluations / s (Lc0: search nodes / s)")
+        a2.legend(fontsize=9)
+        fig.suptitle("M1: BT4 latency and throughput against batch size")
         fig.tight_layout()
         for ext in ("pdf", "png"):
             fig.savefig(fdir / f"m1_nn_latency.{ext}", dpi=150)
@@ -863,13 +864,21 @@ def plot_micro(results: pathlib.Path, out: pathlib.Path):
         d = load(ab)
         agg = d.get("aggregate", {})
         th = sorted(int(k) for k in agg)
-        fig, ax = plt.subplots(figsize=(5, 3.8))
+        plt.rcParams.update({"font.size": 11})
+        fig, ax = plt.subplots(figsize=(5.5, 4.2))
         ax.plot(th, [agg[str(t)]["nps_median"] / 1e6 for t in th], marker="o")
+        # the M2 Max has 8 performance cores; higher thread counts also use the 4 efficiency cores
+        ax.axvline(8, color="grey", ls=":", lw=1)
+        ax.text(
+            8.2,
+            ax.get_ylim()[0],
+            " efficiency cores\n from here",
+            fontsize=9,
+            va="bottom",
+        )
         ax.set_xlabel("alpha-beta threads")
         ax.set_ylabel("nodes / s (millions)")
-        ax.set_title(
-            f"M2 — alpha-beta NPS vs threads, depth {d.get('depth')} ({d.get('hardware', '')})"
-        )
+        ax.set_title(f"M2: alpha-beta nodes/s, depth {d.get('depth')}")
         ax.grid(alpha=0.3)
         fig.tight_layout()
         for ext in ("pdf", "png"):
