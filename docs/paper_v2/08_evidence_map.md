@@ -80,13 +80,13 @@ per hybrid move.
 
 | Measurement | Value | Artifact |
 | --- | --- | --- |
-| `bench` node count, ported engine | 2,497,913 (= Stockfish 19 upstream signature) | build log `results/paper_v2/calibration/build_final.log`; CHANGELOG |
+| `bench` node count, ported engine | 2,497,913 (= Stockfish 19 upstream signature) | `results/paper_v2/queue_paper_log.txt` bench lines (25, 60, 98, 105); CHANGELOG |
 | `bench` single-thread NPS, ported engine vs SF19 PGO binary | 1.308 M vs 1.337 M (ratio 0.979, 3 runs each, sequential) | port agent report (2026-10-12) |
 | PGO vs plain LTO build (pre-port tree, depth 13, best of 3) | 1.263 vs 1.284 Mnps, identical node counts (2,477,446) | `tools/build_pgo.sh` run, 2026-10-12 |
 | AB NPS vs threads (pre-port tree, depth 15, median of 3) | 1: 1.37 M, 4: 5.80 M, 8: 7.54 M, 12: 10.72 M (+42% at 12 vs 8) | `results/paper_v2/micro/ab_scaling_preport.json` (re-run on the final engine pending) |
-| BT4 eval latency, MetalFish MPSGraph, frozen-day sweep (2026-10-14, machine otherwise idle, `micro/nn_latency.json`) | FP16: b1 7.40 ms (135 pos/s), b8 19.7 ms (407), b16 35.9 ms (446), b64 119 ms (538); FP32: b1 8.74 ms (114), b64 125 ms (511) | `results/paper_v2/micro/nn_latency.json` (built from the pre-C18 branch binary, identical NN code) |
+| BT4 eval latency, MetalFish MPSGraph, sweep of 2026-10-13 (build 8777b99, whose network code is the frozen one; no game running, host load not yet logged; `micro/nn_latency.json`; date from `queue_paper_log.txt`, corrected 2026-10-27) | FP16: b1 7.40 ms (135 pos/s), b8 19.7 ms (407), b16 35.9 ms (446), b64 119 ms (538); FP32: b1 8.74 ms (114), b64 125 ms (511) | `results/paper_v2/micro/nn_latency.json` (built from the pre-C18 branch binary, identical NN code) |
 | Lc0 0.32.1 Metal BT4 steady-state nps (`lc0 benchmark`, same sweep) | mb1 165, mb2 163, mb4 189, mb8 294, mb16 606, mb32 725, mb64 530 (median of the last five per-second samples; the all-sample median is biased low by the ramp-up) | `results/paper_v2/micro/nn_latency.json` `nps_steady_median` |
-| AB NPS vs threads, frozen-day run (depth 16, 5 repeats, `micro/ab_scaling.json`) | 1: 1.53 M, 2: 3.04 M, 4: 6.27 M, 6: 9.18 M, 8: 11.81 M, 12: 13.52 M | `results/paper_v2/micro/ab_scaling.json` |
+| AB NPS vs threads, run of 2026-10-13 (build 8777b99, whose search code is the frozen one; depth 16, 5 repeats, `micro/ab_scaling.json`) | 1: 1.53 M, 2: 3.04 M, 4: 6.27 M, 6: 9.18 M, 8: 11.81 M, 12: 13.52 M | `results/paper_v2/micro/ab_scaling.json` |
 | BT4 eval latency, MetalFish MPSGraph (idle machine, 2026-10-07) | FP16 b1 7.61 ms (131 pos/s), b16 36.1 ms (443 pos/s); FP32 b1 8.83 ms (113), b16 38.3 ms (418) | `06_environment_and_baselines.md` |
 | Lc0 0.32.1 Metal BT4 nps (idle machine, 2026-10-07) | mb1 ≈160, mb4 ≈215, mb16 ≈410, mb64 ≈600, mb256 ≈650 | `06_environment_and_baselines.md` |
 | The 2026-10-12 NN sweep | contaminated by concurrent builds; quarantined | `results/paper_v2/micro/nn_latency_m2max_CONTAMINATED_concurrent_builds.json` |
