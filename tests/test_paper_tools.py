@@ -165,6 +165,55 @@ class TraceParserTest(unittest.TestCase):
         self.assertEqual(len(recs), 1)
         self.assertEqual(recs[0]["engine"], "MF-Hybrid-T8")
 
+    def test_game_ids_from_position_commands(self):
+        fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
+        head = "[Engine] [10:00:00.000000] <         0x16fdff000>  "
+
+        def to(name, payload):
+            return f"{head}{name} <--- {payload}"
+
+        def frm(name, payload):
+            return f"{head}{name} ---> {payload}"
+
+        recs = self._parse(
+            [
+                to("MF", f"position fen {fen}"),
+                frm("MF", self.TRACE),
+                to("AB", f"position fen {fen} moves e7e5"),  # the opponent's own count
+                to("MF", f"position fen {fen} moves e7e5 g1f3"),
+                frm("MF", self.TRACE),
+                to(
+                    "MF", f"position fen {fen} moves d7d5"
+                ),  # colour-reversed partner game
+                frm("MF", self.FALLBACK),
+                to("MF", "position startpos"),
+                frm("MF", self.TRACE),
+            ]
+        )
+        self.assertEqual([r["game"] for r in recs], [1, 1, 2, 3])
+        self.assertEqual([r["opening"] for r in recs], [fen, fen, fen, "startpos"])
+        self.assertEqual(recs[2]["reason"], "ab_fallback_time_safety")
+        self.assertTrue(recs[1]["fen"].startswith("rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/"))
+        # the CLI streams the same records to --out
+        with tempfile.TemporaryDirectory() as d:
+            log = pathlib.Path(d) / "engines.log"
+            out = pathlib.Path(d) / "moves.jsonl"
+            log.write_text(
+                "\n".join(
+                    [
+                        to("MF", f"position fen {fen}"),
+                        frm("MF", self.TRACE),
+                        to("MF", "position startpos"),
+                        frm("MF", self.TRACE),
+                    ]
+                )
+                + "\n"
+            )
+            self.assertEqual(parse_hybrid_trace.main([str(log), "--out", str(out)]), 0)
+            streamed = [json.loads(l) for l in out.read_text().splitlines()]
+            self.assertEqual(streamed, parse_hybrid_trace.parse(str(log)))
+            self.assertEqual([r["game"] for r in streamed], [1, 2])
+
     def test_rounds_restarting_per_invocation_pair_by_round_and_fen(self):
         # Two fastchess invocations (block 0 and a resume/block 1) both number their rounds from 1;
         # the opening FEN keeps their pairs apart. An orphan game (one game of a round) is unpaired.
@@ -547,6 +596,216 @@ class OracleSamplingTest(unittest.TestCase):
         sample, info = self.op.stratified_sample(self._records()[:10], 600, seed=1)
         self.assertEqual(len(sample), 10)
         self.assertEqual(info["requested"], 10)
+
+
+class FakeJudge:
+    """Stands in for a UCI judge: scores every position +50 cp for the side to move and
+    records each call."""
+
+    def __init__(self):
+        self.calls = []
+
+    def analyse(self, board, limit, multipv=None, root_moves=None, game=None):
+        import chess
+        import chess.engine
+
+        self.calls.append(
+            {"fen": board.fen(), "limit": limit, "game": game, "multipv": multipv}
+        )
+        info = {
+            "score": chess.engine.PovScore(chess.engine.Cp(50), board.turn),
+            "pv": [next(iter(root_moves or board.legal_moves))],
+        }
+        if multipv:
+            return [
+                {
+                    "score": chess.engine.PovScore(chess.engine.Cp(10 * i), board.turn),
+                    "pv": [m],
+                }
+                for i, m in enumerate(root_moves)
+            ]
+        return info
+
+
+class OracleJudgingTest(unittest.TestCase):
+    """Pins the equal-effort scoring and the summary of tools/paper/oracle_probe.py
+    (amendment §11.12d/g)."""
+
+    def setUp(self):
+        try:
+            import chess  # noqa: F401
+            import oracle_probe  # noqa: F401
+        except ImportError as exc:  # python-chess missing
+            self.skipTest(f"oracle_probe unavailable: {exc}")
+        self.op = sys.modules["oracle_probe"]
+        self.chess = sys.modules["chess"]
+
+    def test_logistic_elo(self):
+        self.assertEqual(self.op.logistic_elo(0.0), 0.0)
+        self.assertAlmostEqual(self.op.logistic_elo(0.1), 400 * math.log10(0.6 / 0.4))
+        self.assertAlmostEqual(self.op.logistic_elo(-0.1), -self.op.logistic_elo(0.1))
+        self.assertIsNone(self.op.logistic_elo(0.5))
+        self.assertAlmostEqual(self.op.logistic(250.0, 250.0), 1 / (1 + math.exp(-1)))
+
+    def test_per_candidate_scoring_uses_equal_effort_and_fresh_trees(self):
+        import chess.engine
+
+        eng = FakeJudge()
+        board = self.chess.Board()
+        limit = chess.engine.Limit(nodes=30000)
+        j = self.op.judge_position(
+            eng, board, ["e2e4", "d2d4"], limit, per_candidate=True
+        )
+        self.assertEqual(len(eng.calls), 3)  # root search + one search per candidate
+        self.assertTrue(all(c["limit"] is limit for c in eng.calls))
+        self.assertTrue(all(c["multipv"] is None for c in eng.calls))
+        games = [c["game"] for c in eng.calls]
+        self.assertTrue(all(g is not None for g in games))
+        self.assertEqual(
+            len({id(g) for g in games}), 3
+        )  # ucinewgame before every search
+        self.assertEqual(eng.calls[1]["fen"].split()[1], "b")  # searched after the move
+        # +50 for the opponent to move after the candidate is -50 for the mover
+        self.assertEqual(j["cand_cp"], {"e2e4": -50.0, "d2d4": -50.0})
+        self.assertEqual(j["best_cp"], 50.0)
+
+    def test_restricted_search_for_time_limited_judges(self):
+        import chess.engine
+
+        eng = FakeJudge()
+        j = self.op.judge_position(
+            eng, self.chess.Board(), ["e2e4", "d2d4"], chess.engine.Limit(time=1.0)
+        )
+        self.assertEqual(len(eng.calls), 2)
+        self.assertEqual(eng.calls[1]["multipv"], 2)
+        self.assertIsNone(eng.calls[0]["game"])
+        self.assertEqual(j["cand_cp"], {"e2e4": 0.0, "d2d4": 10.0})
+
+    def test_mating_candidate_scored_without_search(self):
+        import chess.engine
+
+        eng = FakeJudge()
+        board = self.chess.Board(
+            "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2"
+        )
+        cp = self.op.cp_after_move(
+            eng, board, self.chess.Move.from_uci("d8h4"), chess.engine.Limit(nodes=10)
+        )
+        self.assertEqual(cp, 30000.0)
+        self.assertEqual(eng.calls, [])
+
+    @staticmethod
+    def _judge(verdict, loss_ab, loss_mcts, delta=0.0):
+        return {
+            "verdict": verdict,
+            "loss_ab_es": loss_ab,
+            "loss_mcts_es": loss_mcts,
+            "delta_cp": delta,
+        }
+
+    def _rows(self):
+        def row(stratum, cluster, sf, lc0):
+            return {
+                "fen": "f",
+                "ab_move": "a",
+                "mcts_move": "m",
+                "selected": "a",
+                "stratum": stratum,
+                "cluster": cluster,
+                "judges": {"sf": sf, "lc0": lc0},
+            }
+
+        J = self._judge
+        return [
+            row("A", "g1", J("mcts", 0.10, 0.0), J("mcts", 0.04, 0.0)),
+            row("A", "g2", J("ab", 0.0, 0.05), J("mcts", 0.02, 0.0)),
+            row("B", "g3", J("tie", 0.0, 0.0), J("tie", 0.0, 0.0)),
+            row("B", "g3", J("ab", 0.0, 0.03), J("ab", 0.0, 0.01)),
+        ]
+
+    def test_summary_reweights_strata_and_bounds_on_consensus(self):
+        sampling = {"strata_population": {"A": 300, "B": 100}}
+        s = self.op.summarise(self._rows(), ["sf", "lc0"], sampling, n_boot=500, seed=1)
+        self.assertEqual(
+            (s["positions"], s["games"], s["cluster_unit"]), (4, 3, "game")
+        )
+        sf = s["judges"]["sf"]["stats"]
+        self.assertAlmostEqual(sf["frac_mcts_better"]["estimate"], 0.75 * 0.5)
+        self.assertAlmostEqual(sf["frac_mcts_better"]["sample_mean"], 0.25)
+        self.assertAlmostEqual(sf["arbiter_upper_bound_es"]["estimate"], 0.75 * 0.05)
+        self.assertAlmostEqual(sf["realised_accuracy"]["estimate"], 0.75 * 0.5 + 0.25)
+        lo, hi = sf["arbiter_upper_bound_es"]["ci95"]
+        self.assertLessEqual(lo, 0.75 * 0.05)
+        self.assertGreaterEqual(hi, 0.75 * 0.05)
+        # stratum B is one game: resampling games keeps its tie and its AB win together
+        self.assertEqual(sf["frac_tie"]["ci95"], [0.125, 0.125])
+        elo = s["judges"]["sf"]["projected_elo_of_bound"]["estimate"]
+        self.assertAlmostEqual(elo, self.op.logistic_elo(0.0375))
+        lc0 = s["judges"]["lc0"]["stats"]
+        self.assertAlmostEqual(lc0["frac_mcts_better"]["estimate"], 0.75)
+        ag = s["agreement"]
+        self.assertAlmostEqual(ag["stats"]["frac_judges_agree"]["estimate"], 0.625)
+        self.assertAlmostEqual(ag["stats"]["frac_undecided"]["estimate"], 0.375)
+        # only the first position has both judges finding the unselected move better: min bound
+        self.assertAlmostEqual(
+            ag["stats"]["consensus_bound_es"]["estimate"], 0.75 * 0.02
+        )
+        self.assertAlmostEqual(ag["cohen_kappa_sample"], 0.4375 / 0.6875)
+        self.assertEqual(ag["confusion"]["ab/mcts"], 1)
+
+    def test_weights_fall_back_to_row_shares(self):
+        rows = self._rows()
+        w = self.op.stratum_weights(rows, {})
+        self.assertEqual(w, {"A": 0.5, "B": 0.5})
+
+    def test_summarise_only_rewrites_the_summary_without_engines(self):
+        with tempfile.TemporaryDirectory() as d:
+            moves = [pathlib.Path(d) / "a.jsonl", pathlib.Path(d) / "b.jsonl"]
+            out = pathlib.Path(d) / "oracle.jsonl"
+            fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 20"
+            for k, path in enumerate(moves):
+                with open(path, "w") as fh:
+                    for i in range(3):
+                        rec = {
+                            "fen": fen,
+                            "ab_move": "e2e4",
+                            "mcts_move": "d2d4",
+                            "selected": "e2e4",
+                            "mcts_root_visits": i,
+                            "game": i,
+                            "source": str(path),
+                            "engine": "MF",
+                        }
+                        fh.write(json.dumps(rec) + "\n")
+            with open(out, "w") as fh:
+                for r in self._rows():
+                    fh.write(json.dumps(r) + "\n")
+            rc = self.op.main(
+                [
+                    *map(str, moves),
+                    "--out",
+                    str(out),
+                    "--judge",
+                    "sf=-",
+                    "--judge",
+                    "lc0=-",
+                    "--nodes",
+                    "lc0:30000",
+                    "--summarise-only",
+                    "--bootstrap",
+                    "200",
+                ]
+            )
+            self.assertEqual(rc, 0)
+            summ = json.loads(pathlib.Path(str(out) + ".summary.json").read_text())
+            self.assertEqual(summ["positions"], 4)
+            self.assertEqual(summ["judging"]["lc0"]["limit"], "nodes 30000")
+            self.assertEqual(
+                summ["method"]["expected_score"],
+                "logistic, 250 cp per unit of log-odds",
+            )
+            self.assertEqual(summ["sampling"]["method"], "stratified")
+            self.assertEqual(sum(summ["sampling"]["strata_population"].values()), 6)
 
 
 if __name__ == "__main__":
