@@ -1,0 +1,22 @@
+{
+  "source": "softwareupdate --history on the measurement host, read 2026-10-31; local install times converted to UTC (BST until 2026-10-25, GMT after)",
+  "note": "The manifests record sw_vers 27.2 without the build, so these dates are the only record of which macOS build a game ran on.",
+  "builds": [
+    {
+      "build": "macOS 27.2 beta",
+      "installed_utc": "2026-09-23T19:16:14Z"
+    },
+    {
+      "build": "macOS 27.2 beta 3",
+      "installed_utc": "2026-10-16T09:31:21Z"
+    },
+    {
+      "build": "macOS 27.2 release candidate",
+      "installed_utc": "2026-10-20T17:39:48Z"
+    },
+    {
+      "build": "macOS 27.2",
+      "installed_utc": "2026-10-31T13:40:16Z"
+    }
+  ]
+}
