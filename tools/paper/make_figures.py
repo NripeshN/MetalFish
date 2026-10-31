@@ -1152,6 +1152,35 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
         )
     rob_tex += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "robustness.md").write_text("\n".join(rob_md) + "\n")
+    # each cell by the macOS build its pairs started on (amendment 13; docs/paper_v2/os_builds.json)
+    bpath = REPO / "docs" / "paper_v2" / "os_builds.json"
+    if bpath.exists():
+        builds = robustness.load_builds(str(bpath))
+        md = [
+            "| Cell | macOS build | Games | Pairs | Elo (95% CI), builds with at least 100 pairs |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for c in cells:
+            pgn = results / c["dir"] / "games.pgn"
+            if not pgn.exists() or not c["arm_a"]:
+                continue
+            for build, gs in robustness.split_by_build(
+                penta_stats.read_games(str(pgn)), builds
+            ).items():
+                st = penta_stats.compute(gs, c["arm_a"])
+                est = (
+                    fmt_pm(st.get("elo"), st.get("elo_pm"))
+                    if st.get("pairs", 0) >= 100
+                    else "—"
+                )
+                # RQ1a was interpreted before amendment 13 added this breakdown
+                note = (
+                    " (added after the interpretation)" if c["cell"] == "RQ1a" else ""
+                )
+                md.append(
+                    f"| {c['cell']} | {build} | {st['games']} | {st.get('pairs', 0)} | {est}{note} |"
+                )
+        (tdir / "os_builds.md").write_text("\n".join(md) + "\n")
     (tdir / "robustness.tex").write_text("\n".join(rob_tex) + "\n")
     (tdir / "blocks_q.md").write_text("\n".join(blk_md) + "\n")
     (tdir / "adjudications.md").write_text("\n".join(adj_md) + "\n")

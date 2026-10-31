@@ -15,6 +15,8 @@ records; tools/paper/make_figures.py writes the tables. No games are run.
 - move_stats: time, depth and nodes per second of each arm's moves from the PGN move comments
 - adjudications: adjudicated games by type and by the arm they favoured
 - flag_counts: how often each 0/1 trace flag held on the disagreement records
+- load_builds / split_by_build: the games grouped by the macOS build each pair started on
+  (amendment 13; build dates in docs/paper_v2/os_builds.json)
 """
 
 from __future__ import annotations
@@ -518,3 +520,42 @@ def flag_counts(records: Iterable[Dict]) -> Dict:
         "first_hint_is_mcts_move": first_is_mcts,
         "first_hint_is_ab_move": first_is_ab,
     }
+
+
+def load_builds(path: str) -> List[Tuple[dt.datetime, str]]:
+    """[(install time, build)] from docs/paper_v2/os_builds.json, in time order."""
+    import json
+
+    with open(path) as fh:
+        data = json.load(fh)
+    out = []
+    for b in data["builds"]:
+        t = dt.datetime.strptime(b["installed_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=dt.timezone.utc
+        )
+        out.append((t, b["build"]))
+    return sorted(out)
+
+
+def split_by_build(
+    games: List[Dict], builds: List[Tuple[dt.datetime, str]]
+) -> Dict[str, List[Dict]]:
+    """The games grouped by the macOS build that was installed when each pair's first game
+    started (unpaired games by their own start), keeping each pair's games adjacent and in play
+    order, so penta_stats.compute pairs them again."""
+    times = [t for t, _ in builds]
+
+    def build_at(g: Dict) -> str:
+        iv = _interval(g)
+        if not iv:
+            return "unknown"
+        k = bisect.bisect_right(times, iv[0]) - 1
+        return builds[k][1] if k >= 0 else "before the first recorded build"
+
+    pairs, singles = penta_stats.make_pairs(games)
+    units = [(min(i, j), [i, j]) for i, j in pairs] + [(k, [k]) for k in singles]
+    out: Dict[str, List[Dict]] = {}
+    for first, idx in sorted(units):
+        label = build_at(games[first])
+        out.setdefault(label, []).extend(games[k] for k in sorted(idx))
+    return out

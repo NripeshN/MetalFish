@@ -510,3 +510,26 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     RQ1a's first 50 pairs (with the pre-freeze build), and the 183 games set aside by amendment 7
     played its first 92 openings. RQ1a is therefore also reported without its first 92 openings, and
     the 183 set-aside games are reported on their own; the gating matches used another seed.
+13. **2026-10-31 — macOS builds during the cells; an update during the last blocks (written before
+    RQ2a, RQ2b and RQ5c are interpreted; RQ1a was interpreted on 2026-10-31 at 07:50 UTC).** The host's
+    update history (`softwareupdate --history`) shows that macOS 27.2 was a pre-release build for most
+    of the measurement period and was updated automatically three times: 27.2 beta (installed
+    2026-09-23, in use at the freeze, for the microbenchmarks of 2026-10-13 and for the first blocks),
+    27.2 beta 3 (2026-10-16 09:31 UTC), the release candidate (2026-10-20 17:39 UTC) and the final
+    release (2026-10-31 13:40 UTC); the dates are in `docs/paper_v2/os_builds.json`. The manifests
+    record `sw_vers` 27.2 without the build, which is why this was not noticed earlier. The binary,
+    its bundled libraries and every option are unchanged (SHA-256 `8c534bb6…` checked after the last
+    update, and the engine starts normally); the system frameworks the transformer runs on (Metal,
+    MPSGraph) and the system libraries are not. The last update installed while RQ2a was playing: its
+    game 945 was lost on time by the AB(6) arm with an 873 ms overrun during the installation, and the
+    machine restarted at 13:46 UTC before the pair's second game finished; the unpaired game stays in
+    the record, its opening is replayed, and the queue resumed by itself after the restart. The
+    load spike behind amendment 9's four forfeits began 48 minutes after the beta 3 installation.
+    Decisions: (a) primary estimates stay as registered, over all games; (b) every cell is also
+    reported by macOS build (games per build, and the estimate on each build with at least 100
+    pairs; a pair belongs to the build its first game started on), and a difference between builds
+    larger than its standard error is reported and discussed; the builds partly coincide with the
+    blocks, which the per-block estimates and Cochran's Q already compare; (c) RQ1a's breakdown by
+    build is computed after its interpretation and is labelled as such; (d) the microbenchmarks
+    re-run after the cells run on the final release, and each microbenchmark is reported with its
+    build; (e) the author is asked to defer further system updates until the programme ends.

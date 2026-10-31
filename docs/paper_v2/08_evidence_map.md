@@ -355,6 +355,17 @@ traced moves; the MCTS move was played on 7 of 25,138 disagreements, all through
 verification rejecting the MCTS move 19,579, alpha-beta default 5,552. The interim interval after
 three blocks (−8.4 ± 7.3) had excluded zero; as registered, no decision was taken on it.
 
+System update and restart, 2026-10-31 (amendment 13): macOS 27.2 (final release) installed automatically
+at 13:40 UTC over the release candidate while RQ2a block 3 was playing; RQ2a game 945 (AB(6) arm) was
+lost on time by 873 ms during the installation, and the host restarted at 13:46 UTC before the pair's
+second game finished (the game is unpaired and its opening is replayed). The login agent restarted the
+logger, the queue, the watchdog and the chain at 13:57 UTC. The `openclaw` gateway had relaunched with
+the login session and was crash-looping again (1,825 restarts by 15:05 UTC); it was stopped again at
+15:05 UTC, while Spotlight re-indexed after the update. The binary's SHA-256 (`8c534bb6…`) was
+re-checked and the engine starts normally on the new build. The host's update history
+(`docs/paper_v2/os_builds.json`) shows three earlier automatic updates during the programme: 27.2 beta
+(2026-09-23), beta 3 (2026-10-16 09:31 UTC) and the release candidate (2026-10-20 17:39 UTC).
+
 Host-load logger extended, 2026-10-27 21:20 UTC (amendment 12c): every line of `hostload.log` now also
 carries `gpu_util` (IOAccelerator "Device Utilization %", an instantaneous sample that includes the
 engines' own GPU use), `gpu_mem_mb` (GPU in-use system memory), `mem_level` (`kern.memorystatus_level`,

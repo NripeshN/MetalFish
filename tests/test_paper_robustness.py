@@ -225,6 +225,35 @@ class RobustnessTest(unittest.TestCase):
         self.assertEqual((out["with_hints"], out["first_hint_is_mcts_move"]), (1, 1))
 
 
+@unittest.skipIf(robustness is None, "robustness unavailable (python-chess missing)")
+class BuildSplitTest(unittest.TestCase):
+    def test_pairs_follow_the_build_of_their_first_game(self):
+        import json
+
+        builds_json = {
+            "builds": [
+                {"build": "beta", "installed_utc": "2026-10-01T00:00:00Z"},
+                {"build": "rc", "installed_utc": "2026-10-20T10:04:00Z"},
+            ]
+        }
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+            json.dump(builds_json, fh)
+            path = fh.name
+        builds = robustness.load_builds(path)
+        self.assertEqual([b for _, b in builds], ["beta", "rc"])
+        # T0 is 2026-10-20 10:00 UTC: the first pair starts on the beta and finishes on the rc,
+        # the second pair starts on the rc; a lone game at T0 + 20 min is unpaired
+        games = pair(1, "f1", 1.0, 0.5, 0) + pair(2, "f2", 0.0, 0.5, 10)
+        games.append(game(3, "f3", "A", "B", "1-0", 20))
+        split = robustness.split_by_build(games, builds)
+        self.assertEqual([g["fen"] for g in split["beta"]], ["f1", "f1"])
+        self.assertEqual([g["fen"] for g in split["rc"]], ["f2", "f2", "f3"])
+        import penta_stats
+
+        st = penta_stats.compute(split["rc"], "A")
+        self.assertEqual((st["pairs"], st["unpaired_games"]), (1, 1))
+
+
 class BackendbenchParseTest(unittest.TestCase):
     def test_parses_the_row_of_the_requested_batch(self):
         import microbench
