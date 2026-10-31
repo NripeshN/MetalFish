@@ -15,6 +15,8 @@ records; tools/paper/make_figures.py writes the tables. No games are run.
 - move_stats: time, depth and nodes per second of each arm's moves from the PGN move comments
 - adjudications: adjudicated games by type and by the arm they favoured
 - flag_counts: how often each 0/1 trace flag held on the disagreement records
+- evals_by_position / eval_rate_by_block: the hybrid's MCTS evaluation rate by block, a measure
+  of GPU health (amendment 12 (c)), from the traces joined to the PGN move times by position
 - load_builds / split_by_build: the games grouped by the macOS build each pair started on
   (amendment 13; build dates in docs/paper_v2/os_builds.json)
 """
@@ -520,6 +522,60 @@ def flag_counts(records: Iterable[Dict]) -> Dict:
         "first_hint_is_mcts_move": first_is_mcts,
         "first_hint_is_ab_move": first_is_ab,
     }
+
+
+def evals_by_position(records: Iterable[Dict]) -> Dict[str, Optional[int]]:
+    """FEN -> network evaluations of the transformer-enabled trace record at that position (not a
+    time-safety move, mcts_evals > 0). None marks a position with more than one record of any
+    kind, which cannot be matched to a single move."""
+    out: Dict[str, Optional[int]] = {}
+    seen = set()
+    for r in records:
+        fen = r.get("fen")
+        if not fen:
+            continue
+        if fen in seen:
+            out[fen] = None
+            continue
+        seen.add(fen)
+        ev = r.get("mcts_evals")
+        if (
+            r.get("reason") != "ab_fallback_time_safety"
+            and isinstance(ev, (int, float))
+            and ev > 0
+        ):
+            out[fen] = int(ev)
+    return out
+
+
+def eval_rate_by_block(
+    moves: Iterable[Tuple[int, int, float]], blocks: Sequence[Tuple[int, int, int]]
+) -> Dict[int, Dict]:
+    """The hybrid's MCTS evaluation rate by block (amendment 12 (c)) from (PGN game index, network
+    evaluations, move time in s) of its matched transformer-enabled moves and the blocks' (block,
+    first game, end) ranges: per block the moves, the median and 10th percentile of evaluations
+    per second of move time, and total evaluations over total move time."""
+    acc: Dict[int, Dict] = {}
+    for k, ev, t in moves:
+        if not t or t <= 0:
+            continue
+        b = next((b for b, first, end in blocks if first <= k < end), None)
+        if b is None:
+            continue
+        a = acc.setdefault(b, {"rates": [], "evals": 0, "time": 0.0})
+        a["rates"].append(ev / t)
+        a["evals"] += ev
+        a["time"] += t
+    out = {}
+    for b, a in sorted(acc.items()):
+        r = sorted(a["rates"])
+        out[b] = {
+            "moves": len(r),
+            "rate_p50": quantile(r, 0.5),
+            "rate_p10": quantile(r, 0.1),
+            "rate_total": a["evals"] / a["time"],
+        }
+    return out
 
 
 def load_builds(path: str) -> List[Tuple[dt.datetime, str]]:

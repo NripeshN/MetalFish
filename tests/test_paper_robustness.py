@@ -224,6 +224,27 @@ class RobustnessTest(unittest.TestCase):
         self.assertEqual(out["flags"], {"x_flag": 1})
         self.assertEqual((out["with_hints"], out["first_hint_is_mcts_move"]), (1, 1))
 
+    def test_eval_rate_by_block_skips_unmatched_positions(self):
+        recs = [
+            {"fen": "p1", "reason": "engines_agree", "mcts_evals": 40},
+            {"fen": "p2", "reason": "ab_fallback_time_safety"},
+            {"fen": "p3", "reason": "ab_default", "mcts_evals": 30},
+            {"fen": "p3", "reason": "ab_default", "mcts_evals": 35},
+            {"fen": "p4", "reason": "ab_root_rejects_mcts", "mcts_evals": 0},
+            {"fen": "p5", "reason": "engines_agree", "mcts_evals": 90},
+            {"fen": "p5", "reason": "ab_fallback_time_safety"},
+            {"fen": "p6", "reason": "engines_agree", "mcts_evals": 60},
+        ]
+        ev = robustness.evals_by_position(recs)
+        self.assertEqual(ev, {"p1": 40, "p3": None, "p5": None, "p6": 60})
+        # games 0-1 are block 0 and games 2-3 block 1; a move without time is skipped
+        moves = [(0, 40, 0.5), (3, 90, 1.0), (3, 60, 2.0), (2, 50, 0.0)]
+        out = robustness.eval_rate_by_block(moves, [(0, 0, 2), (1, 2, 4)])
+        self.assertEqual((out[0]["moves"], out[1]["moves"]), (1, 2))
+        self.assertAlmostEqual(out[0]["rate_p50"], 80.0)
+        self.assertAlmostEqual(out[1]["rate_p50"], 60.0)
+        self.assertAlmostEqual(out[1]["rate_total"], 50.0)
+
 
 @unittest.skipIf(robustness is None, "robustness unavailable (python-chess missing)")
 class BuildSplitTest(unittest.TestCase):
