@@ -324,6 +324,37 @@ Pace 1.57 min per game over 19.6 h of play; thermal log: 1,238 samples, no warni
 on 2026-10-30 from 03:59 to 10:39 UTC: outside load exceeded 3 cores in 6 of its 400 in-game minutes
 (2%).
 
+**RQ1a final reading** (2026-10-31; block 3 ended 07:34 UTC; the cell is complete and is interpreted
+once, by the rule of amendment 12 (a)). Computed from `RQ1a/games.pgn` with `penta_stats.py` and
+`robustness.py`; no other cell was read.
+
+| Cell | Comparison | Games | Elo (95% CI) | nElo | LOS | Ptnml [0..2] | W / D / L | Time forfeits | Artifact |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| RQ1a | Hybrid(8) vs AB(8), 30+0.3 | 2,002 (999 pairs + 4 unpaired) | **−4.4 [−10.7, +2.0]** (± 6.3) | −10.5 ± 15.2 | 8.9% | [0, 185, 654, 160, 0] | 504 / 973 / 525 | 7 (0.35%; AB 6, hybrid 1) | `RQ1a/games.pgn`, `RQ1a/summary.json` |
+
+Decision rule (amendment 12 (a)): the 95% interval spans zero, so RQ1a is **inconclusive at this N**:
+no effect of the concurrent GPU search was detected at an equal `Threads` setting, so the GPU path does
+not pay for itself at this budget on this machine; effects above +2.0 Elo or below −10.7 Elo are
+excluded.
+
+Sensitivity analyses (amendment 12 (b), (h); the primary estimate's standard error is 3.2 Elo): zero
+outside load (pair-level regression on the fraction of high-load minutes, 794 pairs with samples, 226
+exposed; slope −0.001 ± 0.020 per unit fraction) −3.0 ± 8.0; low-load pairs only (amendment 8; 773 of
+999 pairs kept) −3.4 ± 7.1; forfeit pairs removed −4.6 ± 6.3; forfeits scored as draws −5.2 ± 6.3;
+without the first 92 openings −4.8 ± 6.7. No estimate moves by more than one standard error, so the
+result is **not load-sensitive**. Blocks (amendment 12 (g)): −11.8 ± 12.6, −7.0 ± 13.1, −6.3 ± 12.1,
++7.6 ± 12.7 (draw ratio 47–50%); Cochran's Q = 5.03 (3 df), p = 0.17; bootstrap over the runner's 218
+chunks, 95% interval [−9.9, +2.2]. Load-log coverage: block 0 45 of 250 pairs (the logger started
+during block 0), blocks 1–3 complete. The 183 games set aside by amendment 7 (rc1 binary, first 92
+openings): 91 pairs + 1 unpaired, −9.6 ± 18.6.
+
+Telemetry (`summary.json`, 128,952 hybrid moves): transformer enabled on 53.1%; median 36 MCTS
+evaluations and 38 playouts per transformer-enabled move; alpha-beta and MCTS disagree on 36.7% of the
+traced moves; the MCTS move was played on 7 of 25,138 disagreements, all through
+`mcts_root_reject_q_gap`. Decision reasons: time-safety 60,496, agreement 43,318, alpha-beta
+verification rejecting the MCTS move 19,579, alpha-beta default 5,552. The interim interval after
+three blocks (−8.4 ± 7.3) had excluded zero; as registered, no decision was taken on it.
+
 Host-load logger extended, 2026-10-27 21:20 UTC (amendment 12c): every line of `hostload.log` now also
 carries `gpu_util` (IOAccelerator "Device Utilization %", an instantaneous sample that includes the
 engines' own GPU use), `gpu_mem_mb` (GPU in-use system memory), `mem_level` (`kern.memorystatus_level`,
