@@ -1042,6 +1042,7 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
     except (OSError, KeyError, ValueError):
         nblocks = 4
     pairs_by_cell = {}
+    ranges_by_cell = {}
     rob_md = [
         "| Cell | Primary | Zero outside load (regression) | Low-load pairs only | Forfeit pairs removed | Forfeits as draws | Without first 92 openings | Load-sensitive |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -1123,7 +1124,9 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
             pairs_total = int(m["cell"]["pairs"])
             per_block = -(-pairs_total // nblocks)
             chunk_starts = [h.get("games_before", 0) for h in m.get("history") or []]
-            for b, first, end in block_ranges(m, len(games), per_block, nblocks):
+            ranges = list(block_ranges(m, len(games), per_block, nblocks))
+            ranges_by_cell[c["cell"]] = ranges
+            for b, first, end in ranges:
                 st = penta_stats.compute(games[first:end], c["arm_a"])
                 if st.get("elo") is not None and st.get("elo_pm"):
                     ests.append(st["elo"])
@@ -1234,20 +1237,29 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
         "\\midrule",
     ]
     flag_md = []
+    gh_md = [
+        "| Cell | Block | Matched transformer-enabled moves | MCTS evaluations per second of move time, median (10th percentile) | Total evaluations / total move time |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    gh_notes = []
     for c in cells:
         d = results / c["dir"]
         pgn = d / "games.pgn"
         if not pgn.exists() or not c["arm_a"]:
             continue
-        cls_of = {}
+        cls_of, slim, ev_of = {}, [], {}
         mj = d / "moves.jsonl"
         if mj.exists() and (c["telemetry"] or {}).get("moves_total"):
 
-            def traced(fh, table=cls_of):
-                # one pass: the move class of every traced position, and the records streamed on
+            def traced(fh, table=cls_of, keep=slim):
+                # one pass: the move class of every traced position, the fields the evaluation
+                # rate needs, and the records streamed on
                 for line in fh:
                     r = json.loads(line)
                     if r.get("fen"):
+                        keep.append(
+                            {k: r.get(k) for k in ("fen", "reason", "mcts_evals")}
+                        )
                         kind = (
                             "time-safety"
                             if r.get("reason") == "ab_fallback_time_safety"
@@ -1260,6 +1272,7 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
 
             with open(mj) as fh:
                 fc = robustness.flag_counts(traced(fh))
+            ev_of = robustness.evals_by_position(slim)
             logc = count_log_lines(
                 d / "engines.log",
                 ["subsearch stop grace expired", "engines agree, stopping early"],
@@ -1284,9 +1297,36 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
             k = table.get(m.get("fen"))
             return None if k in (None, "ambiguous") else k
 
+        rate_moves = []
+
+        def tee(moves, hyb=c["arm_a"], table=ev_of, out=rate_moves):
+            # the hybrid's matched transformer-enabled moves, for the evaluation rate by block
+            for mv in moves:
+                if mv["engine"] == hyb and table.get(mv.get("fen")):
+                    out.append((mv["game"], table[mv["fen"]], mv["time"]))
+                yield mv
+
         st = robustness.move_stats(
-            robustness.iter_engine_moves(str(pgn), with_fen=bool(cls_of)), classify
+            tee(robustness.iter_engine_moves(str(pgn), with_fen=bool(cls_of))), classify
         )
+        if rate_moves and c["cell"] in ranges_by_cell:
+            enabled = sum(
+                1
+                for r in slim
+                if r["reason"] != "ab_fallback_time_safety"
+                and isinstance(r["mcts_evals"], (int, float))
+                and r["mcts_evals"] > 0
+            )
+            rates = robustness.eval_rate_by_block(rate_moves, ranges_by_cell[c["cell"]])
+            # the whole cell as well (M3: in-game MCTS evaluations per second)
+            rates.update(robustness.eval_rate_by_block(rate_moves, [("all", 0, 10**9)]))
+            for b, v in rates.items():
+                gh_md.append(
+                    f"| {c['cell']} | {b} | {v['moves']} | {v['rate_p50']:.0f} ({v['rate_p10']:.0f}) | {v['rate_total']:.0f} |"
+                )
+            gh_notes.append(
+                f"{c['cell']}: {len(rate_moves)} of {enabled} transformer-enabled trace records matched to a PGN move by position."
+            )
         for (eng, cls), v in sorted(st.items()):
             prof = ", ".join(f"{k}: {t:.2f}" for k, t in v["time_by_index"].items())
             label = eng if cls == "all" else f"{eng} ({cls})"
@@ -1303,6 +1343,9 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
     (tdir / "timing.md").write_text("\n".join(tim_md) + "\n")
     (tdir / "timing.tex").write_text("\n".join(tim_tex) + "\n")
     (tdir / "flags.md").write_text("\n".join(flag_md) + "\n")
+    (tdir / "gpu_health.md").write_text(
+        "\n".join(gh_md) + "\n\n" + "\n".join(gh_notes) + "\n"
+    )
 
     # outside processes and the GPU and memory covariates over in-game minutes
     full = parse_hostload_full(results / "hostload.log")
