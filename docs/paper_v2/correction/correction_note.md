@@ -5,11 +5,11 @@ IntelliSys 2026*, Lecture Notes in Networks and Systems, vol. 2078, Springer, Ch
 https://doi.org/10.1007/978-3-032-32726-0_39
 
 > Status: **draft for an author-initiated Correction** (prepared 2026-10-14, revised 2026-10-27
-> after the manuscript's integrity check: items 8–10). Fields in double
-> braces are filled before filing: `{{RQ1A_RESULT}}` (from `results/paper_v2/RQ1a/summary.json` when the cell completes),
-> `{{PREPRINT}}` (arXiv identifier of the follow-up paper), `{{ZENODO_DOI}}`. Nothing else
-> in this note depends on pending work; every other number cites an existing artifact
-> (see `error_list.md`).
+> after the manuscript's integrity check: items 8–10; the RQ1a result in item 1 filled on
+> 2026-10-31 from `results/paper_v2/RQ1a/summary.json`, the cell's final reading in
+> `08_evidence_map.md` §E). Fields in double braces are filled before filing: `{{PREPRINT}}`
+> (arXiv identifier of the follow-up paper) and `{{ZENODO_DOI}}`. Nothing else in this note
+> depends on pending work; every other number cites an existing artifact (see `error_list.md`).
 
 The author has re-examined the chapter against the engine's source code at the commit the
 chapter described (repository commit `ec1dee5`, 11 May 2026) and against the retained
@@ -34,9 +34,12 @@ concern how its components and its results were characterised.
    and no rating for any of the three modes should be inferred from the chapter. The game
    records of the 322-game tournament were not retained, so the win/draw/loss counts in
    Table 5 cannot be independently verified. A controlled measurement of the hybrid mode
-   against the engine's own eight-thread alpha-beta mode under a pre-registered protocol
-   (30 s + 0.3 s per game, colour-swapped opening pairs, pentanomial statistics) is reported in
-   {{PREPRINT}}: {{RQ1A_RESULT}}.
+   against the engine's own eight-thread alpha-beta mode, under a pre-registered protocol
+   (30 s per game plus 0.3 s per move, colour-swapped opening pairs, pentanomial statistics)
+   and with the engine at the commit frozen for that study (`365f36a`) rather than the version
+   the chapter describes, is reported in {{PREPRINT}}: over 2,002 games the hybrid mode scored
+   −4.4 Elo against the alpha-beta mode (95% confidence interval −10.7 to +2.0), so no
+   difference between the two modes was detected.
 
 2. **Provenance of the alpha-beta engine** (Sect. 2.1; Sect. 3.1; Sect. 5.2; Sect. 1,
    contribution 1). "Our alpha-beta engine derives from the Stockfish codebase, inheriting its
