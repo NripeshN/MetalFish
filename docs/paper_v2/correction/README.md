@@ -6,14 +6,14 @@ Systems and Applications. IntelliSys 2026*, Lecture Notes in Networks and System
 Springer, Cham, pp. 653–664, DOI [10.1007/978-3-032-32726-0_39](https://doi.org/10.1007/978-3-032-32726-0_39)
 (published online 2026-08-14; print year 2027). Basis: `../01_published_paper_audit.md`.
 
-**Status (2026-10-27): draft, not filed.** Filing is outward-facing and is the author's action;
-see `support_ticket.md` for the exact steps. Before filing, fill the three remaining fields in
+**Status (2026-10-31): draft, not filed.** Filing is outward-facing and is the author's action;
+see `support_ticket.md` for the exact steps. Before filing, fill the two remaining fields in
 `correction_note.md`:
 
 | Field | Source | State |
 | --- | --- | --- |
 | `{{LNNS_VOLUME}}` | SpringerLink chapter page, read 2026-10-27: LNNS vol. 2078 | filled |
-| `{{RQ1A_RESULT}}` | `results/paper_v2/RQ1a/summary.json` → "Elo ± 95% CI over N games" (cell running) | pending |
+| `{{RQ1A_RESULT}}` | `results/paper_v2/RQ1a/summary.json` (final reading 2026-10-31, `08_evidence_map.md` §E): −4.4 Elo, 95% CI −10.7 to +2.0, over 2,002 games | filled |
 | `{{PREPRINT}}` | arXiv identifier of the follow-up paper (Phase B) | pending |
 | `{{ZENODO_DOI}}` | Zenodo deposit of `results/paper_v2` (Phase A, after the cells) | pending |
 
