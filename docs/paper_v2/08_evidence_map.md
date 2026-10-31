@@ -366,6 +366,58 @@ re-checked and the engine starts normally on the new build. The host's update hi
 (`docs/paper_v2/os_builds.json`) shows three earlier automatic updates during the programme: 27.2 beta
 (2026-09-23), beta 3 (2026-10-16 09:31 UTC) and the release candidate (2026-10-20 17:39 UTC).
 
+**RQ2a final reading** (2026-10-31; block 3 ended 18:22 UTC; the cell is complete and is interpreted
+once, by amendments 12 and 13). Computed from `RQ2a/games.pgn` with `penta_stats.py` and
+`robustness.py`; no other cell was read.
+
+| Cell | Comparison | Games | Elo (95% CI) | nElo | LOS | Ptnml [0..2] | W / D / L | Time forfeits | Artifact |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| RQ2a | AB(6) vs AB(8), 30+0.3 | 1,001 (500 pairs + 1 unpaired) | **−19.8 [−28.6, −11.1]** (± 8.8) | −48.8 ± 21.5 | 0.0% | [0, 114, 329, 57, 0] | 230 / 483 / 288 | 1 (0.1%; AB(6), the unpaired game 945 during the system update) | `RQ2a/games.pgn`, `RQ2a/summary.json` |
+
+Reading (02 §5 RQ2; exploratory, amendment 12 (g)): the 95% interval is below zero, so giving two of
+the eight alpha-beta threads to the GPU side, as the pre-amendment split did, costs about 20 Elo at
+30+0.3 on this machine.
+
+Sensitivity analyses (amendment 12 (b); the primary estimate's standard error is 4.5 Elo): zero outside
+load (pair-level regression on the fraction of high-load minutes; all 500 pairs have samples, 135
+exposed; slope +0.059 ± 0.026 per unit fraction) −24.7 ± 9.8, which differs from the primary estimate by
+4.9 Elo, more than one standard error, so RQ2a is **load-sensitive** and both estimates are reported:
+the positive slope means the gap between six and eight threads was smaller in pairs played under outside
+load, so the estimated price of the two threads at zero outside load is larger than the all-games
+estimate. Low-load pairs only (amendment 8; 365 of 500 kept) −23.8 ± 10.1 (shift −4.0, within one
+standard error). The cell's only forfeit is in the unpaired game, so removing forfeit pairs or scoring
+forfeits as draws leaves the estimate at −19.8 ± 8.8. In-game minutes with outside CPU above 300%: 199
+of 1,629 (12.2%); median outside CPU 128%. Blocks (amendment 12 (g)): −9.7 ± 17.0, −32.1 ± 18.4, −23.7 ±
+17.0, −13.9 ± 17.5 (draw ratio 44–52%); Cochran's Q = 3.69 (3 df), p = 0.30; bootstrap over the runner's
+113 chunks, 95% interval [−31.4, −11.7]. Pairs exposed to a minute above 300%, by block (descriptive):
+65 of 125 (52%; block 0 was played before the load gate of amendment 8), 10, 12 and 48 (38%; block 3 was
+played on 2026-10-31, around the system update). Load-log coverage: complete in all four blocks.
+Amendment 12 (b)(ii) says that block 0 of RQ2a predates the logger; it does not: the logger's first line
+is 2026-10-15 00:57 UTC, during RQ1a's block 0 and 2.5 h before RQ2a's first game (03:24 UTC), so only
+RQ1a's block 0 is partly uncovered (45 of 250 pairs).
+
+By macOS build (amendment 13 (b); a pair belongs to the build its first game started on): 27.2 beta,
+250 games (125 pairs, exactly block 0), −9.7 ± 17.0; release candidate, 695 games (347 pairs + the
+unpaired game), −25.1 ± 10.6; final release, 56 games (28 pairs, below the 100-pair threshold, no
+estimate). Release candidate minus beta is −15.3 (standard error 10.2), larger than its standard error,
+so it is reported: the beta pairs are block 0, the only block played without the load gate and the
+one with the most outside load, so build, scheduling regime and load cannot be separated here, and
+Cochran's Q over the blocks does not indicate heterogeneity (p = 0.30).
+
+Health (`make_figures.py`): adjudicated 899 of 1,001 games; no other terminations; 1.59 min per game
+over 26.5 h of play; thermal log: 1,666 samples, no warning. GPU and memory covariates (amendment
+12 (c); 1,005 in-game minutes logged since 2026-10-27 21:20 UTC): GPU utilisation median 2% (p95 50%;
+neither arm uses the GPU), GPU in-use memory median 799 MB, memory available median 62% (minimum 48%),
+5,200 page-outs during the cell's games.
+
+RQ1a by macOS build (amendment 13 (c); computed on 2026-10-31 after RQ1a's interpretation, and labelled
+as such): 27.2 beta, 514 games (256 pairs + 2 unpaired: block 0 and the first 6 pairs of block 1),
+−10.9 ± 12.4; beta 3, 320 games (159 pairs + 2 unpaired, within block 1), +2.2 ± 15.7; release
+candidate, 1,168 games (584 pairs: the rest of block 1 and blocks 2–3), −3.3 ± 8.3. Beta 3 minus beta is
++13.1 (standard error 10.2), larger than its standard error; release candidate minus beta (+7.6, standard
+error 7.6) and minus beta 3 (−5.5, standard error 9.1) are not. The builds follow the blocks, whose
+estimates Cochran's Q does not flag (p = 0.17).
+
 Host-load logger extended, 2026-10-27 21:20 UTC (amendment 12c): every line of `hostload.log` now also
 carries `gpu_util` (IOAccelerator "Device Utilization %", an instantaneous sample that includes the
 engines' own GPU use), `gpu_mem_mb` (GPU in-use system memory), `mem_level` (`kern.memorystatus_level`,
