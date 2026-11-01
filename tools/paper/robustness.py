@@ -490,14 +490,20 @@ def adjudications(games: List[Dict], arms: Sequence[str]) -> Dict:
 
 def flag_counts(records: Iterable[Dict]) -> Dict:
     """On the traced disagreements (alpha-beta and MCTS moves differ, not a time-safety move):
-    how often each 0/1 trace field held, plus the hint fields' presence and agreement.
+    how often each 0/1 trace field held, plus the hint fields' presence and agreement. Over every
+    traced move that is not a time-safety move: how many had root hints and how many ran the
+    verification sub-search (the engine fills ab_verified_hints only when it ran; RQ6a).
     """
     counts: Dict[str, int] = {}
     nonflag = set()
     n = hints = first_is_mcts = first_is_ab = 0
+    traced = traced_hints = traced_verified = 0
     for r in records:
         if r.get("reason") == "ab_fallback_time_safety":
             continue
+        traced += 1
+        traced_hints += bool(r.get("ab_hints"))
+        traced_verified += bool(r.get("ab_verified_hints"))
         if (
             not (r.get("ab_move") and r.get("mcts_move"))
             or r["ab_move"] == r["mcts_move"]
@@ -526,6 +532,9 @@ def flag_counts(records: Iterable[Dict]) -> Dict:
         "with_hints": hints,
         "first_hint_is_mcts_move": first_is_mcts,
         "first_hint_is_ab_move": first_is_ab,
+        "traced": traced,
+        "traced_with_hints": traced_hints,
+        "traced_with_verification": traced_verified,
     }
 
 
@@ -551,6 +560,22 @@ def evals_by_position(records: Iterable[Dict]) -> Dict[str, Optional[int]]:
         ):
             out[fen] = int(ev)
     return out
+
+
+def class_switches(seq: Iterable[Tuple[int, str]]) -> Dict:
+    """Switches between transformer-enabled and time-safety moves within each game, from the
+    hybrid's moves in game order as (game, class)."""
+    last: Dict[int, str] = {}
+    to_enabled = to_safety = 0
+    for game, cls in seq:
+        prev = last.get(game)
+        if prev is not None and prev != cls:
+            if cls == "transformer-enabled":
+                to_enabled += 1
+            else:
+                to_safety += 1
+        last[game] = cls
+    return {"games": len(last), "to_enabled": to_enabled, "to_safety": to_safety}
 
 
 def eval_rate_by_block(

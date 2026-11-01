@@ -1259,6 +1259,10 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
         "\\midrule",
     ]
     flag_md = []
+    switch_md = [
+        "| Cell | Games | Switches from a time-safety to a transformer-enabled move | Switches from a transformer-enabled to a time-safety move |",
+        "| --- | --- | --- | --- |",
+    ]
     gh_md = [
         "| Cell | Block | Matched transformer-enabled moves | MCTS evaluations per second of move time, median (10th percentile) | Total evaluations / total move time |",
         "| --- | --- | --- | --- | --- |",
@@ -1300,7 +1304,10 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
                 ["subsearch stop grace expired", "engines agree, stopping early"],
             )
             flag_md.append(
-                f"## {c['cell']}\n\nTraced disagreements: {fc['disagreements']}; with root hints: "
+                f"## {c['cell']}\n\nTraced moves other than time-safety moves: {fc['traced']}; "
+                f"with root hints: {fc['traced_with_hints']}; with the verification sub-search: "
+                f"{fc['traced_with_verification']}.\n\n"
+                f"Traced disagreements: {fc['disagreements']}; with root hints: "
                 f"{fc['with_hints']}; first hint = MCTS move: {fc['first_hint_is_mcts_move']}; "
                 f"first hint = alpha-beta move: {fc['first_hint_is_ab_move']}. Engine log: "
                 + (
@@ -1319,18 +1326,30 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
             k = table.get(m.get("fen"))
             return None if k in (None, "ambiguous") else k
 
-        rate_moves = []
+        rate_moves, order = [], []
 
-        def tee(moves, hyb=c["arm_a"], table=ev_of, out=rate_moves):
-            # the hybrid's matched transformer-enabled moves, for the evaluation rate by block
+        def tee(
+            moves, hyb=c["arm_a"], table=ev_of, out=rate_moves, cls=cls_of, seq=order
+        ):
+            # the hybrid's matched transformer-enabled moves, for the evaluation rate by block,
+            # and the class of each of its moves in game order, for the switches between classes
             for mv in moves:
-                if mv["engine"] == hyb and table.get(mv.get("fen")):
-                    out.append((mv["game"], table[mv["fen"]], mv["time"]))
+                if mv["engine"] == hyb:
+                    if table.get(mv.get("fen")):
+                        out.append((mv["game"], table[mv["fen"]], mv["time"]))
+                    k = cls.get(mv.get("fen"))
+                    if k in ("transformer-enabled", "time-safety"):
+                        seq.append((mv["game"], k))
                 yield mv
 
         st = robustness.move_stats(
             tee(robustness.iter_engine_moves(str(pgn), with_fen=bool(cls_of))), classify
         )
+        if order:
+            sw = robustness.class_switches(order)
+            switch_md.append(
+                f"| {c['cell']} | {sw['games']} | {sw['to_enabled']} | {sw['to_safety']} |"
+            )
         if rate_moves and c["cell"] in ranges_by_cell:
             enabled = sum(
                 1
@@ -1365,6 +1384,10 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
     (tdir / "timing.md").write_text("\n".join(tim_md) + "\n")
     (tdir / "timing.tex").write_text("\n".join(tim_tex) + "\n")
     (tdir / "flags.md").write_text("\n".join(flag_md) + "\n")
+    # in the split configuration every switch resizes alpha-beta's pool (the hybrid's share on
+    # transformer-enabled moves, the full Threads value on time-safety moves), and a resize
+    # rebuilds the workers with empty per-thread histories (hybrid_search.cpp, UCIEngine::go)
+    (tdir / "switches.md").write_text("\n".join(switch_md) + "\n")
     (tdir / "gpu_health.md").write_text(
         "\n".join(gh_md) + "\n\n" + "\n".join(gh_notes) + "\n"
     )
