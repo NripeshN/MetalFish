@@ -432,6 +432,12 @@ jobs:
             $env:VCPKG_INSTALLATION_ROOT = "C:\vcpkg"
           }
           $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
+          # Pin the ports tree to the parent of microsoft/vcpkg de775baf ("[protobuf] Update to 7.36.2",
+          # 2026-10-22). The windows-2025-vs2026 image 20261030 ships that tree, and with protobuf 7.36.2
+          # the x64-windows (DLL) link of net.pb.cc fails on fixed_address_empty_string; the parent keeps
+          # protobuf 6.33.4, which every earlier run used.
+          git -C $env:VCPKG_ROOT fetch --quiet origin d6eee3dba8766a176e08ee4c741ae0b166ebbfcd
+          git -C $env:VCPKG_ROOT checkout --quiet d6eee3dba8766a176e08ee4c741ae0b166ebbfcd
           vcpkg install protobuf zlib abseil --triplet x64-windows
           python -m pip install -r tests/requirements.txt
 
