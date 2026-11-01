@@ -562,6 +562,22 @@ def evals_by_position(records: Iterable[Dict]) -> Dict[str, Optional[int]]:
     return out
 
 
+def class_switches(seq: Iterable[Tuple[int, str]]) -> Dict:
+    """Switches between transformer-enabled and time-safety moves within each game, from the
+    hybrid's moves in game order as (game, class)."""
+    last: Dict[int, str] = {}
+    to_enabled = to_safety = 0
+    for game, cls in seq:
+        prev = last.get(game)
+        if prev is not None and prev != cls:
+            if cls == "transformer-enabled":
+                to_enabled += 1
+            else:
+                to_safety += 1
+        last[game] = cls
+    return {"games": len(last), "to_enabled": to_enabled, "to_safety": to_safety}
+
+
 def eval_rate_by_block(
     moves: Iterable[Tuple[int, int, float]], blocks: Sequence[Tuple[int, int, int]]
 ) -> Dict[int, Dict]:

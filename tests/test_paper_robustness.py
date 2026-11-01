@@ -247,6 +247,14 @@ class RobustnessTest(unittest.TestCase):
             (3, 1, 1),
         )
 
+    def test_class_switches_per_game(self):
+        E, S = "transformer-enabled", "time-safety"
+        seq = [(0, E), (0, E), (0, S), (0, E), (0, S), (1, S), (1, E), (1, E)]
+        self.assertEqual(
+            robustness.class_switches(seq),
+            {"games": 2, "to_enabled": 2, "to_safety": 2},
+        )
+
     def test_eval_rate_by_block_skips_unmatched_positions(self):
         recs = [
             {"fen": "p1", "reason": "engines_agree", "mcts_evals": 40},
