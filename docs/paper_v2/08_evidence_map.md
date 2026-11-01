@@ -483,6 +483,51 @@ logged since 2026-10-27 21:20 UTC): GPU utilisation median 87% (p95 89%; the hyb
 block medians 88%, 88%, 84%), GPU in-use memory median 918 MB (block medians 966, 937 and 642 MB),
 memory available median 60% (minimum 36%), 9,164 page-outs during the cell's games.
 
+**RQ5c final reading** (2026-11-01; block 3 ended 08:33 UTC; the cell is complete and is interpreted
+once, by amendments 12 and 13). Computed from `RQ5c/games.pgn` with `penta_stats.py` and
+`robustness.py`; no other cell was read. With this reading the four MUST game cells (RQ1a, RQ2a, RQ2b
+and RQ5c) are complete.
+
+| Cell | Comparison | Games | Elo (95% CI) | nElo | LOS | Ptnml [0..2] | W / D / L | Time forfeits | Artifact |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| RQ5c | AB(8) (frozen build, alpha-beta only) vs Stockfish 19 (8 threads), 30+0.3, `Hash` 2048 MB each; move overhead 50 ms for AB(8), Stockfish 19's default 10 ms | 1,000 (500 pairs) | **+1.4 [−7.3, +10.1]** (± 8.7) | +3.5 ± 21.5 | 62.3% | [0, 79, 338, 83, 0] | 249 / 506 / 245 | 0 | `RQ5c/games.pgn`, `RQ5c/summary.json` |
+
+Reading (02 §5 RQ5c; exploratory, amendment 12 (g); read as a parity interval with no equivalence
+claim, amendment 12 (a)): the 95% interval spans zero, so no difference between the frozen build's
+alpha-beta engine and Stockfish 19 at equal threads and hash was detected at 30+0.3 on this machine.
+The interval excludes differences above +10.1 Elo and below −7.3 Elo; no equivalence margin was
+registered, so the reading does not say that the two engines are equally strong. It is consistent
+with the expectation registered in 02 §5 (≈ 0 after the 2026-10-12 port). AB(8) is the baseline of
+RQ1a and RQ2a, so those comparisons are against an engine within this range of Stockfish 19. Threads
+and hash are equal, the move overhead is not: AB(8) uses the 50 ms of every MetalFish arm
+(`experiments.json`; the paper's match setup states it) and Stockfish 19 its default 10 ms, which
+leaves AB(8) slightly less time per move; the size of that effect is not measured.
+
+Sensitivity analyses (amendment 12 (b); the primary estimate's standard error is 4.4 Elo): zero outside
+load (pair-level regression; all 500 pairs have samples, 109 exposed; slope +0.011 ± 0.020 per unit
+fraction) +0.3 ± 9.5 (shift −1.1); low-load pairs only (amendment 8; 391 of 500 kept) −0.4 ± 9.6
+(shift −1.8); there were no time forfeits, so both forfeit variants equal the primary estimate. No
+estimate moves by more than one standard error, so RQ5c is **not load-sensitive**. In-game minutes
+with outside CPU above 300%: 248 of 1,619 (15.3%); median outside CPU 146%. Blocks (amendment 12 (g)):
++2.8 ± 17.7, +6.9 ± 17.8, −2.8 ± 17.2, −1.4 ± 16.6 (draw ratio 48–54%); Cochran's Q = 0.73 (3 df),
+p = 0.87; bootstrap over the runner's 113 chunks, 95% interval [−8.1, +11.2]. Pairs exposed to a
+minute above 300%, by block (descriptive): 81 of 125 (65%; block 0, played on 2026-10-15/16 under the
+gate of amendment 8, then checked only between chunks of 10 pairs, before the in-chunk watchdog of
+amendments 9 and 10), 18 (14%), 6 (5%) and 4 (3%). Load-log coverage: complete in all four blocks.
+
+By macOS build (amendment 13 (b); a pair belongs to the build its first game started on): 27.2 beta,
+250 games (125 pairs, exactly block 0), +2.8 ± 17.7; release candidate, 500 games (250 pairs, blocks
+1–2), +2.1 ± 12.4; final release, 250 games (125 pairs, exactly block 3), −1.4 ± 16.6. All three
+differences are within their standard errors: release candidate minus beta −0.7 (standard error
+11.0), final release minus beta −4.2 (12.4), final release minus release candidate −3.5 (10.6).
+
+Health (`make_figures.py`): adjudicated 894 of 1,000 games (400 draws; wins 249 for AB(8), 245 for
+Stockfish 19), 106 ended normally (all draws); no time forfeits and no other terminations; 1.58 min
+per game over 26.3 h of play; thermal log: 1,661 samples, no warning. Host covariates (amendment
+12 (c); 1,212 of the cell's 1,619 in-game minutes carry them, blocks 1–3, logged since 2026-10-27
+21:20 UTC): GPU utilisation median 1% (p95 22%; neither engine uses the GPU), GPU in-use memory
+median 674 MB, memory available median 62% (minimum 35%), 6,073 page-outs during the cell's games.
+
 Host-load logger extended, 2026-10-27 21:20 UTC (amendment 12c): every line of `hostload.log` now also
 carries `gpu_util` (IOAccelerator "Device Utilization %", an instantaneous sample that includes the
 engines' own GPU use), `gpu_mem_mb` (GPU in-use system memory), `mem_level` (`kern.memorystatus_level`,
