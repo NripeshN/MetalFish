@@ -162,6 +162,22 @@ class RobustnessTest(unittest.TestCase):
             )["depth"],
             26,
         )
+        # the cells' format (fastchess pgnout with timeleft and seldepth): tl= and sd= sit between
+        self.assertEqual(
+            robustness.parse_move_comment(
+                "-0.87/26 5.090s, tl=16.014s, n=46082718, sd=65, nps=9053579"
+            ),
+            {"depth": 26, "time": 5.09, "nodes": 46082718, "nps": 9053579},
+        )
+        self.assertEqual(
+            robustness.parse_move_comment(
+                "-0.86/22 0.712s, tl=29.888s, n=3191743, sd=0, nps=4482785"
+            )["nps"],
+            4482785,
+        )
+        self.assertIsNone(
+            robustness.parse_move_comment("+0.30/20 1.000s, tl=29.000s")["nodes"]
+        )
         self.assertIsNone(robustness.parse_move_comment("book"))
         pgn = (
             '[Event "t"]\n[White "A"]\n[Black "B"]\n[Result "1-0"]\n\n'
