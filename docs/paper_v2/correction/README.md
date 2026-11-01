@@ -13,7 +13,7 @@ see `support_ticket.md` for the exact steps. Before filing, fill the two remaini
 | Field | Source | State |
 | --- | --- | --- |
 | `{{LNNS_VOLUME}}` | SpringerLink chapter page, read 2026-10-27: LNNS vol. 2078 | filled |
-| `{{RQ1A_RESULT}}` | `results/paper_v2/RQ1a/summary.json` (final reading 2026-10-31, `08_evidence_map.md` §E): −4.4 Elo, 95% CI −10.7 to +2.0, over 2,002 games | filled |
+| `{{RQ1A_RESULT}}` | `results/paper_v2/RQ1a/summary.json` (final reading 2026-10-31, `08_evidence_map.md` §E): −4.3 Elo, 95% CI −10.7 to +2.0, over 2,002 games (corrected 2026-11-01 from −4.4, which had been rounded twice; `08_evidence_map.md` §E "Rounding corrections") | filled |
 | `{{PREPRINT}}` | arXiv identifier of the follow-up paper (Phase B) | pending |
 | `{{ZENODO_DOI}}` | Zenodo deposit of `results/paper_v2` (Phase A, after the cells) | pending |
 

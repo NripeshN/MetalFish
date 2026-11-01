@@ -38,7 +38,7 @@ concern how its components and its results were characterised.
    (30 s per game plus 0.3 s per move, colour-swapped opening pairs, pentanomial statistics)
    and with the engine at the commit frozen for that study (`365f36a`) rather than the version
    the chapter describes, is reported in {{PREPRINT}}: over 2,002 games the hybrid mode scored
-   −4.4 Elo against the alpha-beta mode (95% confidence interval −10.7 to +2.0), so no
+   −4.3 Elo against the alpha-beta mode (95% confidence interval −10.7 to +2.0), so no
    difference between the two modes was detected.
 
 2. **Provenance of the alpha-beta engine** (Sect. 2.1; Sect. 3.1; Sect. 5.2; Sect. 1,

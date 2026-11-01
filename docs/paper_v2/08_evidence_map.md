@@ -330,7 +330,7 @@ once, by the rule of amendment 12 (a)). Computed from `RQ1a/games.pgn` with `pen
 
 | Cell | Comparison | Games | Elo (95% CI) | nElo | LOS | Ptnml [0..2] | W / D / L | Time forfeits | Artifact |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| RQ1a | Hybrid(8) vs AB(8), 30+0.3 | 2,002 (999 pairs + 4 unpaired) | **−4.4 [−10.7, +2.0]** (± 6.3) | −10.5 ± 15.2 | 8.9% | [0, 185, 654, 160, 0] | 504 / 973 / 525 | 7 (0.35%; AB 6, hybrid 1) | `RQ1a/games.pgn`, `RQ1a/summary.json` |
+| RQ1a | Hybrid(8) vs AB(8), 30+0.3 | 2,002 (999 pairs + 4 unpaired) | **−4.3 [−10.7, +2.0]** (± 6.3) | −10.5 ± 15.2 | 8.9% | [0, 185, 654, 160, 0] | 504 / 973 / 525 | 7 (0.35%; AB 6, hybrid 1) | `RQ1a/games.pgn`, `RQ1a/summary.json` |
 
 Decision rule (amendment 12 (a)): the 95% interval spans zero, so RQ1a is **inconclusive at this N**:
 no effect of the concurrent GPU search was detected at an equal `Threads` setting, so the GPU path does
@@ -346,7 +346,7 @@ result is **not load-sensitive**. Blocks (amendment 12 (g)): −11.8 ± 12.6, �
 +7.6 ± 12.7 (draw ratio 47–50%); Cochran's Q = 5.03 (3 df), p = 0.17; bootstrap over the runner's 218
 chunks, 95% interval [−9.9, +2.2]. Load-log coverage: block 0 45 of 250 pairs (the logger started
 during block 0), blocks 1–3 complete. The 183 games set aside by amendment 7 (rc1 binary, first 92
-openings): 91 pairs + 1 unpaired, −9.6 ± 18.6.
+openings): 91 pairs + 1 unpaired, −9.5 ± 18.6.
 
 Telemetry (`summary.json`, 128,952 hybrid moves): transformer enabled on 53.1%; median 36 MCTS
 evaluations and 38 playouts per transformer-enabled move; alpha-beta and MCTS disagree on 36.7% of the
@@ -380,7 +380,7 @@ the eight alpha-beta threads to the GPU side, as the pre-amendment split did, co
 
 Sensitivity analyses (amendment 12 (b); the primary estimate's standard error is 4.5 Elo): zero outside
 load (pair-level regression on the fraction of high-load minutes; all 500 pairs have samples, 135
-exposed; slope +0.059 ± 0.026 per unit fraction) −24.7 ± 9.8, which differs from the primary estimate by
+exposed; slope +0.059 ± 0.026 per unit fraction) −24.7 ± 9.7, which differs from the primary estimate by
 4.9 Elo, more than one standard error, so RQ2a is **load-sensitive** and both estimates are reported:
 the positive slope means the gap between six and eight threads was smaller in pairs played under outside
 load, so the estimated price of the two threads at zero outside load is larger than the all-games
@@ -414,7 +414,7 @@ RQ1a by macOS build (amendment 13 (c); computed on 2026-10-31 after RQ1a's inter
 as such): 27.2 beta, 514 games (256 pairs + 2 unpaired: block 0 and the first 6 pairs of block 1),
 −10.9 ± 12.4; beta 3, 320 games (159 pairs + 2 unpaired, within block 1), +2.2 ± 15.7; release
 candidate, 1,168 games (584 pairs: the rest of block 1 and blocks 2–3), −3.3 ± 8.3. Beta 3 minus beta is
-+13.1 (standard error 10.2), larger than its standard error; release candidate minus beta (+7.6, standard
++13.0 (standard error 10.2), larger than its standard error; release candidate minus beta (+7.6, standard
 error 7.6) and minus beta 3 (−5.5, standard error 9.1) are not. The builds follow the blocks, whose
 estimates Cochran's Q does not flag (p = 0.17).
 
@@ -527,6 +527,19 @@ per game over 26.3 h of play; thermal log: 1,661 samples, no warning. Host covar
 12 (c); 1,212 of the cell's 1,619 in-game minutes carry them, blocks 1–3, logged since 2026-10-27
 21:20 UTC): GPU utilisation median 1% (p95 22%; neither engine uses the GPU), GPU in-use memory
 median 674 MB, memory available median 62% (minimum 35%), 6,073 page-outs during the cell's games.
+
+**Rounding corrections** (2026-11-01, before the correction note was filed or the paper used these
+values). Four values in the final readings above had been rounded twice: the final-reading helper
+prints two decimals, and the records rounded that print again. Checked at full precision (each cell's
+`summary.json` and a recomputation from the PGNs) and against the tables of `make_figures.py
+--final-analyses` (`robustness.md`, `setaside.md`, `os_builds.md`), they are: RQ1a −4.3 Elo (exactly
+−4.348; recorded as −4.4), with its interval [−10.7, +2.0] unchanged; the 183 set-aside games
+−9.5 ± 18.6 (−9.547; recorded as −9.6); RQ1a's beta 3 minus beta +13.0 (+13.046; recorded as +13.1);
+RQ2a's zero-load estimate −24.7 ± 9.7 (± 9.747; recorded as ± 9.8). The entries above, the
+strength-check table (07) and the correction package now carry these values. No reading changes:
+RQ1a's interval still spans zero, the build difference is still larger than its standard error, and
+RQ2a's zero-load shift (4.9 Elo) is unchanged. Every other value of the four final readings matches
+the recomputation.
 
 Host-load logger extended, 2026-10-27 21:20 UTC (amendment 12c): every line of `hostload.log` now also
 carries `gpu_util` (IOAccelerator "Device Utilization %", an instantaneous sample that includes the
