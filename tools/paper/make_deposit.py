@@ -190,6 +190,7 @@ def main() -> int:
         capture_output=True,
         text=True,
     ).stdout.strip()
+    oracle = (RESULTS / "RQ6b" / "oracle.jsonl").exists()
     meta = {
         "metadata": {
             "upload_type": "dataset",
@@ -199,8 +200,17 @@ def main() -> int:
                 "Complete record of the pre-registered evaluation of MetalFish's concurrent alpha-beta + transformer-MCTS "
                 "search on an Apple M2 Max: the evaluation protocol with amendments, the audit of the earlier IntelliSys 2026 "
                 "chapter and the prepared Correction, every game (PGN), engine log and hybrid trace, manifests with binary, "
-                "network and book hashes, thermal logs, microbenchmarks, the oracle study, and the scripts that generate "
-                f"every figure and table of the paper. Engine source: repository tag {git}."
+                "network and book hashes, thermal logs, microbenchmarks, "
+                + ("the oracle study, " if oracle else "")
+                + "and the scripts that generate every figure and table of the paper. "
+                + (
+                    ""
+                    if oracle
+                    else "This version holds the cells of the paper version described in FROZEN.md; the oracle "
+                    "study and the cells still running at its cut-off follow in a later version. "
+                )
+                + "Engine source: repository tag paper-v2-freeze-rc2 (the source of commit 365f36a); records and "
+                f"scripts as of {git}."
             ),
             "keywords": [
                 "computer chess",
