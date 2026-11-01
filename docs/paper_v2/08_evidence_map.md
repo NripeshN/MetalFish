@@ -418,6 +418,71 @@ candidate, 1,168 games (584 pairs: the rest of block 1 and blocks 2–3), −3.3
 error 7.6) and minus beta 3 (−5.5, standard error 9.1) are not. The builds follow the blocks, whose
 estimates Cochran's Q does not flag (p = 0.17).
 
+**RQ2b final reading** (2026-11-01; block 3 ended 01:45 UTC; the cell is complete and is interpreted
+once, by amendments 12 and 13). Computed from `RQ2b/games.pgn` with `penta_stats.py` and
+`robustness.py`; the derived RQ2c also uses `RQ2a/games.pgn` (interpreted on 2026-10-31); no other
+cell was read.
+
+| Cell | Comparison | Games | Elo (95% CI) | nElo | LOS | Ptnml [0..2] | W / D / L | Time forfeits | Artifact |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| RQ2b | Hybrid-split(8) (6 AB threads + MCTS worker) vs AB(6), 30+0.3 | 1,000 (500 pairs) | **−17.0 [−26.2, −7.9]** (± 9.1) | −40.3 ± 21.5 | 0.0% | [1, 113, 320, 66, 0] | 230 / 491 / 279 | 1 (0.1%; hybrid-split arm, block 1, 2026-10-28, by 32 ms) | `RQ2b/games.pgn`, `RQ2b/summary.json` |
+| RQ2c (derived) | Hybrid-split(8) vs AB(8) = RQ2b + RQ2a (AB(6) vs AB(8)); shared-opening covariance included | 1,000 + 1,001 | **−36.9 [−49.6, −24.2]** (± 12.7) | — | — | — | — | — | `RQ2b/games.pgn`, `RQ2a/games.pgn` |
+
+Reading (02 §5 RQ2; exploratory, amendment 12 (g)): the 95% interval is below zero, so with the same six
+alpha-beta threads as its opponent, the split hybrid's GPU search (one MCTS worker on the rest of the
+eight-thread budget) cost about 17 Elo at 30+0.3 on this machine instead of adding strength. Every move
+the hybrid played was its alpha-beta side's move (the MCTS move was chosen in none of the 13,152
+disagreements; telemetry below), so the loss does not come from moves chosen by MCTS. Derived RQ2c: the
+split hybrid against AB(8) is −36.9 Elo (95% interval [−49.6, −24.2]), about 20 Elo for the two threads
+(RQ2a) and 17 Elo for running the GPU search beside the six (RQ2b). 02 §5 writes RQ2c ≈ RQ2b − RQ2a with
+RQ2a scored from AB(8)'s side; RQ2a is scored here from AB(6)'s side, so the two are added. The outcome
+02 §5 singles out, a positive RQ2b with a negative RQ2c (the GPU search helps only when CPU threads are
+free), did not occur: RQ2b is negative, so the GPU search did not help even with the alpha-beta threads
+held equal. The direct RQ2c cell is queued after the oracle (`queue_after_must_rc2_gated.sh`).
+
+Sensitivity analyses (amendment 12 (b); the primary estimate's standard error is 4.7 Elo): zero outside
+load (pair-level regression; 499 of 500 pairs have samples, 113 exposed; slope −0.008 ± 0.025 per unit
+fraction) −16.3 ± 10.1 (shift +0.7); low-load pairs only (amendment 8; 387 of 500 kept) −16.6 ± 10.3
+(shift +0.4); forfeit pairs removed (499 pairs) −16.4 ± 9.0 (shift +0.7); forfeits scored as draws
+−16.7 ± 9.0 (shift +0.3). No estimate moves by more than one standard error, so RQ2b is **not
+load-sensitive**. In-game minutes with outside CPU above 300%: 221 of 1,697 (13.0%); median outside
+CPU 140%. Blocks (amendment 12 (g)): −27.9 ± 18.4, −12.5 ± 17.8, −12.5 ± 18.2, −15.3 ± 18.5 (draw
+ratio 44–54%); Cochran's Q = 1.85 (3 df), p = 0.60; bootstrap over the runner's 120 chunks, 95%
+interval [−26.5, −7.6]. Pairs exposed to a minute above 300%, by block (descriptive): 67 of 125 (54%;
+block 0, played on 2026-10-15 under the gate of amendment 8, then checked only between chunks of 10
+pairs, before the in-chunk watchdog of amendments 9 and 10), 22 (18%), 2 (2%) and 22 (18%). Load-log
+coverage: 124 of 125 pairs in block 0, complete in blocks 1–3.
+
+By macOS build (amendment 13 (b); a pair belongs to the build its first game started on): 27.2 beta,
+250 games (125 pairs, exactly block 0), −27.9 ± 18.4; release candidate, 500 games (250 pairs, blocks
+1–2), −12.5 ± 12.7; final release, 250 games (125 pairs, exactly block 3), −15.3 ± 18.5. Release
+candidate minus beta is +15.3 (standard error 11.4), larger than its standard error, so it is
+reported: the beta pairs are block 0, which had the most outside load, the lowest MCTS evaluation rate
+(below) and no in-chunk watchdog, so build, scheduling and load cannot be separated; Cochran's Q over
+the blocks does not indicate heterogeneity (p = 0.60). Final release minus beta (+12.6, standard error
+13.3) and minus release candidate (−2.8, standard error 11.5) are within their standard errors.
+
+Telemetry (`summary.json`, 65,371 hybrid moves): transformer enabled on 59.1%; median 70 MCTS
+evaluations and 76 playouts per transformer-enabled move; alpha-beta and MCTS disagree on 34.0% of the
+traced moves; the MCTS move was played on none of the 13,152 disagreements. Decision reasons:
+time-safety 26,726, agreement 25,493, alpha-beta verification rejecting the MCTS move 10,166,
+alpha-beta default 2,986.
+
+GPU health (amendment 12 (c); MCTS evaluations per second of move time on the transformer-enabled
+moves, matched to the PGN by position: 38,604 of 38,640 trace records; the cell's rate is the
+six-thread point of M3): median 89.5 (p10 24.4) in block 0, 122.7 (39.7) in block 1, 129.7 (46.9) in
+block 2, 118.8 (41.4) in block 3 and 117.6 (35.8) over the cell; total evaluations over total move
+time 56.7, 78.3, 83.5, 75.9 and 73.7. Block 0's median is 28% below the mean of blocks 1–3 (123.7), and
+so is its total rate (79.2); block 0 is also the beta build and the block with the most outside load.
+
+Health (`make_figures.py`): adjudicated 898 of 1,000 games (390 draws; wins 230 for the hybrid, 278 for
+AB(6)), 101 ended normally, 1 time forfeit (in a minute with outside CPU above 300%); no other
+terminations; 1.56 min per game over 26.0 h of play; thermal log: 1,684 samples, no warning. GPU and
+memory covariates (amendment 12 (c); 1,287 of the cell's 1,697 in-game minutes carry them, blocks 1–3,
+logged since 2026-10-27 21:20 UTC): GPU utilisation median 87% (p95 89%; the hybrid's own inference;
+block medians 88%, 88%, 84%), GPU in-use memory median 918 MB (block medians 966, 937 and 642 MB),
+memory available median 60% (minimum 36%), 9,164 page-outs during the cell's games.
+
 Host-load logger extended, 2026-10-27 21:20 UTC (amendment 12c): every line of `hostload.log` now also
 carries `gpu_util` (IOAccelerator "Device Utilization %", an instantaneous sample that includes the
 engines' own GPU use), `gpu_mem_mb` (GPU in-use system memory), `mem_level` (`kern.memorystatus_level`,
