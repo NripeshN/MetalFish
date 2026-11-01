@@ -777,6 +777,70 @@ class OracleJudgingTest(unittest.TestCase):
         self.assertAlmostEqual(ag["cohen_kappa_sample"], 0.4375 / 0.6875)
         self.assertEqual(ag["confusion"]["ab/mcts"], 1)
 
+    def test_cross_judge_rates_and_bounds(self):
+        """Amendment §11.14: one judge selects, the other scores, in each direction."""
+        sampling = {"strata_population": {"A": 300, "B": 100}}
+        s = self.op.summarise(self._rows(), ["sf", "lc0"], sampling, n_boot=500, seed=1)
+        x = s["cross_judge"]
+        self.assertEqual(list(x), ["sf->lc0", "lc0->sf"])
+        sl = x["sf->lc0"]
+        # sf flags only the first position, and lc0 also rates its MCTS move better
+        self.assertEqual(sl["confirmation_rate"]["sample"], {"flagged": 1, "also": 1})
+        self.assertAlmostEqual(sl["confirmation_rate"]["estimate"], 1.0)
+        self.assertEqual(sl["confirmation_rate"]["ci95"], [1.0, 1.0])
+        # a draw of stratum A without game g1 flags nothing and has no ratio
+        self.assertLess(sl["confirmation_rate"]["replicates"], 500)
+        self.assertEqual(
+            sl["scorer_verdicts_on_flagged"], {"ab": 0, "mcts": 1, "tie": 0}
+        )
+        # sf picks the MCTS move on the first position only (an exact tie keeps the selection);
+        # lc0's losses value that pick at 0.04
+        self.assertEqual(sl["picks_not_selected"], 1)
+        self.assertAlmostEqual(sl["stats"]["cross_bound_es"]["estimate"], 0.75 * 0.02)
+        ls = x["lc0->sf"]
+        # lc0 flags both stratum-A positions; sf agrees on one of them
+        self.assertEqual(ls["confirmation_rate"]["sample"], {"flagged": 2, "also": 1})
+        self.assertAlmostEqual(ls["confirmation_rate"]["estimate"], 0.5)
+        self.assertEqual(ls["confirmation_rate"]["replicates"], 500)
+        self.assertEqual(
+            ls["scorer_verdicts_on_flagged"], {"ab": 1, "mcts": 1, "tie": 0}
+        )
+        # lc0's picks scored by sf: +0.10 on the first position, -0.05 on the second
+        self.assertEqual(ls["picks_not_selected"], 2)
+        self.assertAlmostEqual(ls["stats"]["cross_bound_es"]["estimate"], 0.75 * 0.025)
+        # under the scorer's losses no other judge's pick beats the scorer's own oracle pick
+        for c in x.values():
+            own = s["judges"][c["scorer"]]["stats"]["arbiter_upper_bound_es"]
+            self.assertLessEqual(
+                c["stats"]["cross_bound_es"]["estimate"], own["estimate"]
+            )
+        elo = ls["projected_elo_of_cross_bound"]
+        self.assertAlmostEqual(elo["estimate"], self.op.logistic_elo(0.75 * 0.025))
+        self.assertIn("not a prediction of game results", elo["label"])
+
+    def test_tables_carry_the_cross_judge_rows(self):
+        import make_figures as mf
+
+        sampling = {"strata_population": {"A": 300, "B": 100}}
+        s = self.op.summarise(self._rows(), ["sf", "lc0"], sampling, n_boot=200, seed=1)
+        s["method"]["expected_score"] = "logistic, 250 cp per unit of log-odds"
+        with tempfile.TemporaryDirectory() as d:
+            mf.write_oracle_tables(s, pathlib.Path(d))
+            md = (pathlib.Path(d) / "oracle.md").read_text()
+            tex = (pathlib.Path(d) / "oracle_cross.tex").read_text().splitlines()
+            self.assertTrue((pathlib.Path(d) / "oracle.tex").exists())
+        self.assertIn(
+            "| sf | lc0 | 1 of 4 | 1.000 [1.000, 1.000] | 0/1/0 | 1 | 0.015 [", md
+        )
+        self.assertIn("| lc0 | sf | 2 of 4 | 0.500 [", md)
+        self.assertIn("not a prediction of game results", md)
+        body = [l for l in tex if l.endswith("\\\\") and not l.startswith("Selects")]
+        self.assertEqual(len(body), 2)
+        self.assertTrue(
+            body[0].startswith("sf & lc0 & 1 & 1.000 [1.000, 1.000] & 0.015 [")
+        )
+        self.assertTrue(body[1].startswith("lc0 & sf & 2 & 0.500 ["))
+
     def test_weights_fall_back_to_row_shares(self):
         rows = self._rows()
         w = self.op.stratum_weights(rows, {})
