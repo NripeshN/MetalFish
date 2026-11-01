@@ -1260,6 +1260,14 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
         "Cell & Arm (moves) & Moves & Mean s & p99 s & Depth & Mnps \\\\",
         "\\midrule",
     ]
+    # mean time per move by the arm's own move number (all moves of each arm), for clock-use profiles
+    bins = [robustness.bin_label(b) for b in range(len(robustness.INDEX_BINS))]
+    prof_tex = [
+        "\\begin{tabular}{ll" + "r" * len(bins) + "}",
+        "\\toprule",
+        "Cell & Arm & " + " & ".join(b.replace("-", "--") for b in bins) + " \\\\",
+        "\\midrule",
+    ]
     flag_md = []
     switch_md = [
         "| Cell | Games | Switches from a time-safety to a transformer-enabled move | Switches from a transformer-enabled to a time-safety move |",
@@ -1377,6 +1385,19 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
                 f"{esc(c['cell'])} & {esc(label)} & {v['moves']} & {v['time_mean']:.2f} & "
                 f"{v['time_p99']:.2f} & {v['depth_p50']:.0f} & {(v['nps_p50'] or 0) / 1e6:.1f} \\\\"
             )
+            if cls == "all":
+                prof_tex.append(
+                    f"{esc(c['cell'])} & {esc(eng)} & "
+                    + " & ".join(
+                        (
+                            f"{v['time_by_index'][b]:.2f}"
+                            if b in v["time_by_index"]
+                            else "—"
+                        )
+                        for b in bins
+                    )
+                    + " \\\\"
+                )
             tim_md.append(
                 f"| {c['cell']} | {eng}{'' if cls == 'all' else ' (' + cls + ')'} | {v['moves']} | "
                 f"{v['time_mean']:.3f} | {v['time_p50']:.3f} | {v['time_p90']:.3f} | {v['time_p99']:.3f} | "
@@ -1385,6 +1406,8 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
     tim_tex += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "timing.md").write_text("\n".join(tim_md) + "\n")
     (tdir / "timing.tex").write_text("\n".join(tim_tex) + "\n")
+    prof_tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "timing_profile.tex").write_text("\n".join(prof_tex) + "\n")
     (tdir / "flags.md").write_text("\n".join(flag_md) + "\n")
     # in the split configuration every switch resizes alpha-beta's pool (the hybrid's share on
     # transformer-enabled moves, the full Threads value on time-safety moves), and a resize
