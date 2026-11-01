@@ -83,13 +83,17 @@ per hybrid move.
 | `bench` node count, ported engine | 2,497,913 (= Stockfish 19 upstream signature) | `results/paper_v2/queue_paper_log.txt` bench lines (25, 60, 98, 105); CHANGELOG |
 | `bench` single-thread NPS, ported engine vs SF19 PGO binary | 1.308 M vs 1.337 M (ratio 0.979, 3 runs each, sequential) | port agent report (2026-10-12) |
 | PGO vs plain LTO build (pre-port tree, depth 13, best of 3) | 1.263 vs 1.284 Mnps, identical node counts (2,477,446) | `tools/build_pgo.sh` run, 2026-10-12 |
-| AB NPS vs threads (pre-port tree, depth 15, median of 3) | 1: 1.37 M, 4: 5.80 M, 8: 7.54 M, 12: 10.72 M (+42% at 12 vs 8) | `results/paper_v2/micro/ab_scaling_preport.json` (re-run on the final engine pending) |
+| AB NPS vs threads (pre-port tree, depth 15, median of 3) | 1: 1.37 M, 4: 5.80 M, 8: 7.54 M, 12: 10.72 M (+42% at 12 vs 8) | `results/paper_v2/micro/ab_scaling_preport.json` (superseded by M2 on the frozen build, below) |
 | BT4 eval latency, MetalFish MPSGraph, sweep of 2026-10-13 (build 8777b99, whose network code is the frozen one; no game running, host load not yet logged; `micro/nn_latency.json`; date from `queue_paper_log.txt`, corrected 2026-10-27) | FP16: b1 7.40 ms (135 pos/s), b8 19.7 ms (407), b16 35.9 ms (446), b64 119 ms (538); FP32: b1 8.74 ms (114), b64 125 ms (511) | `results/paper_v2/micro/nn_latency.json` (built from the pre-C18 branch binary, identical NN code) |
 | Lc0 0.32.1 Metal BT4 steady-state nps (`lc0 benchmark`, same sweep) | mb1 165, mb2 163, mb4 189, mb8 294, mb16 606, mb32 725, mb64 530 (median of the last five per-second samples; the all-sample median is biased low by the ramp-up) | `results/paper_v2/micro/nn_latency.json` `nps_steady_median` |
 | AB NPS vs threads, run of 2026-10-13 (build 8777b99, whose search code is the frozen one; depth 16, 5 repeats, `micro/ab_scaling.json`) | 1: 1.53 M, 2: 3.04 M, 4: 6.27 M, 6: 9.18 M, 8: 11.81 M, 12: 13.52 M | `results/paper_v2/micro/ab_scaling.json` |
 | BT4 eval latency, MetalFish MPSGraph (idle machine, 2026-10-07) | FP16 b1 7.61 ms (131 pos/s), b16 36.1 ms (443 pos/s); FP32 b1 8.83 ms (113), b16 38.3 ms (418) | `06_environment_and_baselines.md` |
 | Lc0 0.32.1 Metal BT4 nps (idle machine, 2026-10-07) | mb1 ≈160, mb4 ≈215, mb16 ≈410, mb64 ≈600, mb256 ≈650 | `06_environment_and_baselines.md` |
 | The 2026-10-12 NN sweep | contaminated by concurrent builds; quarantined | `results/paper_v2/micro/nn_latency_m2max_CONTAMINATED_concurrent_builds.json` |
+| **M1, frozen build** (2026-11-01, 08:38–08:45 UTC, after the MUST cells, by `queue_after_must_rc2_gated.sh` behind the load gate; `microbench.py nn`, 5 warm-up and 40 timed iterations per batch size; outside CPU logged per minute 151–361%, median 184%: the editor about one core, one minute each of `mediaanalysisd` and a WebKit process above 300%) | MetalFish MPSGraph, median latency (positions/s): FP16 b1 7.21 ms (139), b2 8.79 ms (227), b4 12.2 ms (327), b8 18.9 ms (422), b16 35.8 ms (447), b32 60.1 ms (532), b64 119 ms (538); FP32 b1 8.56 ms (117), b8 20.6 ms (388), b16 38.0 ms (422), b64 125 ms (511) | `results/paper_v2/micro/nn_latency_frozen.json` (`metalfish`) |
+| **M1, Lc0 0.32.1 Metal, same run** (`lc0 benchmark`; steady-state median of the last five per-second samples; these are search nodes per second, which include cache hits and terminal nodes, so they are not raw network evaluations; `backendbench` failed with "Failed to import MPS module", so no raw Lc0 latency was measured) | mb1 217, mb2 222, mb4 297, mb8 447, mb16 638, mb32 763, mb64 671 nps | `nn_latency_frozen.json` (`lc0`, `nps_steady_median`; `lc0_backendbench` holds the errors) |
+| **M2, frozen build** (2026-11-01, 08:45–08:50 UTC, same chain and gate; `microbench.py ab`, depth 16, `Hash` 1024, 5 repeats per thread count, median; outside CPU logged per minute 145%, 283%, 76%, 16% and 15% in that order, the sweep running from 1 to 12 threads) | 1: 1.47 M, 2: 3.02 M, 4: 6.10 M, 6: 9.15 M, 8: 12.78 M, 12: 15.06 M nodes/s (12 threads +18% over 8; the four extra cores are efficiency cores) | `results/paper_v2/micro/ab_scaling_frozen.json` (`aggregate`) |
+| **M4, frozen build** (2026-11-01, 08:50 UTC, same chain and gate; `footprint.py`: physical footprint from `vmmap -summary` after `isready` and after a 20 s search of one position, with the cells' options and `Hash` 2048; vmmap's units, G = 2^30 bytes; outside CPU logged 15% and 58% in the two minutes the run overlapped) | AB(8) 2.3 GB (peak 2.3); Hybrid(8) 4.4 GB (peak 4.7); MCTS(1) 5.6 GB after `isready`, 5.7 GB after the search (peak 5.9) | `results/paper_v2/micro/footprint_frozen.json` |
 
 ## C. Prior repository evidence (pre-port engine, balanced book)
 
@@ -541,6 +545,85 @@ RQ1a's interval still spans zero, the build difference is still larger than its 
 RQ2a's zero-load shift (4.9 Elo) is unchanged. Every other value of the four final readings matches
 the recomputation.
 
+**Final analyses** (2026-11-01; `make_figures.py --final-analyses` at 09:47–09:50 UTC, after the parser
+and labelling fixes of PR #130 and the verification counts of PR #132, on a view of `results/paper_v2`
+without RQ1b, which began at 08:50 UTC: the four completed cells, the pilot and the set-aside games,
+with `hostload.log` cut after its 08:33:49 UTC sample, the minute in which RQ5c's last game ended; the
+tables are reproduced from the deposit by leaving out the cells that were still running and cutting
+`hostload.log` there). The tables are written to `docs/paper_v2/tables/` (git-ignored) and copied with
+the deposit; the paper's tables and figures are this run's. Values the paper uses that the final
+readings above do not already give:
+
+| Cell | Arm (moves) | Moves | Mean s per move | Median depth | Median nodes/s | Mean s by own move number: 1–10, 11–20, 21–30, 31–40, 41–60, 61+ |
+| --- | --- | --- | --- | --- | --- | --- |
+| RQ1a | AB(8) | 128,863 | 0.735 | 21 | 10.78 M | 1.33, 1.09, 0.86, 0.58, 0.39, 0.31 |
+| RQ1a | Hybrid(8), all | 128,877 | 0.735 | 21 | 10.52 M | 1.31, 1.09, 0.87, 0.59, 0.39, 0.30 |
+| RQ1a | Hybrid(8), transformer-enabled | 68,408 | 1.048 | 22 | 8.88 M | 1.31, 1.10, 0.95, 0.76, 0.59, 0.47 |
+| RQ1a | Hybrid(8), time-safety | 60,469 | 0.380 | 19 | 12.59 M | 1.60, 0.80, 0.62, 0.45, 0.35, 0.30 |
+| RQ2a | AB(6) | 66,225 | 0.724 | 21 | 8.79 M | 1.31, 1.09, 0.88, 0.58, 0.39, 0.31 |
+| RQ2a | AB(8) | 66,194 | 0.720 | 21 | 11.38 M | 1.29, 1.06, 0.87, 0.59, 0.41, 0.31 |
+| RQ2b | AB(6) | 65,328 | 0.722 | 21 | 8.68 M | 1.27, 1.03, 0.88, 0.61, 0.41, 0.31 |
+| RQ2b | Hybrid-split(8), all | 65,344 | 0.718 | 21 | 8.97 M | 0.96, 1.06, 1.02, 0.70, 0.42, 0.31 |
+| RQ2b | Hybrid-split(8), transformer-enabled | 38,618 | 0.952 | 22 | 7.06 M | 0.96, 1.06, 1.06, 0.85, 0.61, 0.51 |
+| RQ2b | Hybrid-split(8), time-safety | 26,726 | 0.379 | 19 | 13.00 M | —, 0.94, 0.69, 0.50, 0.35, 0.31 |
+| RQ5c | AB(8) | 65,171 | 0.728 | 21 | 11.01 M | 1.32, 1.10, 0.86, 0.57, 0.39, 0.30 |
+| RQ5c | Stockfish 19 (8 threads) | 65,170 | 0.733 | 21 | 11.52 M | 1.38, 1.13, 0.85, 0.55, 0.37, 0.30 |
+
+(`timing.md`: the PGN move comments, with the hybrid's moves split into transformer-enabled and
+time-safety moves by the traces; a move counts for its position, so the classes are not matched game
+phases: time-safety moves come late in the game. The split hybrid's time-safety moves use the full
+eight-thread pool. A hybrid move's nodes per second are the engine's own report: alpha-beta and MCTS
+nodes over the hybrid's search time, `365f36a:src/hybrid/hybrid_search.cpp` 4164-4182.) The split hybrid
+used less time than AB(6) in its first ten moves (0.96 against 1.27 s) and more in moves 21–40; RQ1a's
+hybrid and AB(8) used their clocks alike. Over all moves, RQ1a's hybrid reported a median of 10.52
+million nodes per second against AB(8)'s 10.78 million in the same games, and Stockfish 19 searched at
+11.52 million against AB(8)'s 11.01 million in RQ5c.
+
+Agreement stop (engine log, "engines agree, stopping early"; `flags.md`): RQ1a 660, 1.0% of its 68,456
+transformer-enabled moves (`summary.json`, `moves_hybrid`); RQ2b 6,485, 16.8% of 38,645; pilot 3 of
+3,278. The stop requires at least 100 MCTS nodes; the median MCTS evaluations per enabled move were 36
+in RQ1a and 70 in RQ2b. "Subsearch stop grace expired": 0 in each cell. Root hints and verification
+(`flags.md`, traced moves other than time-safety moves): RQ1a 68,456 moves, 57,308 with hints, 12,225
+with the verification sub-search; RQ2b 38,645, 35,353 and 11,695; pilot 3,278, 2,711 and 584. On the
+disagreements, RQ1a had hints on 20,140 of 25,138, with the first hint the MCTS move on 14,211 and the
+alpha-beta move on 2,429; RQ2b 11,545 of 13,152, 8,149 and 1,318; pilot 935 of 1,165, 610 and 116.
+
+Thread pool of the split hybrid (RQ2b). On a time-safety move the hybrid plays plain alpha-beta on the
+full `Threads` pool (`365f36a:src/uci/uci.cpp` 312-317 and 1731-1736), and on a transformer-enabled move
+it sizes the pool to its alpha-beta share, only when the size changes (`hybrid_search.cpp` 3813-3820); a
+resize rebuilds the workers with empty per-thread histories. In the split configuration
+(`HybridOversubscribe=false`, share 6 of 8) the alpha-beta side therefore had six threads on the
+transformer-enabled moves (59.1% of its moves) and eight on the time-safety moves (40.9%), and each
+change rebuilt the pool. Switches between the two classes in game order (`switches.md`): RQ2b 818 from a
+transformer-enabled to a time-safety move over its 1,000 games and none back, so the pool was rebuilt at
+the first transformer-enabled move of each game and again at the switch to time-safety moves in 818
+games; RQ1a 1,779 and 14 over 2,002 games, without any resize, because its share is the full pool; pilot
+93 and 1. This qualifies the RQ2b reading above: the alpha-beta threads were equal to AB(6)'s on the
+split hybrid's transformer-enabled moves, while on its time-safety moves it had two more; the cell
+measures the split configuration as built, and the derived RQ2c, a difference of measured scores, is
+unaffected.
+
+In-game MCTS evaluation rate (M3; amendment 12 (c); `gpu_health.md`; evaluations per second of move
+time on the matched transformer-enabled moves, median with 10th percentile, and total evaluations over
+total move time): RQ1a, eight alpha-beta threads plus the worker, 68,384 of 68,445 records matched:
+58 (19), total 38; by block 53 (16), 55 (16), 64 (20), 78 (26), totals 31, 34, 37, 49. RQ2b, six
+threads plus the worker: 118 (36), total 74 (117.6 and 73.7 in its final reading). Pilot: 40 (13), total
+27. M1's batch-1 ceiling on the frozen build is 139 evaluations per second (FP16; §B).
+
+RQ1a's GPU and memory covariates (amendment 12 (c); `covariates.md`; 1,750 in-game minutes carry them,
+logged since 2026-10-27 21:20 UTC): GPU utilisation median 58% (p95 73%), GPU in-use memory median
+834 MB, memory available median 56% (minimum 45%), 8,062 page-outs during the cell's games. RQ1a's
+adjudications (`adjudications.md`): 789 draws; wins 498 for the hybrid, 524 for AB(8).
+
+Host load (`hostload.md`, `outside_processes.md`): 16,256 minutes logged from 2026-10-15 to 2026-11-01
+08:33 UTC, median outside load 4.20 cores (95th percentile 11.6), above three cores in 56% (9,036); the
+7,723 minutes that overlap a game of these cells: median 1.44 cores (95th percentile 5.6), 14% (1,076)
+above three cores; by scheduling regime: before the gate 25% of 630 minutes, gate only 48% of 791, gate
+with the watchdog at 450% 40% of 601, gate with the watchdog at 300% 5% of 5,701. Largest outside
+process in the 1,076 minutes above three cores: the virtual machine (Virtualization.framework) 251,
+Homebrew Python 3.11 229, Python 3.14 127 (the interpreter of this study's runner and analysis scripts,
+among others), the editor (Kiro) 100, openclaw-gateway 86, mediaanalysisd 44, Python 3.12 41, Spotlight
+indexing 38, openclaw 33, WebKit web content 20.
 Host-load logger extended, 2026-10-27 21:20 UTC (amendment 12c): every line of `hostload.log` now also
 carries `gpu_util` (IOAccelerator "Device Utilization %", an instantaneous sample that includes the
 engines' own GPU use), `gpu_mem_mb` (GPU in-use system memory), `mem_level` (`kern.memorystatus_level`,
