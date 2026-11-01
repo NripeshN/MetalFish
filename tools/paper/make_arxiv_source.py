@@ -46,8 +46,12 @@ LOG_PROBLEMS = re.compile(
 def package(final: bool, src: pathlib.Path) -> list[str]:
     """Write the flat source tree to `src`; returns the list of packaged paths."""
     tex = (PAPER / "main.tex").read_text()
-    figures = sorted(set(GRAPHICS.findall(tex)))
-    tables = sorted(set(TABLE_INPUT.findall(tex)))
+    scan = tex
+    if re.search(r"^\\oraclefalse$", tex, flags=re.M):
+        # the oracle table is typeset only once the oracle study exists (\oracletrue)
+        scan = re.sub(r"\\iforacle\b.*?\\fi\b", "", scan, flags=re.S)
+    figures = sorted(set(GRAPHICS.findall(scan)))
+    tables = sorted(set(TABLE_INPUT.findall(scan)))
     missing = [f"figures/{f}" for f in figures if not (FIGURES / f).exists()]
     missing += [f"tables/{t}" for t in tables if not (TABLES / t).exists()]
     for name in ("PRIMEarxiv.sty", "main.bbl"):
