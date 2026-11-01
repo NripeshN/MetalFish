@@ -38,7 +38,8 @@ cell; RQ1a restarts from pair 1 with the re-linked rc2 binary (protocol amendmen
 rc2 verification (14:26–14:34 local): 130 objects rebuilt from the same source; `bench` 2,497,913
 nodes; unit suite 128 checks passed; UCI/perft smoke passed; `test_nn_comparison` fixed-position BT4
 references within tolerance (max value delta 0.0012, max top-policy delta 0.006), batch parity exact
-to batch 8, one FP16 policy-logit deviation of 0.0056 at batch 16 (the same class of deviation the
+to batch 8, one FP16 policy-logit deviation of 0.0056 at batch 16, against the check's tolerance of 0.005
+(`queue_paper_log.txt` 2026-10-14T14:32:15; `queue_logs/rc2_nn_comparison.txt`) (the same class of deviation the
 green CI run of main 8c0661d shows at batch 2; the engine evaluates at batch 1); 81 Homebrew dynamic
 libraries bundled under `build/lib`; bench, probe and unit suite re-passed after bundling. rc2 sha256
 8c534bb6f82fe9ec…; tag `paper-v2-freeze-rc2` on 8c0661d (engine source identical to 365f36a).
