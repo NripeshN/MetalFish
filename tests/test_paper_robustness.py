@@ -225,6 +225,7 @@ class RobustnessTest(unittest.TestCase):
                 "x_flag": 1,
                 "visits": 1,
                 "ab_hints": [{"move": "d2d4"}],
+                "ab_verified_hints": [{"move": "d2d4"}],
             },
             {
                 "reason": "ab_default",
@@ -233,12 +234,18 @@ class RobustnessTest(unittest.TestCase):
                 "x_flag": 0,
                 "visits": 37,
                 "ab_hints": [],
+                "ab_verified_hints": [],
             },
         ]
         out = robustness.flag_counts(recs)
         self.assertEqual(out["disagreements"], 2)
         self.assertEqual(out["flags"], {"x_flag": 1})
         self.assertEqual((out["with_hints"], out["first_hint_is_mcts_move"]), (1, 1))
+        # every traced move but the time-safety one; verification only where the engine ran it
+        self.assertEqual(
+            (out["traced"], out["traced_with_hints"], out["traced_with_verification"]),
+            (3, 1, 1),
+        )
 
     def test_eval_rate_by_block_skips_unmatched_positions(self):
         recs = [

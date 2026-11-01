@@ -1300,7 +1300,10 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
                 ["subsearch stop grace expired", "engines agree, stopping early"],
             )
             flag_md.append(
-                f"## {c['cell']}\n\nTraced disagreements: {fc['disagreements']}; with root hints: "
+                f"## {c['cell']}\n\nTraced moves other than time-safety moves: {fc['traced']}; "
+                f"with root hints: {fc['traced_with_hints']}; with the verification sub-search: "
+                f"{fc['traced_with_verification']}.\n\n"
+                f"Traced disagreements: {fc['disagreements']}; with root hints: "
                 f"{fc['with_hints']}; first hint = MCTS move: {fc['first_hint_is_mcts_move']}; "
                 f"first hint = alpha-beta move: {fc['first_hint_is_ab_move']}. Engine log: "
                 + (
