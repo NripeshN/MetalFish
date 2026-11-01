@@ -3,6 +3,7 @@
 # tables from the measurement artifacts, then latexmk.
 #   --final  every \pending{} becomes a compile error (arXiv-ready check)
 #   --anon   double-anonymous variant for IEEE ToG -> main_anon.pdf
+#   RESULTS=<dir> bash build.sh ...   tables and figures from that results directory
 set -euo pipefail
 cd "$(dirname "$0")"
 # The measurement venv pins the interpreter and packages (the host's default python3 may lack them).
@@ -17,7 +18,8 @@ for arg in "$@"; do
   esac
 done
 "$PY" ../../../tools/paper/make_bib.py --offline
-# --final also writes the final-reading analyses (amendment 12; slow)
-"$PY" ../../../tools/paper/make_figures.py $FIG
+# --final also writes the final-reading analyses (amendment 12; slow). RESULTS=<dir> reads the cells from
+# another directory: a version's cut-off (the cells it reports, and hostload.log up to its last game).
+"$PY" ../../../tools/paper/make_figures.py $FIG ${RESULTS:+--results "$RESULTS"}
 latexmk -pdf -interaction=nonstopmode -halt-on-error -jobname="$JOB" -usepretex="$PRE" main.tex
 echo "built $JOB.pdf ($(pdfinfo "$JOB.pdf" | awk '/Pages/{print $2}') pages)"
