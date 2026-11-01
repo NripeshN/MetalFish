@@ -149,14 +149,16 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
 - **Corrected**: the stop exists but requires a clock search, `agreement_count ≥ 3` consecutive
   coordinator polls (~1.5 ms apart), elapsed > 25% of budget, MCTS playouts ≥ max(100,
   `min_mcts_nodes`), AB depth ≥ 10. It fired 0 of 209 times in the July 2026 telemetry
-  (median 45 playouts < 100); in the current engine it fires rarely (3 of the 3,278 moves with
-  the transformer active in the October 2026 30+0.3 pilot; also in some gate matches). No
-  time-saving measurement exists; "10–40%" withdrawn.
+  (median 45 playouts < 100); in the current engine it fires rarely: 660 of the 68,456 moves
+  with the transformer active in RQ1a (1.0%; 2,002 games at 30+0.3, October 2026; 3 of 3,278 in
+  the pilot; also in some gate matches). No time-saving measurement exists; "10–40%" withdrawn.
 - **Evidence**: `ec1dee5:src/hybrid/hybrid_search.cpp` lines 640–702 (`agreement_count`,
   gate at 695); `results/tournament_20260701_212250/results.json` parsed with
   `tools/paper/parse_hybrid_trace.py` (0 agreement stops; `../08_evidence_map.md` §C); current
   engine: "engines agree, stopping early" lines in `results/paper_v2/RQ1a_pilot/engines.log.gz`
-  (3) and `results/paper_v2/sprt/*/engines.log.gz`; message at
+  (3), `results/paper_v2/RQ1a/engines.log` (660; `tables/flags.md` of `make_figures.py
+  --final-analyses`; denominator `moves_hybrid` in `RQ1a/summary.json`) and
+  `results/paper_v2/sprt/*/engines.log.gz`; message at
   `365f36a:src/hybrid/hybrid_search.cpp` 4077–4081. Audit C5.
 
 ### E9 — Hybrid–Lc0 agreement inference; Bratko–Kopec as a ranking · Misleading
@@ -168,9 +170,10 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
   network component has significant influence on move selection."
 - **Corrected**: final move = AB's move in 207/209 hybrid decisions (July 2026, 20+0.2; MCTS
   move chosen 2/209; reasons: engines_agree 131, ab_root_rejects_mcts 49, ab_default 27,
-  tie-break 2). Current engine at 30+0.3: MCTS move chosen in 0 of 1,165 disagreements (RQ1a
-  pilot, build 8777b99) and 0 times in the frozen build's 101-game gate (L14); re-check against
-  the final RQ1a cell before filing. The BK suite
+  tie-break 2). Current engine at 30+0.3: MCTS move chosen in 7 of 25,138 disagreements in RQ1a
+  (2,002 games, frozen build, all through `mcts_root_reject_q_gap`; `RQ1a/summary.json`), 0 of
+  1,165 in the pilot (build 8777b99) and 0 in the frozen build's 101-game gate (L14); checked
+  against the complete RQ1a cell on 2026-11-01. The BK suite
   is at ceiling (2026-06-30 run at 5 s: AB 20, MCTS 24, Hybrid 24, Lc0 18, SF 20) and was used as
   a tuning target (~1,500 BK/puzzle runs under `results/`), so Tables 2–3 cannot rank engines.
 - **Evidence**: `results/tournament_20260701_212250/results.json` (+ `parse_hybrid_trace.py`);

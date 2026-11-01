@@ -116,17 +116,17 @@ concern how its components and its results were characterised.
    iterations); more than a quarter of the budget elapsed; at least 100 MCTS playouts; and
    alpha-beta depth of at least 10. In the retained July 2026 telemetry (a build later than the
    chapter's) it never fired (0 of 209 hybrid decisions at 20 s + 0.2 s; median 45 MCTS playouts
-   per move); in the current engine it fires rarely (on 3 of the 3,278 moves with the
-   transformer active in a 100-game 30 s + 0.3 s pilot, October 2026). No measurement of a time
-   saving exists; the "10–40%" figure is withdrawn.
+   per move); in the current engine it fires rarely (on 660 of the 68,456 moves with the
+   transformer active, 1.0%, in the 2,002 games of a pre-registered 30 s + 0.3 s cell, October
+   2026). No measurement of a time saving exists; the "10–40%" figure is withdrawn.
 
 9. **Influence of the neural-network component** (Sect. 5.2; Sect. 6.1; Tables 2 and 3).
    "The 95.8% agreement between the hybrid engine and Lc0 suggests the hybrid's
    decision-making is heavily influenced by its neural network component" is an incorrect
    inference. In the retained telemetry the hybrid's final move was the alpha-beta move in
-   207 of 209 hybrid decisions (July 2026, 20 s + 0.2 s), and in a 100-game pilot of the current
-   engine at 30 s + 0.3 s (October 2026) the MCTS move was selected in none of the 1,165 decisions
-   in which the two searches disagreed. The agreement with
+   207 of 209 hybrid decisions (July 2026, 20 s + 0.2 s), and in the 2,002 games of a
+   pre-registered 30 s + 0.3 s cell of the current engine (October 2026) the MCTS move was
+   selected in 7 of the 25,138 decisions in which the two searches disagreed. The agreement with
    Lc0 on the Bratko–Kopec positions reflects agreement between Stockfish's search and Lc0 on
    those positions. The 24-position suite is also at ceiling for these engines (a later run at
    5 s per position gave AB 20, MCTS 24, Hybrid 24, Lc0 18 and Stockfish 20 of 24) and had been

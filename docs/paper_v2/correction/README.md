@@ -6,7 +6,7 @@ Systems and Applications. IntelliSys 2026*, Lecture Notes in Networks and System
 Springer, Cham, pp. 653–664, DOI [10.1007/978-3-032-32726-0_39](https://doi.org/10.1007/978-3-032-32726-0_39)
 (published online 2026-08-14; print year 2027). Basis: `../01_published_paper_audit.md`.
 
-**Status (2026-10-31): draft, not filed.** Filing is outward-facing and is the author's action;
+**Status (2026-11-01): draft, not filed.** Filing is outward-facing and is the author's action;
 see `support_ticket.md` for the exact steps. Before filing, fill the two remaining fields in
 `correction_note.md`:
 
@@ -20,8 +20,10 @@ see `support_ticket.md` for the exact steps. Before filing, fill the two remaini
 Everything else in the note is final and cites an existing artifact. Items 8–10 were revised on
 2026-10-27 after the manuscript's integrity check: the throughput comparison with Lc0 is now
 stated per batch size, and the early-stop and arbiter statements are scoped to the records they
-come from. Before filing, re-check items 8 and 9 against the final RQ1a/RQ1b telemetry
-(`moves.jsonl`) and say so if the complete cells show a different picture.
+come from. Items 8 and 9 were re-checked against the complete RQ1a cell on 2026-11-01 and now
+cite it (the agreement stop fired on 1.0% of the moves with the transformer active; the MCTS move
+was chosen on 7 of 25,138 disagreements); the picture is unchanged. If RQ1b is complete before
+filing, check it as well.
 
 ## Files
 

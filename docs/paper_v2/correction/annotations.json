@@ -185,7 +185,7 @@
     {
       "id": "E8",
       "title": "Early termination: no time saving measured",
-      "note": "Corrected: the agreement stop exists but is gated (clock games only; three consecutive coordinator polls about 1.5 ms apart, not iterations; more than 25% of the budget elapsed; at least 100 MCTS playouts; AB depth at least 10). It fired 0 of 209 times in the retained July 2026 telemetry (a build later than the chapter's); in the current engine it fires rarely (3 of the 3,278 moves with the transformer active in a 30+0.3 pilot, October 2026). No time-saving measurement exists; '10-40%' is withdrawn.",
+      "note": "Corrected: the agreement stop exists but is gated (clock games only; three consecutive coordinator polls about 1.5 ms apart, not iterations; more than 25% of the budget elapsed; at least 100 MCTS playouts; AB depth at least 10). It fired 0 of 209 times in the retained July 2026 telemetry (a build later than the chapter's); in the current engine it fires rarely (660 of the 68,456 moves with the transformer active, 1.0%, in 2,002 games of a pre-registered 30+0.3 cell, October 2026). No time-saving measurement exists; '10-40%' is withdrawn.",
       "anchors": [
         {
           "page": 5,
@@ -204,7 +204,7 @@
     {
       "id": "E9",
       "title": "NN influence inference wrong; BK suite at ceiling",
-      "note": "Corrected: in the retained telemetry the hybrid's final move was the alpha-beta move in 207 of 209 decisions (20+0.2, July 2026); in a 100-game 30+0.3 pilot of the current engine (October 2026) the MCTS move was selected in none of the 1,165 decisions where the two searches disagreed. Agreement with Lc0 reflects Stockfish/Lc0 agreement on these positions. The 24-position suite is at ceiling (a later 5 s run: AB 20, MCTS 24, Hybrid 24, Lc0 18, Stockfish 20) and was used during tuning; Tables 2-3 are not a ranking.",
+      "note": "Corrected: in the retained telemetry the hybrid's final move was the alpha-beta move in 207 of 209 decisions (20+0.2, July 2026); in 2,002 games of a pre-registered 30+0.3 cell of the current engine (October 2026) the MCTS move was selected in 7 of the 25,138 decisions where the two searches disagreed. Agreement with Lc0 reflects Stockfish/Lc0 agreement on these positions. The 24-position suite is at ceiling (a later 5 s run: AB 20, MCTS 24, Hybrid 24, Lc0 18, Stockfish 20) and was used during tuning; Tables 2-3 are not a ranking.",
       "anchors": [
         {
           "page": 7,
