@@ -365,19 +365,24 @@ def load_coverage(
 
 COMMENT_RE = re.compile(
     r"(?P<eval>[+-]?\d+\.\d+|[+-]?M\d+)/(?P<depth>\d+)\s+(?P<time>\d+(?:\.\d+)?)s"
-    r"(?:,\s*n=(?P<nodes>\d+))?(?:,\s*nps=(?P<nps>\d+))?"
 )
+# fastchess writes the optional fields after the time in its own order (with timeleft=true and
+# seldepth=true: "tl=..., n=..., sd=..., nps=..."), so each is looked up by name
+NODES_RE = re.compile(r",\s*n=(?P<nodes>\d+)")
+NPS_RE = re.compile(r",\s*nps=(?P<nps>\d+)")
 
 
 def parse_move_comment(comment: str) -> Optional[Dict]:
     m = COMMENT_RE.search(comment or "")
     if not m:
         return None
+    rest = comment[m.end() :]
+    n, nps = NODES_RE.search(rest), NPS_RE.search(rest)
     return {
         "depth": int(m.group("depth")),
         "time": float(m.group("time")),
-        "nodes": int(m.group("nodes")) if m.group("nodes") else None,
-        "nps": int(m.group("nps")) if m.group("nps") else None,
+        "nodes": int(n.group("nodes")) if n else None,
+        "nps": int(nps.group("nps")) if nps else None,
     }
 
 
