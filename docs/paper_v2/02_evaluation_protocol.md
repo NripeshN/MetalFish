@@ -533,3 +533,13 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     build is computed after its interpretation and is labelled as such; (d) the microbenchmarks
     re-run after the cells run on the final release, and each microbenchmark is reported with its
     build; (e) the author is asked to defer further system updates until the programme ends.
+14. **2026-11-01 — the oracle study's cross-judge rates (written before RQ6b has run; RQ1a, RQ2a,
+    RQ2b and RQ5c are interpreted, and RQ1b is running).** The re-review of the paper asked that the
+    optimism of a judge who both selects and scores the better candidate be bounded. Besides the
+    per-judge results and the bound on the positions where both judges agree (amendment 12 (d)),
+    RQ6b reports, in each direction, the cross-judge results: on the positions where one judge rates
+    the MCTS move better than the alpha-beta move by more than 10 cp, the share on which the other
+    judge also rates it better; and the arbiter bound when one judge selects the candidate and the
+    other judge's evaluations score it. The projected Elo stays a labelled conversion of the
+    per-position expected-score bound, and the paper states that it is not a prediction of game
+    results. The positions, judges, budgets and sampling are unchanged; no oracle output exists yet.
