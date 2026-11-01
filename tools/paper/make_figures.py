@@ -1468,76 +1468,127 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
     # oracle summary (RQ6b), written by tools/paper/oracle_probe.py
     osum = results / "RQ6b" / "oracle.jsonl.summary.json"
     if osum.exists():
-        o = load(osum)
+        write_oracle_tables(load(osum), tdir)
 
-        def ci(st):
-            lo, hi = st.get("ci95") or (None, None)
-            return (
-                f"{st['estimate']:.3f} [{lo:.3f}, {hi:.3f}]"
-                if lo is not None
-                else f"{st['estimate']:.3f}"
-            )
 
-        md = [
-            f"Positions: {o['positions']} from {o['games']} games ({o['cluster_unit']} clusters); "
-            f"{o['method']['estimates']}; {o['method']['ci95']}; {o['method'].get('expected_score', '')}.",
+def write_oracle_tables(o: dict, tdir: pathlib.Path):
+    """oracle.md, oracle.tex and oracle_cross.tex from the RQ6b summary of
+    tools/paper/oracle_probe.py: per judge, the judges' agreement, and the cross-judge results of
+    protocol amendment 14 (one judge selects, the other scores)."""
+    esc = lambda t: str(t).replace("_", "\\_").replace("%", "\\%")  # noqa: E731
+
+    def ci(st):
+        if st.get("estimate") is None:
+            return "—"
+        lo, hi = st.get("ci95") or (None, None)
+        return (
+            f"{st['estimate']:.3f} [{lo:.3f}, {hi:.3f}]"
+            if lo is not None
+            else f"{st['estimate']:.3f}"
+        )
+
+    md = [
+        f"Positions: {o['positions']} from {o['games']} games ({o['cluster_unit']} clusters); "
+        f"{o['method']['estimates']}; {o['method']['ci95']}; {o['method'].get('expected_score', '')}.",
+        "",
+        "| Judge | n | AB better | MCTS better | Tie | Loss AB − MCTS (ES) | Arbiter bound (ES) | Projected Elo of the bound | Realised accuracy |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for name, j in o["judges"].items():
+        st = j["stats"]
+        pe = j["projected_elo_of_bound"]
+        pe_ci = pe.get("ci95") or [None, None]
+        md.append(
+            f"| {name} | {j['n']} | {ci(st['frac_ab_better'])} | {ci(st['frac_mcts_better'])} | {ci(st['frac_tie'])} | "
+            f"{ci(st['loss_es_ab_minus_mcts'])} | {ci(st['arbiter_upper_bound_es'])} | "
+            f"{(pe['estimate'] or 0):.1f} [{(pe_ci[0] or 0):.1f}, {(pe_ci[1] or 0):.1f}] | {ci(st['realised_accuracy'])} |"
+        )
+    ag = o.get("agreement")
+    if ag:
+        st = ag["stats"]
+        md += [
             "",
-            "| Judge | n | AB better | MCTS better | Tie | Loss AB − MCTS (ES) | Arbiter bound (ES) | Projected Elo of the bound | Realised accuracy |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            f"Judges' agreement on {ag['n']} positions: {ci(st['frac_judges_agree'])}, Cohen's kappa "
+            f"{fmt_num(ag.get('cohen_kappa_sample'), 2)}; consensus AB better {ci(st['frac_consensus_ab_better'])}, MCTS better "
+            f"{ci(st['frac_consensus_mcts_better'])}, undecided {ci(st['frac_undecided'])}; bound on agreed positions "
+            f"{ci(st['consensus_bound_es'])} (projected Elo {fmt_num(ag['projected_elo_of_consensus_bound']['estimate'], 1)}).",
         ]
-        for name, j in o["judges"].items():
-            st = j["stats"]
-            pe = j["projected_elo_of_bound"]
+    cross = o.get("cross_judge") or {}
+    if cross:
+        md += [
+            "",
+            "Cross-judge results (protocol amendment 14): the selecting judge flags the positions where "
+            "it rates the MCTS move better by more than the tie margin, or picks the candidate with its "
+            "smaller loss; the scoring judge's evaluations judge that choice.",
+            "",
+            "| Selects | Scores | Flagged MCTS better | Share the scorer also rates MCTS better | Scorer's verdicts on them (AB/MCTS/tie) | Picks other than the selection | Cross bound (ES) | Projected Elo of the bound |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for c in cross.values():
+            cr = c["confirmation_rate"]
+            v = c["scorer_verdicts_on_flagged"]
+            pe = c["projected_elo_of_cross_bound"]
             pe_ci = pe.get("ci95") or [None, None]
             md.append(
-                f"| {name} | {j['n']} | {ci(st['frac_ab_better'])} | {ci(st['frac_mcts_better'])} | {ci(st['frac_tie'])} | "
-                f"{ci(st['loss_es_ab_minus_mcts'])} | {ci(st['arbiter_upper_bound_es'])} | "
-                f"{(pe['estimate'] or 0):.1f} [{(pe_ci[0] or 0):.1f}, {(pe_ci[1] or 0):.1f}] | {ci(st['realised_accuracy'])} |"
+                f"| {c['selector']} | {c['scorer']} | {cr['sample']['flagged']} of {c['n']} | {ci(cr)} | "
+                f"{v['ab']}/{v['mcts']}/{v['tie']} | {c['picks_not_selected']} | {ci(c['stats']['cross_bound_es'])} | "
+                f"{fmt_num(pe['estimate'], 1)} [{fmt_num(pe_ci[0], 1)}, {fmt_num(pe_ci[1], 1)}] |"
             )
-        ag = o.get("agreement")
-        if ag:
-            st = ag["stats"]
-            md += [
-                "",
-                f"Judges' agreement on {ag['n']} positions: {ci(st['frac_judges_agree'])}, Cohen's kappa "
-                f"{fmt_num(ag.get('cohen_kappa_sample'), 2)}; consensus AB better {ci(st['frac_consensus_ab_better'])}, MCTS better "
-                f"{ci(st['frac_consensus_mcts_better'])}, undecided {ci(st['frac_undecided'])}; bound on agreed positions "
-                f"{ci(st['consensus_bound_es'])} (projected Elo {fmt_num(ag['projected_elo_of_consensus_bound']['estimate'], 1)}).",
-            ]
-        (tdir / "oracle.md").write_text("\n".join(md) + "\n")
+        md += [
+            "",
+            f"Projected Elo: {next(iter(cross.values()))['projected_elo_of_cross_bound']['label']}.",
+        ]
+    (tdir / "oracle.md").write_text("\n".join(md) + "\n")
+    tex = [
+        "\\begin{tabular}{lrlllll}",
+        "\\toprule",
+        "Judge & $n$ & MCTS better & AB better & Tie & Bound (ES) & Projected Elo \\\\",
+        "\\midrule",
+    ]
+    rows = [
+        (n, j["n"], j["stats"], j["projected_elo_of_bound"])
+        for n, j in o["judges"].items()
+    ]
+    if ag:
+        rows.append(
+            (
+                "both agree",
+                ag["n"],
+                {
+                    "frac_mcts_better": ag["stats"]["frac_consensus_mcts_better"],
+                    "frac_ab_better": ag["stats"]["frac_consensus_ab_better"],
+                    "frac_tie": ag["stats"]["frac_consensus_tie"],
+                    "arbiter_upper_bound_es": ag["stats"]["consensus_bound_es"],
+                },
+                ag["projected_elo_of_consensus_bound"],
+            )
+        )
+    for name, n, st, pe in rows:
+        pe_ci = pe.get("ci95") or [None, None]
+        tex.append(
+            f"{esc(name)} & {n} & {ci(st['frac_mcts_better'])} & {ci(st['frac_ab_better'])} & "
+            f"{ci(st['frac_tie'])} & {ci(st['arbiter_upper_bound_es'])} & "
+            f"{fmt_num(pe['estimate'], 1)} [{fmt_num(pe_ci[0], 1)}, {fmt_num(pe_ci[1], 1)}] \\\\"
+        )
+    tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "oracle.tex").write_text("\n".join(tex) + "\n")
+    if cross:
         tex = [
-            "\\begin{tabular}{lrlllll}",
+            "\\begin{tabular}{llrlll}",
             "\\toprule",
-            "Judge & $n$ & MCTS better & AB better & Tie & Bound (ES) & Projected Elo \\\\",
+            "Selects & Scores & Flagged & Scorer also & Bound (ES) & Projected Elo \\\\",
             "\\midrule",
         ]
-        rows = [
-            (n, j["n"], j["stats"], j["projected_elo_of_bound"])
-            for n, j in o["judges"].items()
-        ]
-        if ag:
-            rows.append(
-                (
-                    "both agree",
-                    ag["n"],
-                    {
-                        "frac_mcts_better": ag["stats"]["frac_consensus_mcts_better"],
-                        "frac_ab_better": ag["stats"]["frac_consensus_ab_better"],
-                        "frac_tie": ag["stats"]["frac_consensus_tie"],
-                        "arbiter_upper_bound_es": ag["stats"]["consensus_bound_es"],
-                    },
-                    ag["projected_elo_of_consensus_bound"],
-                )
-            )
-        for name, n, st, pe in rows:
+        for c in cross.values():
+            pe = c["projected_elo_of_cross_bound"]
             pe_ci = pe.get("ci95") or [None, None]
             tex.append(
-                f"{esc(name)} & {n} & {ci(st['frac_mcts_better'])} & {ci(st['frac_ab_better'])} & "
-                f"{ci(st['frac_tie'])} & {ci(st['arbiter_upper_bound_es'])} & "
+                f"{esc(c['selector'])} & {esc(c['scorer'])} & {c['confirmation_rate']['sample']['flagged']} & "
+                f"{ci(c['confirmation_rate'])} & {ci(c['stats']['cross_bound_es'])} & "
                 f"{fmt_num(pe['estimate'], 1)} [{fmt_num(pe_ci[0], 1)}, {fmt_num(pe_ci[1], 1)}] \\\\"
             )
         tex += ["\\bottomrule", "\\end{tabular}"]
-        (tdir / "oracle.tex").write_text("\n".join(tex) + "\n")
+        (tdir / "oracle_cross.tex").write_text("\n".join(tex) + "\n")
 
 
 def main(argv=None):

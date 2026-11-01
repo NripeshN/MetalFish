@@ -9,7 +9,7 @@ experiment manifest: `docs/paper_v2/experiments.json`.
 | `run_cell.py` | Run one experiment cell with fastchess (fair-resource options, UHO openings, blocks with disjoint openings, manifest with hashes/versions/hardware, thermal log, `summary.json`). `--dry-run` prints the command. |
 | `penta_stats.py` | Pentanomial statistics from a PGN: Elo ± 95% CI, nElo, LOS, draw ratios, pairs ratio, WL/DD, terminations; trinomial comparison. Reproduces fastchess's `-report penta=true` numbers. |
 | `parse_hybrid_trace.py` | Hybrid telemetry (`HybridTrace:` and time-safety fallback lines) from fastchess/cutechess logs or `results.json` into per-move JSONL with the decision-time FEN; summary of reasons, GPU-active fraction, disagreements. |
-| `oracle_probe.py` | Judge AB vs MCTS moves on disagreement positions with reference engines (Stockfish 19, optionally Lc0); loss per candidate, oracle-arbiter upper bound, bootstrap CIs. |
+| `oracle_probe.py` | Judge AB vs MCTS moves on disagreement positions with reference engines (Stockfish 19, optionally Lc0); loss per candidate, oracle-arbiter upper bound, the judges' agreement and the cross-judge results of amendment 14 (one judge selects, the other scores), clustered bootstrap CIs. |
 | `suite_runner.py` | EPD suites (bm/am) and Lichess puzzle samples for any UCI engine; Wilson intervals; per-rating-band puzzle accuracy. |
 | `microbench.py` | `nn`: BT4 latency/throughput vs batch size (MetalFish FP16/FP32 and Lc0); `ab`: `bench` NPS vs thread count. |
 | `footprint.py` | M4: physical footprint (`vmmap -summary`) and peak resident set of AB(8), Hybrid(8) and MCTS(1), configured as the cells configure them, after `isready` and after a fixed search. |

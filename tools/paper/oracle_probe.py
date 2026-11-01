@@ -21,9 +21,16 @@ accuracy (its move better or tied), and the oracle-arbiter upper bound
 mean(loss_selected) - mean(min loss) with its projected Elo (the logistic Elo of a score of
 0.5 + bound, per disagreement position); with several judges, their agreement (Cohen's kappa for
 two) and the bound on the positions where all judges find the move not selected better, positions
-where they differ counted as undecided. Estimates are means over strata weighted by the recorded
-stratum population counts; 95% intervals are percentile bootstraps resampling games as clusters
-within strata (§11.12g), and the number of games contributing positions is reported.
+where they differ counted as undecided; and, in each direction between two judges (§11.14), the
+cross-judge results: on the positions where the selecting judge rates the MCTS move better by more
+than --tie-cp, the share on which the scoring judge does too, and the arbiter bound when the
+selecting judge picks the candidate (its smaller loss; the realised selection on an exact tie) and
+the scoring judge's losses score that pick against the realised selection, which removes the
+optimism of a judge that both selects and scores. Estimates are means over strata weighted by the
+recorded stratum population counts (a share among flagged positions is a ratio of two such means);
+95% intervals are percentile bootstraps resampling games as clusters within strata (§11.12g), and
+the number of games contributing positions is reported. A projected Elo is a labelled conversion
+of the per-position bound, not a prediction of game results.
 
 Sampling (protocol 02 §5 + amendment §11.6): disagreement positions are stratified by game
 phase (opening = fullmove <= 15; endgame = at most 6 non-pawn, non-king pieces; else middlegame)
@@ -45,6 +52,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import math
 import random
@@ -225,6 +233,39 @@ def stratified_estimates(
     return out
 
 
+def stratified_ratio(
+    rows: List[Dict],
+    num: List[float],
+    den: List[float],
+    weights: Dict[str, float],
+    n_boot: int,
+    seed: int,
+) -> Dict:
+    """Ratio of two stratum-weighted means (a share among the positions `den` flags) with a 95%
+    percentile interval from the same cluster bootstrap; a replicate that draws no flagged
+    position has no ratio and is left out (the number of replicates used is reported).
+    """
+    units = cluster_units(rows, {"num": num, "den": den})
+    n, d = weighted_means(units, weights, 2)
+    rng = random.Random(seed)
+    reps: List[float] = []
+    for _ in range(n_boot):
+        drawn = {s: rng.choices(cl, k=len(cl)) for s, cl in sorted(units.items())}
+        bn, bd = weighted_means(drawn, weights, 2)
+        if bd > 0:
+            reps.append(bn / bd)
+    reps.sort()
+    k = len(reps)
+    return {
+        "estimate": n / d if d > 0 else None,
+        "ci95": (
+            [reps[int(0.025 * k)], reps[min(k - 1, int(0.975 * k))]] if reps else None
+        ),
+        "replicates": k,
+        "sample": {"flagged": int(sum(den)), "also": int(sum(num))},
+    }
+
+
 def cohen_kappa(pairs: List[tuple], labels=("ab", "mcts", "tie")) -> Optional[float]:
     n = len(pairs)
     if not n:
@@ -244,7 +285,8 @@ def with_elo(stat: Dict) -> Dict:
     return {
         "estimate": logistic_elo(stat["estimate"]),
         "ci95": [logistic_elo(ci[0]), logistic_elo(ci[1])] if ci else None,
-        "label": "projected Elo: logistic Elo of a score of 0.5 + bound, per disagreement position",
+        "label": "projected Elo: logistic Elo of a score of 0.5 + bound, per disagreement position; "
+        "a conversion, not a prediction of game results",
     }
 
 
@@ -365,7 +407,63 @@ def summarise(
                 }
                 agreement["cohen_kappa_sample"] = cohen_kappa(pairs)
             summary["agreement"] = agreement
+            summary["cross_judge"] = cross_judge(both, names, sampling, n_boot, seed)
     return summary
+
+
+def cross_judge(
+    both: List[Dict],
+    names: List[str],
+    sampling: Dict,
+    n_boot: int = 10000,
+    seed: int = 1,
+) -> Dict[str, Dict]:
+    """Amendment §11.14, for each ordered pair (selector, scorer) of judges on the positions both
+    judged: the share of the selector's MCTS-better positions (by more than the tie margin) that
+    the scorer also rates MCTS-better, and the arbiter bound when the selector picks the candidate
+    and the scorer's losses score that pick against the realised selection."""
+    weights = stratum_weights(both, sampling)
+    sel_ab = [r["selected"] == r["ab_move"] for r in both]
+    out: Dict[str, Dict] = {}
+    for a, b in itertools.permutations(names, 2):
+        ja = [r["judges"][a] for r in both]
+        jb = [r["judges"][b] for r in both]
+        flagged = [float(x["verdict"] == "mcts") for x in ja]
+        also = [f * float(y["verdict"] == "mcts") for f, y in zip(flagged, jb)]
+        # the selector's oracle arbiter picks its smaller loss (the selection on an exact tie)
+        pick_ab = [
+            x["loss_ab_es"] < x["loss_mcts_es"]
+            or (x["loss_ab_es"] == x["loss_mcts_es"] and s)
+            for x, s in zip(ja, sel_ab)
+        ]
+        gain = [
+            (y["loss_ab_es"] if s else y["loss_mcts_es"])
+            - (y["loss_ab_es"] if p else y["loss_mcts_es"])
+            for y, s, p in zip(jb, sel_ab, pick_ab)
+        ]
+        stats = stratified_estimates(
+            both, {"cross_bound_es": gain}, weights, n_boot, seed
+        )
+        out[f"{a}->{b}"] = {
+            "selector": a,
+            "scorer": b,
+            "n": len(both),
+            "rule": f"of the positions where {a} rates the MCTS move better by more than the tie "
+            f"margin, the share that {b} also rates MCTS-better; the bound when {a} picks the "
+            f"candidate with its smaller loss (the realised selection on an exact tie) and {b}'s "
+            "losses score the pick against the realised selection",
+            "scorer_verdicts_on_flagged": {
+                v: sum(1 for f, y in zip(flagged, jb) if f and y["verdict"] == v)
+                for v in ("ab", "mcts", "tie")
+            },
+            "confirmation_rate": stratified_ratio(
+                both, also, flagged, weights, n_boot, seed
+            ),
+            "picks_not_selected": sum(1 for p, s in zip(pick_ab, sel_ab) if p != s),
+            "stats": stats,
+            "projected_elo_of_cross_bound": with_elo(stats["cross_bound_es"]),
+        }
+    return out
 
 
 def phase_of(fen: str, opening_moves: int = 15, endgame_pieces: int = 6) -> str:
