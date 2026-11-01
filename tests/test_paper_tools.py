@@ -371,6 +371,30 @@ class RunnerBookkeepingTest(unittest.TestCase):
         self.assertEqual(self.mf.pgn_game_seconds(pathlib.Path(path)), 3690.0)
         self.assertEqual(self.mf.pgn_game_durations(pathlib.Path(path)), (3690.0, 2))
 
+    def test_process_labels_of_cut_paths(self):
+        label = self.mf.process_label
+        self.assertEqual(
+            label(
+                "/opt/homebrew/Cellar/python@3.11/3.11.17/Frameworks/Python.framework/Versio"
+            ),
+            "Python 3.11 (Homebrew)",
+        )
+        self.assertEqual(
+            label(
+                "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Me"
+            ),
+            "Spotlight indexing (Metadata.framework)",
+        )
+        self.assertEqual(
+            label(
+                "/System/Library/Frameworks/Virtualization.framework/Versions/A/XPCServices"
+            ),
+            "Virtualization.framework (virtual machine)",
+        )
+        self.assertEqual(
+            label("/Applications/Kiro.app/Contents/Frameworks/Kiro"), "Kiro"
+        )
+
 
 FAKE_UCI = """
 import sys

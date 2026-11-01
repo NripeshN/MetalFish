@@ -968,15 +968,37 @@ def parse_hostload_full(path: pathlib.Path):
         label, pct = None, None
         if m:
             pct = float(m.group(1))
-            path_tok = m.group(2)
-            label = (
-                "Virtualization.framework (virtual machine)"
-                if "Virtualization" in path_tok
-                else path_tok.rstrip("/").split("/")[-1]
-            )
+            label = process_label(m.group(2))
         out.append((t, fields, label, pct))
     out.sort(key=lambda r: r[0])
     return out
+
+
+# The logger cuts "pcpu path" to 80 characters, so a framework path often ends mid-name
+# (".../Python.framework/Versio"); these name the process by the part that survives.
+PROCESS_NAMES = (
+    ("Virtualization", "Virtualization.framework (virtual machine)"),
+    (
+        "CoreServices.framework/Versions/A/Frameworks/Me",
+        "Spotlight indexing (Metadata.framework)",
+    ),
+    ("WebKit.framework", "WebKit web content"),
+    ("MediaAnalysis.framework", "mediaanalysisd"),
+    ("XProtect", "XProtect"),
+)
+
+
+def process_label(path: str) -> str:
+    """A readable name for the largest outside process of a hostload.log line."""
+    import re
+
+    for key, name in PROCESS_NAMES:
+        if key in path:
+            return name
+    m = re.search(r"python@(\d+\.\d+)", path)
+    if m:
+        return f"Python {m.group(1)} (Homebrew)"
+    return path.rstrip("/").split("/")[-1]
 
 
 def in_game_indices(games, times):
