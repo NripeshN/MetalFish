@@ -1051,7 +1051,9 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
 
     tdir = out / "tables"
     tdir.mkdir(parents=True, exist_ok=True)
-    pmtex = lambda x, pm: f"${fmt_pm(x, pm).replace('±', '\\pm')}$"  # noqa: E731
+    pmtex = lambda x, pm: (  # noqa: E731
+        "—" if x is None or pm is None else f"${fmt_pm(x, pm).replace('±', '\\pm')}$"
+    )
     esc = lambda t: str(t).replace("_", "\\_").replace("%", "\\%")  # noqa: E731
     samples = parse_hostload(results / "hostload.log")
     times = [t for t, _ in samples]

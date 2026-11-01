@@ -33,7 +33,10 @@
 % Outcome tables and figures of the confirmatory cells appear only once the cells are complete; until
 % then the draft carries placeholders, so that no interim outcome is read into the text.
 \newif\ifresults
-\resultsfalse
+\resultstrue
+% The oracle study (RQ6b) was still running for the first arXiv version; its table appears with it.
+\newif\iforacle
+\oraclefalse
 \newcommand{\depositcite}{\ifanon\cite{anonarchive}\else\cite{zenodo}\fi}
 \newcommand{\pending}[1]{\iffinal\PackageError{paper}{Pending content: #1}{Fill it from the artifact before the final build.}\else\textcolor{red}{[PENDING: #1]}\fi}
 \newcommand{\elo}[2]{$#1 \pm #2$}
@@ -61,7 +64,20 @@
 \maketitle
 
 \begin{abstract}
-\pending{abstract: written after RQ1a completes (headline Elo with 95\% CI read by the rule of Section~\ref{sec:rqs}, transformer-enabled fraction, RQ1b and the oracle bound if complete); outcome-neutral}
+Can a GPU make a Stockfish-class chess engine stronger? We test this for \MF{}, which runs a transformer
+Monte Carlo tree search (Lc0's BT4 network at batch size~1) on the GPU of an Apple M2 Max concurrently
+with Stockfish~19's alpha-beta search on its CPU, and arbitrates between their moves. Under a protocol
+published before the first game, the shipped hybrid played 2{,}002 games against the same binary's
+alpha-beta search at the same thread setting (30~s plus 0.3~s per move, unbalanced openings in
+colour-swapped pairs). It scored $-4.3$~Elo (95\% CI $-10.7$ to $+2.0$): no effect was detected, and
+gains above 2~Elo are excluded. The transformer was enabled on 53\% of the hybrid's moves, but the
+arbiter played the MCTS move on only 7 of 25{,}138 disagreements, so the GPU search acted through the
+alpha-beta search it accompanies; with alpha-beta on all eight threads it ran at a median of 58
+evaluations per second, under half its batch-1 ceiling. On an earlier configuration that split the eight
+threads six to two, isolation cells found that the two threads are worth 19.8~Elo and that the split
+hybrid lost a further 17.0~Elo to six-thread alpha-beta. The alpha-beta core matched Stockfish~19 within
+$-7.3$ to $+10.1$~Elo. The study replaces the ratings of an earlier conference chapter on the system,
+which do not hold; all games, traces, logs and scripts are released.
 \end{abstract}
 
 \keywords{computer chess \and alpha-beta search \and Monte Carlo tree search \and transformer networks \and hybrid search \and Apple Silicon \and unified memory \and engine evaluation}
@@ -81,14 +97,22 @@ The strongest chess programs follow one of two designs. One is alpha-beta search
 Equal CPU-thread budget means the same \texttt{Threads} setting for both arms; the hybrid's single MCTS worker runs as one extra thread that mostly waits on the GPU. ``Lc0-class'' refers to the network, Lc0's BT4 transformer, not to Lc0's search configuration, which batches evaluations over several threads (Section~\ref{sec:system}). The estimand is the score of Hybrid(8) against AB(8) from unbalanced human openings at 30~s plus 0.3~s per move, on one Apple M2 Max under the logged host load, with the shipped hybrid (one MCTS worker at batch size~1) as the treatment. In the frozen engine the GPU search can change the outcome through three channels: the MCTS root hints and the verification sub-search, which act on every move with the transformer enabled; contention for CPU time and memory bandwidth; and the arbiter's override, which in the gating matches before the freeze never selected the MCTS move (0 of 1{,}344 disagreements in the frozen build's gate L14, 0 of 1{,}165 in the pilot). RQ1a therefore mostly measures the first two channels, and whether arbitration could be worth anything is the question of the oracle study (RQ6b). %src: results/paper_v2/sprt/L14_hybrid_lean_vs_ab8_30p03/moves.jsonl; results/paper_v2/RQ1a_pilot/moves.jsonl
 The answer is measured as an Elo difference with a confidence interval; for the earlier split configuration, the isolation cells of RQ2 divide the effect into the cost of two alpha-beta threads and the value the GPU search returns; and the oracle study explains it by what the two searches disagree about and who is right when they do. The design was fixed in a protocol merged into the public repository before the first confirmatory game, and every later amendment carries its own merge time (Section~\ref{sec:amend}); the engine was frozen at a tagged commit; every number is traced to a retained artifact, and every table and figure is generated from the artifacts by a script.
 
-\paragraph{Headline result.} \pending{one paragraph: RQ1a Elo $\pm$ CI over 1{,}998 games at 30+0.3 (one pair fewer than planned), read by the rule of Section~\ref{sec:rqs}; transformer-enabled fraction; RQ1b and the oracle bound if complete}
+\paragraph{Headline result.} Over 2{,}002 games at 30+0.3 (999 colour-swapped pairs and four games
+without their partner), the shipped hybrid scored $-4.3$~Elo against AB(8), with a 95\% interval of
+$[-10.7, +2.0]$. By the registered rule the result is inconclusive at this $N$: no effect of the GPU
+search was detected, so the GPU path does not pay for itself at this budget on this machine, and a gain
+above 2.0~Elo is excluded. The transformer was enabled on 53\% of the hybrid's moves, and the arbiter
+played the MCTS move on 7 of the 25{,}138 moves on which the two searches disagreed. In the earlier split
+configuration, the two alpha-beta threads given to the GPU side cost 19.8~Elo, and the split hybrid lost
+a further 17.0~Elo against alpha-beta on six threads. RQ1b at 60+0.6, the oracle study and two further
+cells were still running when this version was prepared and will be added in a revised version.
 
 \paragraph{Contributions.}
 \begin{enumerate}
   \item A controlled methodology, fixed in advance in a time-stamped public protocol, for evaluating hybrid or ensemble chess engines that share one machine: a fair-resource policy, telemetry of when the GPU path is actually enabled, host-load logging with a scheduling gate, component isolation cells and an oracle analysis, combined with the conventions adopted from Fishtest (colour-swapped pairs, unbalanced human openings, pentanomial statistics with normalised Elo), with all artifacts released (Section~\ref{sec:method}).
   \item A corrected as-built description of \MF{}, the system first reported in~\cite{niketan2026chapter}: a concurrent alpha-beta plus MCTS runtime with shared root state, MCTS-to-alpha-beta root-ordering hints and a gated arbiter, with the BT4 transformer on Metal Performance Shaders Graph; the new element is the measurement of its batch-1 latency ceiling (Section~\ref{sec:system}) and of the contention between the two searches inside games (Section~\ref{sec:results}).
   \item Measurements for the research questions of Section~\ref{sec:rqs}: the marginal value of the GPU search at an equal \texttt{Threads} setting and, for the earlier split configuration, its decomposition into thread cost and GPU value (Section~\ref{sec:results}); the parity of the alpha-beta core with Stockfish 19 is checked as a validity condition.
-  \item An oracle analysis that bounds, under two stated judges, what any arbiter choosing between the two root candidates at decision time could gain from this pair of searches, and measures what the implemented arbiter achieves (Section~\ref{sec:oracle}).
+  \item The design of an oracle analysis that bounds, under two stated judges, what any arbiter choosing between the two root candidates at decision time could gain from this pair of searches, and measures what the implemented arbiter achieves (Section~\ref{sec:oracle}); the arbitration telemetry of every hybrid move is reported here, and the oracle's results will be added in a revised version.
 \end{enumerate}
 
 % =====================================================================================
@@ -133,7 +157,14 @@ Its local changes are few: the root accepts move-ordering hints from the MCTS co
 \subsection{MCTS component and neural-network backend}
 The MCTS component follows Lc0's search: PUCT selection with first-play urgency, a policy softmax temperature, tree reuse between moves and a direct-mapped cache of network outputs keyed on the position; it implements Lc0's algorithm and parameters and reads Lc0's network format, and is not claimed as a contribution. Nodes are 128 bytes and aligned to the M-series cache line; a 4-byte \texttt{os\_unfair\_lock} protects score updates. The BT4 transformer (\texttt{BT4-1024x15x32h}, 15 encoder blocks, 32 heads, 1024-wide; 383 MB of weights) is built once as a Metal Performance Shaders graph~\cite{mpsgraph} with an FP16 body and FP32 inputs and outputs, and encoded into a command buffer for each evaluation; one evaluation is in flight at a time. The stand-alone MCTS mode runs one worker at batch size 1; the hybrid runs one worker.
 
-Batch-1 inference is the structural ceiling of this design. On the M2 Max with no game running (13 October 2026, before host load was logged; \ifanon a pre-freeze build\else build \texttt{8777b99}\fi{} whose network code is the frozen one) a single BT4 evaluation takes 7.40 ms in FP16 (135 positions/s) and 8.74 ms in FP32; a batch of 8 takes 19.7 ms (407 positions/s) and a batch of 64 takes 119 ms (538 positions/s), so batching could raise throughput up to fourfold (Figure~\ref{fig:m1}). The engine as shipped does not batch; whether batching, with virtual loss keeping the tree statistics usable~\cite{chaslot2008}, would help it inside a game is not tested here (Section~\ref{sec:threats}). %src: results/paper_v2/micro/nn_latency.json (2026-10-13 sweep, queue_paper_log.txt; to be refreshed from nn_latency_frozen.json)
+Batch-1 inference is the structural ceiling of this design. With the frozen binary, measured after the
+cells (1 November 2026, with outside processes using 1.5 to 3.6 cores during the run), a single BT4
+evaluation takes 7.21~ms in FP16 (139 positions/s), the precision the engine uses, and 8.56~ms in FP32;
+a batch of 8 takes 18.9~ms (422 positions/s) and a batch of 64 takes 119~ms (538 positions/s), so
+batching could raise throughput almost fourfold (Figure~\ref{fig:m1}). The engine as shipped does not
+batch; whether batching, with virtual loss keeping the tree statistics usable~\cite{chaslot2008}, would
+help it inside a game is not tested here (Section~\ref{sec:threats}).
+%src: results/paper_v2/micro/nn_latency_frozen.json (08 §B, M1 frozen build); src/uci/engine.cpp:140 (NNMetalFP16 true)
 A search with Lc0 0.32.1's Metal backend and the same weights reaches 165 nodes/s at minibatch 1 and at best 725 nodes/s (minibatch 32) on the same machine. \MF{}'s evaluation rate is therefore below Lc0's search rate at batch size 1, the setting its search uses, and at each program's best batch size (538 against 725 per second); at batch sizes 2 to 8 it is above, at 16 and 32 below and at 64 about equal (Figure~\ref{fig:m1}). The two tools count different things (network evaluations against search nodes), so these comparisons are indicative only. %src: results/paper_v2/micro/nn_latency.json (lc0 nps_steady_median)
 Inside a game the MCTS worker competes with eight alpha-beta threads for memory bandwidth and scheduling; its observed rate is reported with the game telemetry in Section~\ref{sec:results}.
 
@@ -143,7 +174,7 @@ On every move the coordinator starts the alpha-beta search and the MCTS search o
 
 At the start of a move the alpha-beta side reads up to eight moves from the MCTS root, which at that moment holds the subtree kept from the previous move, or nothing. These hints only reorder alpha-beta's initial list of root moves, so every thread searches the first hint first in the first iteration; from the second iteration Stockfish orders the root by score as usual, the aspiration windows are unaffected, and nothing else in the search reads the hints. When the coordinator's budget is at least one second, the first five hints are first verified by a restricted alpha-beta search of $\min(240~\text{ms}, \text{budget}/8)$; with a queen on the board, a further check of 80 to 160~ms can follow for each verified candidate that is a quiet rook or queen check (at most four). The verification shares the transposition and history tables with the main search, and its result feeds two of the predicates below. Its time is spent from the game clock before Stockfish's time manager starts timing the move, and it replaces state that the time manager carries from one search to the next, so the hybrid's alpha-beta search does not divide the clock exactly as the alpha-beta arm does (Section~\ref{sec:threats}). %src: 365f36a hybrid_search.cpp 572-597, 3102-3176, 3537-3669, 3829-3864; search/search.cpp 59-98, 275-277
 
-When both searches name the same move, it is played, except that two tie-break rules can play a third move from the MCTS list when its prior or its value strongly favours it. When they disagree, the arbiter plays alpha-beta's move unless a predicate selects the MCTS move: 36 predicates are tested in a fixed order, and 31 of them can fire under the tested settings (Appendix~\ref{app:ladder}). A veto blocks the MCTS move when alpha-beta, having completed depth 10, ranks its own move first and the MCTS move lower, and either its average score for the MCTS move trails by at least 30 internal units with at least 10{,}000 nodes spent on its own move, or it barely searched the MCTS move. Of the 31 predicates, 24 override the veto, two do so only under stricter conditions, four are blocked by it, and one applies only when alpha-beta has not reached depth 10, when there is no veto. The veto encodes a design assumption: with a few hundred MCTS visits against millions of alpha-beta nodes, a move that alpha-beta has searched to depth 10 and found worse by a margin is more often a tactical oversight of the shallow MCTS search than a long-term judgement that alpha-beta misses. The oracle study tests this assumption on the disagreements (Section~\ref{sec:oracle}). The pawn-lever and quiet-attack tie-break overrides, which were added after the chapter, are off. In the gating matches before the freeze the arbiter never played the MCTS move (0 of 1{,}344 disagreements in L14). A time-safety rule disables the transformer for a move when the estimated budget is below 400~ms or the remaining clock below 3~s; the move is then plain alpha-beta with Stockfish's own output, and the engine logs the rule but writes no decision trace. The position classifier that the chapter described as weighting the decision can only lengthen the coordinator's budget, never alpha-beta's search time; a longer budget lengthens the MCTS search, the verification cap and the grace period. An agreement rule ends a move early when both searches have named the same move in three consecutive polls after a quarter of the budget, with at least 100 MCTS nodes and alpha-beta at depth 10; it fired on 3 of the 3{,}278 transformer-enabled moves of the 30+0.3 pilot and on none of the 3{,}442 in L14, and its time saving has not been measured. %src: results/paper_v2/RQ1a_pilot/engines.log.gz and L14 engines.log.gz ("engines agree, stopping early"); 365f36a hybrid_search.cpp 1860-1873, 4058-4082, 4946-4951, 5288-5306, 5366-5480
+When both searches name the same move, it is played, except that two tie-break rules can play a third move from the MCTS list when its prior or its value strongly favours it. When they disagree, the arbiter plays alpha-beta's move unless a predicate selects the MCTS move: 36 predicates are tested in a fixed order, and 31 of them can fire under the tested settings (Appendix~\ref{app:ladder}). A veto blocks the MCTS move when alpha-beta, having completed depth 10, ranks its own move first and the MCTS move lower, and either its average score for the MCTS move trails by at least 30 internal units with at least 10{,}000 nodes spent on its own move, or it barely searched the MCTS move. Of the 31 predicates, 24 override the veto, two do so only under stricter conditions, four are blocked by it, and one applies only when alpha-beta has not reached depth 10, when there is no veto. The veto encodes a design assumption: with a few hundred MCTS visits against millions of alpha-beta nodes, a move that alpha-beta has searched to depth 10 and found worse by a margin is more often a tactical oversight of the shallow MCTS search than a long-term judgement that alpha-beta misses. The oracle study tests this assumption on the disagreements (Section~\ref{sec:oracle}). The pawn-lever and quiet-attack tie-break overrides, which were added after the chapter, are off. In the gating matches before the freeze the arbiter never played the MCTS move (0 of 1{,}344 disagreements in L14); in RQ1a it played it on 7 of 25{,}138 (Section~\ref{sec:oracle}). A time-safety rule disables the transformer for a move when the estimated budget is below 400~ms or the remaining clock below 3~s; the move is then plain alpha-beta with Stockfish's own output, and the engine logs the rule but writes no decision trace. The position classifier that the chapter described as weighting the decision can only lengthen the coordinator's budget, never alpha-beta's search time; a longer budget lengthens the MCTS search, the verification cap and the grace period. An agreement rule ends a move early when both searches have named the same move in three consecutive polls after a quarter of the budget, with at least 100 MCTS nodes and alpha-beta at depth 10; it ended 660 of the 68{,}456 transformer-enabled moves of RQ1a early (1.0\%) and 6{,}485 of the 38{,}645 of the split hybrid in RQ2b (16.8\%), whose MCTS search reached the 100-node minimum more often (Section~\ref{sec:results}); its time saving was not measured directly. %src: results/paper_v2/{RQ1a,RQ2b}/engines.log ("engines agree, stopping early"; tables/flags.md) and summary.json moves_hybrid (08 §E Final analyses); 365f36a hybrid_search.cpp 1860-1873, 4058-4082, 4946-4951, 5288-5306, 5366-5480
 
 With \texttt{HybridTrace} on, as in every hybrid arm, the coordinator writes one decision line per move after both searches have stopped and before \texttt{bestmove}, so the trace cannot affect either search; its cost counts towards the move's time and was not measured. The line records the reason, both candidates, their scores and visit counts, every predicate's value, the MCTS top ten and alpha-beta's top sixteen root moves; the recorded reason is the first predicate in ladder order that holds, which need not be the one that lifted the veto. The score the hybrid reports before \texttt{bestmove} is alpha-beta's (Stockfish's normalised centipawns, with mates as $\pm(30000-\text{plies})$ centipawns) unless it plays the MCTS move, when it reports $300\,\mathrm{artanh}\,Q$, bounded at $\pm 1140$; time-safety moves report Stockfish's own output. At the first \texttt{isready} the engine loads the network, builds the Metal graph and runs one batch-1 warm-up evaluation before it answers \texttt{readyok}, which the match manager awaits before the game starts, so the game clock does not pay for initialisation. The complete list of predicates and thresholds, with source references, is in the arbiter reference \ifanon in the archive~\depositcite{}\else in the repository (\texttt{docs/paper\_v2/arbiter\_reference.md})\fi. %src: 365f36a hybrid_search.cpp 4147-4214, 5483-5590; uci.cpp 161-164, 1579-1622, 1727-1737; mcts/search.cpp 278-322; L14 engines.log.gz (isready/readyok before the first go)
 
@@ -153,7 +184,11 @@ The study started from the engine as of July 2026, which already differed from t
 the Stockfish thread pool was kept alive across hybrid moves and Stockfish's time manager was given the clock, with the tie-break overrides turned off (+\elo{74.1}{30.5} over the previous hybrid at 20+0.2, 100 games); %src: 08 §A L7b
 alpha-beta was allowed to keep all eight threads with the MCTS worker oversubscribed (+\elo{15.1}{17.0} over the 6+1 split, 300 games); %src: 08 §A L9
 and the hybrid's network-output cache was capped at 100{,}000 entries after a 100-game pilot of the study's main cell read \elo{-41.9}{25.1} for a hybrid process whose resident memory reached 6.0 GB on the 32 GB host (the lean configuration read +\elo{13.9}{30.3} over 50 pairs (101 games) under the same conditions; a null control in which the hybrid never engaged the transformer read \elo{-20.9}{28.5}, and the same control without preloading the network read \elo{-10.4}{16.8} over 150 pairs (301 games) at 10+0.1). %src: 08 §A RQ1a_pilot, L14, L12, L13; results/paper_v2/micro/mem_pilot.log (max RSS 6.01 GB)
-\pending{M4: physical footprint of AB(8), Hybrid(8) and MCTS(1) on the frozen binary at a 2 GB hash (footprint\_frozen.json, measured after the cells)}
+Measured after the cells with the cells' options and a 2~GB hash (M4), the frozen binary's physical
+footprint after \texttt{isready} is 2.3~GB for AB(8), 4.4~GB for Hybrid(8) (peak 4.7~GB) and 5.6~GB for
+MCTS(1), whose network cache keeps the default two million entries (5.7~GB after a 20~s search, peak
+5.9~GB); the sizes are \texttt{vmmap}'s, in units of $2^{30}$ bytes.
+%src: results/paper_v2/micro/footprint_frozen.json (08 §B, M4 frozen build); src/uci/engine.cpp:225; src/uci/uci.cpp:1244-1257
 The frozen binary's SHA-256 is recorded in every cell manifest.
 
 % =====================================================================================
@@ -208,7 +243,7 @@ The labels follow the protocol. Its further cells (RQ3 and RQ4: CPU-budget cross
 
 \subsection{Pilot, freeze and amendments}
 \label{sec:amend}
-A 50-pair pilot of RQ1a preceded the freeze and checked the runner, the statistics against fastchess, forfeits (none), the draw rate and the transformer-enabled fraction; it used RQ1a's seed, so it played the openings of RQ1a's first 50 pairs, with the pre-freeze build. The pilot found the memory defect described in Section~\ref{sec:prep}, which was fixed before the freeze; the pilot games are reported as a diagnostic and are not part of RQ1a. Twelve amendments were recorded, each before the affected cell was interpreted: (1) the hybrid arm is the shipped configuration after the time-management and tie-break changes; (2) engines restart per game; (3) the shipped hybrid is oversubscribed, so the split configuration became the ablation of RQ2; (4) the transformer-enabled fraction at 30+0.3 (about 50\% of hybrid moves) fell short of the 80\% feasibility target, which was kept as a covariate and led to RQ1b being promoted; (5) RQ6d was promoted after the pilot; (6) the strata of the oracle study were defined; (7) a system-library upgrade on the host broke the frozen binary during the first block of RQ1a, so the same source was rebuilt, re-verified (bench signature, unit suite, network reference outputs; the batch-parity check matched up to batch 8, and at batch 16 one FP16 policy logit differed by 0.0056 against a tolerance of 0.005, a batch size the engine does not use) and re-frozen with its dynamic libraries bundled, and RQ1a restarted from its first opening with the 183 earlier games set aside; (8) because the host was shared with other work, blocks are played in chunks that start only when the CPU used by other processes, averaged over five minutes, is below three cores (the engines need about nine of the twelve; block 0 of RQ1a and RQ2a had been played before the gate existed), and every cell is also reported with the pairs that overlapped a minute above three cores removed (Section~\ref{sec:threats}); (9) after four time forfeits during a load spike inside a chunk, chunks were shortened from ten pairs to four and a watchdog stops a running chunk at the next completed pair when the two-minute external load exceeds 4.5 cores; (10) after a further forfeit during a spike below that trigger, the watchdog uses the gate's threshold of three cores, and time forfeits are reported per arm (Table~\ref{tab:health}); (11) an interim reading of each cell has been recorded after every block for monitoring, beyond the running fastchess printout the protocol allowed, with no decision rule attached (this amendment discloses the practice; amendments 8--10 were written after the first reading); (12) after a review of the design with every result withheld, the reading rules of RQ1a and RQ5c, the meaning of each outcome, the further sensitivity analyses of Section~\ref{sec:method}, the GPU and memory covariates, the oracle's judging design and the description of RQ6d were fixed before any cell was read; (13) the host's update history showed that the cells ran on four automatically installed builds of macOS 27.2 (three pre-release builds and, for the last blocks of RQ2a, RQ2b and RQ5c, the final release, whose installation caused one forfeit in RQ2a), so every cell is also reported by build and the microbenchmarks with their builds. Exceeding the 0.5\% forfeit limit led to scheduling amendments (9 and 10), never to the exclusion of games. The measurements were interrupted by host reboots, including kernel panics, and paused whenever the gate was closed; every block resumed from the next unused opening of the same seeded order, and the manifests record every invocation of every block. No game was deleted. A game whose colour-swapped partner was not played enters no pair and its opening is replayed, except once: before a bookkeeping fix, a watchdog stop split a pair and its opening was skipped, so RQ1a has one pair fewer than planned.
+A 50-pair pilot of RQ1a preceded the freeze and checked the runner, the statistics against fastchess, forfeits (none), the draw rate and the transformer-enabled fraction; it used RQ1a's seed, so it played the openings of RQ1a's first 50 pairs, with the pre-freeze build. The pilot found the memory defect described in Section~\ref{sec:prep}, which was fixed before the freeze; the pilot games are reported as a diagnostic and are not part of RQ1a. Thirteen amendments were recorded, each before the affected cell was interpreted (the by-build estimates that amendment~13 adds for RQ1a were computed after its interpretation and are labelled so): (1) the hybrid arm is the shipped configuration after the time-management and tie-break changes; (2) engines restart per game; (3) the shipped hybrid is oversubscribed, so the split configuration became the ablation of RQ2; (4) the transformer-enabled fraction at 30+0.3 (about 50\% of hybrid moves) fell short of the 80\% feasibility target, which was kept as a covariate and led to RQ1b being promoted; (5) RQ6d was promoted after the pilot; (6) the strata of the oracle study were defined; (7) a system-library upgrade on the host broke the frozen binary during the first block of RQ1a, so the same source was rebuilt, re-verified (bench signature, unit suite, network reference outputs; the batch-parity check matched up to batch 8, and at batch 16 one FP16 policy logit differed by 0.0056 against a tolerance of 0.005, a batch size the engine does not use) and re-frozen with its dynamic libraries bundled, and RQ1a restarted from its first opening with the 183 earlier games set aside; (8) because the host was shared with other work, blocks are played in chunks that start only when the CPU used by other processes, averaged over five minutes, is below three cores (the engines need about nine of the twelve; block 0 of RQ1a and RQ2a had been played before the gate existed), and every cell is also reported with the pairs that overlapped a minute above three cores removed (Section~\ref{sec:threats}); (9) after four time forfeits during a load spike inside a chunk, chunks were shortened from ten pairs to four and a watchdog stops a running chunk at the next completed pair when the two-minute external load exceeds 4.5 cores; (10) after a further forfeit during a spike below that trigger, the watchdog uses the gate's threshold of three cores, and time forfeits are reported per arm (Table~\ref{tab:health}); (11) an interim reading of each cell has been recorded after every block for monitoring, beyond the running fastchess printout the protocol allowed, with no decision rule attached (this amendment discloses the practice; amendments 8--10 were written after the first reading); (12) after a review of the design with every result withheld, the reading rules of RQ1a and RQ5c, the meaning of each outcome, the further sensitivity analyses of Section~\ref{sec:method}, the GPU and memory covariates, the oracle's judging design and the description of RQ6d were fixed before any cell was read; (13) the host's update history showed that the cells ran on four automatically installed builds of macOS 27.2 (three pre-release builds and, for the last blocks of RQ2a, RQ2b and RQ5c, the final release, whose installation caused one forfeit in RQ2a), so every cell is also reported by build and the microbenchmarks with their builds. Exceeding the 0.5\% forfeit limit led to scheduling amendments (9 and 10), never to the exclusion of games. The measurements were interrupted by host reboots, including kernel panics, and paused whenever the gate was closed; every block resumed from the next unused opening of the same seeded order, and the manifests record every invocation of every block. No game was deleted. A game whose colour-swapped partner was not played enters no pair and its opening is replayed, except once: before a bookkeeping fix, a watchdog stop split a pair and its opening was skipped, so RQ1a has one pair fewer than planned.
 
 \subsection{Compute}
 Table~\ref{tab:compute} lists the machine time per cell.
@@ -228,13 +263,13 @@ Table~\ref{tab:compute} lists the machine time per cell.
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.8\linewidth]{m1_nn_latency.pdf}
-\caption{M1: BT4 evaluation latency and throughput against batch size for \MF{} (MPSGraph, FP16 and FP32) and Lc0 0.32.1 (Metal) with the same weights on the M2 Max with no game running (13 October 2026). Lc0's rate is that of its search (nodes per second). Generated from \texttt{micro/nn\_latency.json}.}
+\caption{M1: BT4 evaluation latency and throughput against batch size for \MF{} (MPSGraph, FP16 and FP32) and Lc0 0.32.1 (Metal) with the same weights, on the frozen binary after the cells (1 November 2026; other processes used 1.5 to 3.6 cores during the run). Lc0's rate is that of its search (nodes per second). Generated from \texttt{micro/nn\_latency\_frozen.json}.}
 \label{fig:m1}
 \end{figure}
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.8\linewidth]{m2_ab_scaling.pdf}
-\caption{M2: alpha-beta nodes per second against thread count at fixed depth 16 (median of five runs). Generated from \texttt{micro/ab\_scaling.json}.}
+\caption{M2: alpha-beta nodes per second against thread count at fixed depth 16 (median of five runs; frozen binary, 1 November 2026). Generated from \texttt{micro/ab\_scaling\_frozen.json}.}
 \label{fig:m2}
 \end{figure}
 \begin{figure}[t]
@@ -250,7 +285,20 @@ Table~\ref{tab:compute} lists the machine time per cell.
 \footnotesize
 \ifresults\input{../tables/therm.tex}\else\pending{thermal table, generated when the cells are complete}\fi
 \end{table}
-\pending{M1/M2 text from the frozen-build re-run (nn\_latency\_frozen.json, ab\_scaling\_frozen.json) and M3--M5 from the RQ1a/RQ1b traces}
+The microbenchmarks were re-run on the frozen binary after the four game cells, behind the load gate
+(M1 to M4; Figures~\ref{fig:m1} and~\ref{fig:m2}). Alpha-beta reaches 1.47 million nodes per second on
+one thread, 12.8 million on eight and 15.1 million on twelve, the last four threads being efficiency
+cores (M2; depth 16, median of five runs). Inside the games the GPU search ran far below its batch-1
+ceiling of 139 evaluations per second (M3): with the split hybrid of RQ2b
+(six alpha-beta threads beside the MCTS worker) the median rate over the move time of the
+transformer-enabled moves was 118 evaluations per second (10th percentile 36), and with the shipped
+hybrid of RQ1a (eight alpha-beta threads plus the worker on the eight performance cores) it was 58
+(10th percentile 19), half as many, so the worker's evaluations depend on how many cores alpha-beta
+leaves free. The transformer was enabled on 53\% of the shipped hybrid's moves at 30+0.3 and on 59\%
+of the split hybrid's (Table~\ref{tab:telemetry}); its time-control dependence (M5) needs RQ1b at
+60+0.6, which was still running when this version was prepared. No cell logged a thermal warning (M6;
+Table~\ref{tab:therm}).
+%src: 08 §B (M1, M2 frozen build); 08 §E Final analyses (M3: tables/gpu_health.md); tables/telemetry.md, therm.md
 
 \subsection{RQ1: marginal value of the GPU search}
 \begin{table}[t]
@@ -258,7 +306,7 @@ Table~\ref{tab:compute} lists the machine time per cell.
 \caption{Game cells: pairs, pentanomial outcome, Elo with 95\% CI, nElo, LOS and transformer-enabled fraction. Generated by \texttt{make\_figures.py} from each cell's \texttt{summary.json}.}
 \label{tab:cells}
 \footnotesize
-\ifresults\input{../tables/cells.tex}\else\pending{per-cell table, generated when the cells are complete}\fi
+\ifresults\resizebox{\linewidth}{!}{\input{../tables/cells.tex}}\else\pending{per-cell table, generated when the cells are complete}\fi
 \end{table}
 \begin{table}[t]
 \centering
@@ -303,18 +351,114 @@ Table~\ref{tab:compute} lists the machine time per cell.
 \end{table}
 \begin{table}[t]
 \centering
-\caption{Time per move by arm, from the move times recorded in the games: moves, mean and 99th-percentile time in seconds, median search depth and median nodes per second in millions. The hybrid's moves are also split into transformer-enabled moves and time-safety moves using the traces. Generated from \texttt{games.pgn} and \texttt{moves.jsonl}.}
+\caption{Time per move by arm, from the move times recorded in the games: moves, mean and 99th-percentile time in seconds, median search depth and median nodes per second in millions. The hybrid's moves are also split into transformer-enabled moves and time-safety moves using the traces; a hybrid move's nodes per second are the engine's own report (both searches' nodes over its search time). Generated from \texttt{games.pgn} and \texttt{moves.jsonl}.}
 \label{tab:timing}
 \footnotesize
 \ifresults\input{../tables/timing.tex}\else\pending{time-per-move table, generated when the cells are complete}\fi
 \end{table}
-\pending{RQ1a (and RQ1b if complete) results: Elo, CI, nElo, draw rate, forfeits, transformer-enabled fraction, evals/move, per-block consistency, the sensitivity analyses of Section~\ref{sec:method}}
+RQ1a, the confirmatory cell, ended at 2{,}002 games: 999 pairs and four unpaired games (one pair was lost
+to a runner fault that was fixed before any cell was interpreted; Section~\ref{sec:amend}). The hybrid
+scored $-4.3$~Elo against AB(8), with a 95\% interval of $[-10.7, +2.0]$ (nElo $-10.5 \pm 15.2$;
+Table~\ref{tab:cells}). The interval spans zero, so by the registered rule the result is inconclusive at
+this $N$: no effect of the concurrent GPU search was detected at an equal \texttt{Threads} setting, which
+means the GPU path does not pay for itself at this budget on this machine; the experiment excludes a gain
+above 2.0~Elo and a loss beyond 10.7~Elo.
+
+None of the registered sensitivity analyses moves the estimate by more than one standard error
+(Table~\ref{tab:robustness}): at zero outside load the pair-level regression gives $-3.0 \pm 8.0$, the
+low-load pairs alone give $-3.4 \pm 7.1$, and the cell without the 92 openings already played by the pilot
+and the set-aside games gives $-4.8 \pm 6.7$; removing the pairs that contain a forfeit, or scoring
+forfeits as draws, moves the estimate by less than one Elo. The four blocks read $-11.8$, $-7.0$, $-6.3$ and $+7.6$~Elo
+(Table~\ref{tab:blocks}); Cochran's $Q$ is 5.03 on 3 degrees of freedom ($p = 0.17$), and the bootstrap
+over the runner's 218 chunks gives $[-9.9, +2.2]$. The 183 games set aside by amendment~7 read
+$-9.5 \pm 18.6$ on their own. The interim reading after three blocks had excluded zero ($-8.4 \pm 7.3$);
+as registered, no decision was taken on it.
+
+The transformer was enabled on 53\% of the hybrid's 128{,}952 moves (Table~\ref{tab:telemetry}); on those
+moves the MCTS search ran a median of 36 network evaluations, at a median of 58 per second of move time,
+against the 139 per second that the GPU reaches at batch size~1 with no game running. The two searches
+named different moves on 36.7\% of the traced moves, and the arbiter played the MCTS move on 7 of the
+25{,}138 disagreements, each time through one predicate (\texttt{mcts\_root\_reject\_q\_gap};
+Figure~\ref{fig:reasons}). Whatever the GPU search contributed therefore reached the board through the
+alpha-beta search it accompanies: the root hints, present on 84\% of the transformer-enabled moves; the
+verification sub-search, run on 18\% of them; the agreement rule, which ended 1.0\% of them early; and
+contention for the cores, memory and clock. Over all moves the hybrid reported a median of 10.5 million
+nodes per second (both searches' nodes over its search time), against 10.8 million for AB(8) in the same
+games, and the two arms divided the clock alike (Table~\ref{tab:timing}).
+%src: 08 §E RQ1a final reading (corrected 2026-11-01) and Final analyses
 
 \subsection{RQ2: thread cost versus GPU value}
-\pending{RQ2a, RQ2b (and RQ2c if run) with the decomposition}
+RQ2a measures what the pre-amendment split paid in CPU threads. AB(6) scored $-19.8$~Elo against AB(8)
+over 500 pairs, with a 95\% interval of $[-28.6, -11.1]$ (Table~\ref{tab:cells}): at 30+0.3 on this
+machine two of the eight alpha-beta threads are worth about 20~Elo. By the registered criterion the cell
+is load-sensitive (Table~\ref{tab:robustness}): the pair-level regression puts the estimate at zero outside
+load at $-24.7 \pm 9.7$, 4.9~Elo from the primary estimate (standard error 4.5), and the low-load pairs
+alone give $-23.8 \pm 10.1$. The regression's positive slope says that the gap between six and eight
+threads was smaller in pairs played under outside load, as expected when other processes take cores that
+only the eight-thread arm would have used; both estimates are therefore reported. The four blocks read
+$-9.7$, $-32.1$, $-23.7$ and $-13.9$~Elo (Cochran's $Q$ = 3.69 on 3 degrees of freedom, $p = 0.30$), and
+the bootstrap over the runner's 113 chunks gives $[-31.4, -11.7]$. The first block was played before the
+load gate existed and had the most outside load (52\% of its pairs overlapped a minute above three cores,
+against 8--38\% in the later blocks); it is also the only block on the first macOS build, so the
+difference between builds ($-15.3$, standard error 10.2) cannot be separated from load and scheduling.
+
+RQ2b compares the split hybrid, as built, with AB(6). On its transformer-enabled moves (59\% of its moves)
+the split hybrid's alpha-beta side had the same six threads as its opponent, with the MCTS worker on the
+rest of the eight-thread budget and the GPU; on its time-safety moves it played plain alpha-beta on all
+eight threads, because the time-safety rule restores the full pool, and it switched to them once in 818 of
+its 1{,}000 games and never back, each change rebuilding alpha-beta's thread pool with empty per-thread
+histories. It scored $-17.0$~Elo against AB(6) over 500 pairs, with a 95\% interval of $[-26.2, -7.9]$:
+with at least as many alpha-beta threads as its opponent on every move, the split configuration lost
+strength. It never played an MCTS move against its alpha-beta side's choice: the two searches disagreed
+on 34.0\% of the traced moves, and the MCTS move was chosen on none of these 13{,}152 disagreements, so the
+deficit arose in the alpha-beta side's search inside the hybrid rather than in moves chosen by the GPU
+search. The cell is not load-sensitive: the estimate at zero outside load is $-16.3 \pm 10.1$ and the
+low-load pairs alone give $-16.6 \pm 10.3$, both within 0.7~Elo of the primary estimate (standard error
+4.7). The four blocks read $-27.9$, $-12.5$, $-12.5$ and $-15.3$~Elo (Cochran's $Q$ = 1.85, $p = 0.60$),
+and the bootstrap over 120 chunks gives $[-26.5, -7.6]$. The first block, the only one on the macOS beta,
+also had the most outside load (54\% of its pairs overlapped a minute above three cores, against 2--18\%
+later) and the lowest MCTS evaluation rate (a median of 89.5 evaluations per second of move time, against
+118.8--129.7 in the later blocks), so the difference between the release candidate and the beta ($+15.3$,
+standard error 11.4) cannot be attributed to the build.
+
+The logs show how the split hybrid's alpha-beta search differed from AB(6)'s, without separating the
+causes. The GPU side reaches that search through the root hints, present on 91\% of its
+transformer-enabled moves, and the verification sub-search, which ran on 30\% of them; through the CPU,
+memory and clock that the two sides share; and through the agreement rule, which ended 6{,}485 of the
+38{,}645 transformer-enabled moves early (16.8\%, against 1.0\% for the shipped hybrid of RQ1a, whose MCTS
+search, with half the evaluation rate, rarely reached the rule's 100-node minimum). The split hybrid
+divided its clock differently from AB(6): in its first ten moves it spent 0.96~s per move against
+1.27~s, and more than AB(6) in moves 21 to 40 (Table~\ref{tab:timing}), whereas the shipped hybrid and
+AB(8) used their clocks alike in RQ1a. RQ6d, which switches the hints and the verification off, is still
+queued, and no cell switches the agreement rule off; which of these channels carries the deficit is
+therefore not established here.
+
+Derived as RQ2b plus RQ2a, with the covariance of the shared openings, RQ2c puts the split hybrid at
+$-36.9$~Elo against AB(8) (95\% interval $[-49.6, -24.2]$). The registered interpretation singled out one
+pattern, a positive RQ2b with a negative RQ2c, which would have meant that the GPU search helps only when
+CPU threads are free; RQ2b is negative, so that pattern did not occur. The shipped configuration of RQ1a,
+which keeps all eight alpha-beta threads and runs the MCTS worker as an extra thread, stayed within
+$[-10.7, +2.0]$~Elo of AB(8): it avoids most of the split's cost, but no configuration measured here turns
+the GPU search into a gain.
+%src: 08 §E RQ2a, RQ2b final readings; Final analyses (timing, agreement stop, hints, verification, thread pool)
 
 \subsection{RQ5: component parity}
-\pending{RQ5c (AB vs SF19); RQ5a if run}
+RQ5c checks the baseline. Against Stockfish~19 with the same eight threads and hash, the frozen build's
+alpha-beta engine scored $+1.4$~Elo over 500 pairs, with a 95\% interval of $[-7.3, +10.1]$
+(Table~\ref{tab:cells}). By the registered reading this is a parity interval: no difference was
+detected and differences outside the interval are excluded, but no equivalence margin was set, so the
+result does not show that the two engines are equally strong. The AB(8) baseline of RQ1a and RQ2a is
+therefore within this range of Stockfish~19. The cell is not load-sensitive: the estimate at zero
+outside load is $+0.3 \pm 9.5$ and the low-load pairs alone give $-0.4 \pm 9.6$, both within 1.8~Elo of
+the primary estimate (standard error 4.4). The four blocks read $+2.8$, $+6.9$, $-2.8$ and $-1.4$~Elo
+(Cochran's $Q$ = 0.73, $p = 0.87$), and the bootstrap over 113 chunks gives $[-8.1, +11.2]$; no
+difference between macOS builds exceeds its standard error. The settings differ in one respect: the
+\MF{} arm uses the 50~ms move overhead of every \MF{} arm and Stockfish keeps its 10~ms default
+(Section~\ref{sec:match}), which leaves the alpha-beta arm slightly less time per move; Stockfish's PGO build
+also searched about 5\% more nodes per second (a median of 11.5 against 11.0 million;
+Table~\ref{tab:timing}). RQ5a, the MCTS search against Lc0 at matched settings, was not played for
+this version.
+%src: 08 §E RQ5c final reading; Final analyses (timing)
 
 % =====================================================================================
 \section{Why: arbitration and the oracle study}
@@ -325,19 +469,37 @@ Table~\ref{tab:compute} lists the machine time per cell.
 \caption{Decision reasons per hybrid-engine move. \texttt{ab\_fallback\_time\_safety} labels the plain alpha-beta moves of the time-safety rule (the label is assigned by the trace parser, since the engine writes no decision trace on those moves); \texttt{engines\_agree} is agreement; \texttt{ab\_root\_rejects\_mcts} is alpha-beta's verification rejecting the MCTS move; \texttt{ab\_default} is alpha-beta's move with no override predicate firing. Generated from the traces.}
 \label{fig:reasons}
 \end{figure}
+\iforacle
 \begin{table}[t]
 \centering
 \caption{Oracle study (RQ6b), per judge and on the positions where both judges agree: the share of disagreement positions on which the MCTS move or the alpha-beta move is better, or the two are within 10~cp; the oracle-arbiter bound in expected score (logistic, 250~cp per unit of log-odds); and its projected Elo, per disagreement position. Rates are reweighted to all disagreements by stratum; 95\% intervals from a bootstrap that resamples games within strata. Generated by \texttt{oracle\_probe.py}.}
 \label{tab:oracle}
 \footnotesize
-\ifresults\resizebox{\linewidth}{!}{\input{../tables/oracle.tex}}\else\pending{oracle table, generated when the oracle study is complete}\fi
+\resizebox{\linewidth}{!}{\input{../tables/oracle.tex}}
 \end{table}
-\pending{RQ6a telemetry (disagreement rate, visits at decision, reason histogram, MCTS move chosen) and RQ6b oracle outcomes with bootstrap CIs; the arbiter upper bound in expected score and projected Elo; RQ6d}
+\fi
+RQ6a describes the arbitration of every hybrid move from the traces (Table~\ref{tab:telemetry},
+Figure~\ref{fig:reasons}). In RQ1a the transformer was enabled on 68{,}456 of the hybrid's 128{,}952
+moves, and the two searches named different moves on 25{,}138 of them (36.7\%), with a median of 38 MCTS
+playouts at decision time. On the disagreements, alpha-beta's verification rejected the MCTS move
+19{,}579 times, the arbiter defaulted to alpha-beta's move 5{,}552 times without a predicate firing, and
+it played the MCTS move 7 times, each through \texttt{mcts\_root\_reject\_q\_gap}; the other moves were
+agreements (43{,}318) and time-safety moves (60{,}496). The root hints were present on 57{,}308 of the
+transformer-enabled moves (84\%) and the verification sub-search ran on 12{,}225 (18\%); on the
+disagreements the first hint was the MCTS move in 14{,}211 cases and alpha-beta's final move in 2{,}429.
+The agreement rule ended 660 moves early (1.0\% of the transformer-enabled moves), and the grace period
+for stopping a search never expired. The split hybrid of RQ2b disagreed on 34.0\% of its 38{,}645
+transformer-enabled moves with a median of 76 playouts, never played the MCTS move, had root hints on
+91\% of those moves and ran the verification on 30\%, and stopped on agreement on 16.8\%. The oracle
+study (RQ6b), which judges the disagreement positions, and RQ6d, which switches the hints and the
+verification off, were still running when this version was prepared; their results, and with them the
+bound on what an arbiter between the two root candidates could gain, will be added in a revised version.
+%src: tables/telemetry.md, flags.md (08 §E RQ1a, RQ2b final readings and Final analyses)
 
 % =====================================================================================
 \section{Threats to validity}
 \label{sec:threats}
-\textbf{Single platform and what generalises.} Every measurement comes from one M2 Max, and the CUDA build of the same engine is out of scope. The equal-budget accounting, the oracle method and the mechanism (how often, and through which channel, the GPU search affects the move) carry over to other hardware; the absolute Elo, the M2 Max and batch-1 inference do not. A later Apple chip with a larger GPU, or a discrete GPU with batched inference, would need the transformer-enabled fraction, the in-game evaluation rate and RQ1 measured again. \textbf{An under-provisioned GPU arm.} GPU MCTS is normally run with several workers and batched, overlapping evaluations; the arm studied here runs one worker at batch size~1 with one evaluation in flight, and only on the moves where the transformer is enabled, so the in-game evaluations per move are reported per cell next to the rates this chip reaches with batching (Figure~\ref{fig:m1}). A null result would not show that a better-driven GPU search cannot help. \textbf{Opening book.} UHO openings make differences measurable but exaggerate Elo spreads relative to balanced books; nElo is reported for that reason and the book critique applies~\cite{uhocritique}. \textbf{Transformer-enabled fraction.} The shipped time-safety rule is part of the system under test; at 30+0.3 the transformer is enabled on about half of the hybrid's moves, and at 10+0.1 it would be enabled on almost none because the move budget is mostly below 400 ms, so results at short time controls are largely alpha-beta results. The fraction is reported descriptively per cell; how the effect depends on GPU participation is read from the time-control cells, not from variation within a cell, and no statement is made beyond the time controls tested (in the AlphaZero study, AlphaZero's strength grew faster with thinking time than Stockfish's~\cite{silver2018}). \textbf{Tuning leakage.} The hybrid and MCTS heuristics were tuned on Bratko--Kopec and Lichess puzzle samples; any suite result for \MF{} is optimistic and is labelled so; game results are unaffected. \textbf{Reference drift.} Stockfish 19 is the alpha-beta base and the parity reference; the gap to the chapter-era base is quantified in Section~\ref{sec:prep}. \textbf{Adjudication.} The draw and resignation rules end a game only when both engines' own scores agree that it is decided; the 200-move cap ends a game regardless of the scores, and capped games are included in the adjudication counts. The protocol's re-run of one RQ1a block without adjudication has not been run for this version. \textbf{Move overhead.} The \MF{} arms run with a 50 ms move overhead and Stockfish 19 with its 10 ms default, so in RQ5c the \MF{} arm has 40 ms less per move; this favours Stockfish 19 slightly and is part of that cell as pre-registered, as are its PGO build against \MF{}'s LTO build. \textbf{Clock division.} Both arms play on the same game clock, which is the resource the comparison holds equal, but they divide it differently: on transformer-enabled moves the hint snapshot and the verification sub-search run before Stockfish's time manager starts timing the move, so such a move can take longer than Stockfish would allot on that clock, and the verification replaces state that the time manager carries from one search to the next. The extra time is drawn from the hybrid's own clock and is part of the system under test; the time of every move is recorded in the released games. \textbf{Power and energy.} CPU and GPU power and energy per game were not measured, because the tools need administrator rights on this host; the fair-resource policy counts threads and wall-clock time, not energy. \textbf{Shared host.} The machine was not idle. Over the \HostLogSamples{} minutes logged from \HostLogFirst{} to \HostLogLast{}, other processes used a median of \HostLogMedianCores{} cores and more than three cores in \HostLogOverPct\% of minutes; over the \HostGameSamples{} minutes that overlapped a game, the median was \HostGameMedianCores{} cores (95th percentile \HostGamePninetyfiveCores{}) and \HostGameOverPct\% of those minutes exceeded three cores (the gate checks the load only before a chunk starts, and until amendment~10 the watchdog stopped a chunk only above 4.5 cores). Because the arms of RQ1a and RQ2 need different numbers of free cores, load can bias as well as blur them: time forfeits came in minutes of high outside load wherever the load was logged, and fell mostly on the alpha-beta arm, which favours the hybrid in RQ1a (amendment~10; Table~\ref{tab:health}); every cell is therefore reported with and without the pairs that overlapped a minute of more than three cores of outside load (Table~\ref{tab:sensitivity}). \textbf{System updates.} The engine binary and its bundled libraries never changed, but the operating system it ran on did: four builds of macOS 27.2 were in use over the measurement period, installed automatically. RQ1a ran on the first three; the last update, which forced a restart, came during the final blocks of the other three primary cells and caused one time forfeit in RQ2a. The transformer runs on system frameworks (Metal and MPSGraph), so a build change could alter its speed; the cells are reported by build and the microbenchmarks with their builds. \textbf{Interruptions.} RQ1a was restarted once on a rebuilt binary, and the cells were paused and resumed many times by the load gate and by host reboots (Section~\ref{sec:amend}); per-block results are reported so that any effect of the gaps is visible. \textbf{Statistics.} One confirmatory test at fixed $N$; everything else is exploratory and reported in full.
+\textbf{Single platform and what generalises.} Every measurement comes from one M2 Max, and the CUDA build of the same engine is out of scope. The equal-budget accounting, the oracle method and the mechanism (how often, and through which channel, the GPU search affects the move) carry over to other hardware; the absolute Elo, the M2 Max and batch-1 inference do not. A later Apple chip with a larger GPU, or a discrete GPU with batched inference, would need the transformer-enabled fraction, the in-game evaluation rate and RQ1 measured again. \textbf{An under-provisioned GPU arm.} GPU MCTS is normally run with several workers and batched, overlapping evaluations; the arm studied here runs one worker at batch size~1 with one evaluation in flight, and only on the moves where the transformer is enabled, so the in-game evaluations per move are reported per cell next to the rates this chip reaches with batching (Figure~\ref{fig:m1}). A null result would not show that a better-driven GPU search cannot help. \textbf{Opening book.} UHO openings make differences measurable but exaggerate Elo spreads relative to balanced books; nElo is reported for that reason and the book critique applies~\cite{uhocritique}. \textbf{Transformer-enabled fraction.} The shipped time-safety rule is part of the system under test; at 30+0.3 the transformer is enabled on about half of the hybrid's moves, and at 10+0.1 it would be enabled on almost none because the move budget is mostly below 400 ms, so results at short time controls are largely alpha-beta results. The fraction is reported descriptively per cell; how the effect depends on GPU participation is read from the time-control cells, not from variation within a cell, and no statement is made beyond the time controls tested (in the AlphaZero study, AlphaZero's strength grew faster with thinking time than Stockfish's~\cite{silver2018}). \textbf{Tuning leakage.} The hybrid and MCTS heuristics were tuned on Bratko--Kopec and Lichess puzzle samples; any suite result for \MF{} is optimistic and is labelled so; game results are unaffected. \textbf{Reference drift.} Stockfish 19 is the alpha-beta base and the parity reference; the gap to the chapter-era base is quantified in Section~\ref{sec:prep}. \textbf{Adjudication.} The draw and resignation rules end a game only when both engines' own scores agree that it is decided; the 200-move cap ends a game regardless of the scores, and capped games are included in the adjudication counts. The protocol's re-run of one RQ1a block without adjudication has not been run for this version. \textbf{Move overhead.} The \MF{} arms run with a 50 ms move overhead and Stockfish 19 with its 10 ms default, so in RQ5c the \MF{} arm has 40 ms less per move; this favours Stockfish 19 slightly and is part of that cell as pre-registered, as are its PGO build against \MF{}'s LTO build. \textbf{Clock division.} Both arms play on the same game clock, which is the resource the comparison holds equal, but they divide it differently: on transformer-enabled moves the hint snapshot and the verification sub-search run before Stockfish's time manager starts timing the move, so such a move can take longer than Stockfish would allot on that clock, and the verification replaces state that the time manager carries from one search to the next. The extra time is drawn from the hybrid's own clock and is part of the system under test; the time of every move is recorded in the released games. \textbf{Power and energy.} CPU and GPU power and energy per game were not measured, because the tools need administrator rights on this host; the fair-resource policy counts threads and wall-clock time, not energy. \textbf{Shared host.} The machine was not idle. Over the \HostLogSamples{} minutes logged from \HostLogFirst{} to \HostLogLast{}, other processes used a median of \HostLogMedianCores{} cores and more than three cores in \HostLogOverPct\% of minutes; over the \HostGameSamples{} minutes that overlapped a game, the median was \HostGameMedianCores{} cores (95th percentile \HostGamePninetyfiveCores{}) and \HostGameOverPct\% of those minutes exceeded three cores (the gate checks the load only before a chunk starts, and until amendment~10 the watchdog stopped a chunk only above 4.5 cores). Because the arms of RQ1a and RQ2 need different numbers of free cores, load can bias as well as blur them: time forfeits came in minutes of high outside load wherever the load was logged, and fell mostly on the alpha-beta arm, which favours the hybrid in RQ1a (amendment~10; Table~\ref{tab:health}); every cell is therefore reported with and without the pairs that overlapped a minute of more than three cores of outside load (Table~\ref{tab:sensitivity}). \textbf{System updates.} The engine binary and its bundled libraries never changed, but the operating system it ran on did: four builds of macOS 27.2 were in use over the measurement period, installed automatically. RQ1a ran on the first three; the last update, which forced a restart, came during RQ2a's last block and caused one time forfeit in it; the rest of that block and the last blocks of RQ2b and RQ5c were played on the final release. The transformer runs on system frameworks (Metal and MPSGraph), so a build change could alter its speed; the cells are reported by build and the microbenchmarks with their builds. \textbf{Interruptions.} RQ1a was restarted once on a rebuilt binary, and the cells were paused and resumed many times by the load gate and by host reboots (Section~\ref{sec:amend}); per-block results are reported so that any effect of the gaps is visible. \textbf{Statistics.} One confirmatory test at fixed $N$; everything else is exploratory and reported in full.
 
 % =====================================================================================
 \section{Relation to the IntelliSys 2026 chapter}
@@ -360,8 +522,8 @@ MCTS nodes shrunk from 128 to 64 bytes, two per cache line & Nodes are 128 bytes
 NN cache 3.5 GB $\to$ 38 MB (92$\times$) & 500{,}000 entries of about 820 bytes occupy about 0.41 GB; the reduction is about 9$\times$. \\
 512 MB transposition table (the tournament setting); 125 MB and 6 MB NNUE networks with HalfKAv2 & Default hash 16 MB; networks of 108.9 MB and 3.5 MB with FullThreats and HalfKAv2\_hm features. \\
 Position classifier adjusts the decision weighting; UCI routes through it & Its weights are computed but never read; mode is a UCI option. \\
-Agreement stop saves 10--40\% of time & Never fired in the July 2026 telemetry (0 of 209 decisions) and fires rarely in the frozen engine; no measurement of a saving exists. \\
-95.8\% agreement with Lc0 ``suggests'' neural-network influence & The final move was alpha-beta's in 207 of 209 decisions logged with a July 2026 build (20+0.2) and in every decision of the frozen engine's gate matches. \\
+Agreement stop saves 10--40\% of time & Never fired in the July 2026 telemetry (0 of 209 decisions); in the frozen engine as shipped it ended 1.0\% of the transformer-enabled moves of RQ1a early; no measurement of a saving exists. \\
+95.8\% agreement with Lc0 ``suggests'' neural-network influence & The final move was alpha-beta's in 207 of 209 decisions logged with a July 2026 build (20+0.2) in every decision of the frozen engine's gate matches, and in all but 7 of the 25{,}138 disagreements of RQ1a. \\
 1.26$\times$ (5.5$\times$ in middlegames) higher throughput than Lc0 & Four 10-second positions with a harness fault; controlled sweep: \MF{}'s evaluation rate is below Lc0's search rate at batch size 1 and at each program's best batch size, an indicative comparison (Section~\ref{sec:system}). \\
 M1 Ultra figures (9.8M NPS, 7.24$\times$ scaling, $\sim$382 NPS) & No record; withdrawn. \\
 ``Unlike previous hybrid approaches that use one paradigm to inform the other sequentially''; Baier and Winands ``surveyed'' MCTS enhancements; Lanctot et al.\ worked ``in general game playing'' & Baier and Winands embed shallow minimax searches inside MCTS; Lanctot et al.\ evaluate implicit minimax backups on Kalah, Breakthrough and Lines of Action (Section~\ref{sec:background}). \\
@@ -376,7 +538,27 @@ The root causes were a confounded contribution (the alpha-beta component's stren
 % =====================================================================================
 \section{Conclusion}
 \label{sec:conclusion}
-\pending{conclusion after the results: what was learned, conditions under which a concurrent GPU search is worth it, CUDA and other GPUs, learned arbiters}
+On one M2 Max at 30+0.3, running Lc0's BT4 transformer in an MCTS search on the GPU beside Stockfish~19's
+alpha-beta search did not make the engine detectably stronger than the alpha-beta search alone at the
+same thread setting: the interval of $[-10.7, +2.0]$~Elo excludes gains above 2~Elo. The arbiter almost
+never played the MCTS move, so what the GPU search can change runs through the alpha-beta search it
+accompanies: the root hints, the verification sub-search, the agreement rule, and contention for the
+shared cores, memory and clock. The split configuration shows that these channels can cost strength: with
+at least as many alpha-beta threads as its opponent on every move it lost 17~Elo, and its clock use and
+the agreement rule's firing rate differed from those of the shipped hybrid, which kept all eight threads
+and stayed within the interval above.
+
+The GPU search measured here was under-provisioned by design: one worker, batch size~1, a median of 58
+evaluations per second inside games against a batch-1 ceiling of 139 and a batched throughput near 540,
+and an arbiter that defers to alpha-beta unless a predicate fires. A concurrent GPU search is worth
+reconsidering when the GPU side is driven harder (batched evaluations, several workers, a search that
+does not wait on one evaluation at a time), when it does not take cores the alpha-beta search would
+otherwise use, and when an arbiter has evidence that the MCTS move is right often enough to override; the
+oracle study, which bounds what any arbiter between the two root candidates could gain, is the test of
+the last condition and will be added in a revised version. The engine's CUDA build shares the search and
+network contracts, so the same protocol can be run on a discrete GPU, where memory is not shared and the
+contention differs; the absolute numbers here do not transfer. If the oracle study finds value in the
+disagreements, an arbiter learned from such positions is the natural next step.
 
 \section*{Data and code availability}
 The engine at the frozen commit, every game record, the engine logs of the cells with a hybrid arm, every manifest, thermal log and microbenchmark output, and the scripts that produce every figure and table of this paper are deposited at \ifanon an anonymised archive whose link is supplied to the editors~\depositcite{}\else\pending{Zenodo DOI} and in the repository tag \texttt{paper-v2-freeze-rc2}\fi. The pre-registered protocol with its amendments\ifanon{} and the audit of the earlier chapter are\else, the audit of the earlier chapter and the prepared Correction are\fi{} part of the deposit.
