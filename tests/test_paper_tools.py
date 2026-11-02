@@ -556,6 +556,40 @@ class UnpairedGameAccountingTest(unittest.TestCase):
         self.assertEqual((st["pairs"], st["unpaired_games"]), (2, 0))
 
 
+class AcrossMatchContrastTest(unittest.TestCase):
+    """Pins rq6d.md of tools/paper/make_figures.py: RQ6d minus RQ1a with the covariance of the
+    openings the two cells share (protocol amendment 12(e))."""
+
+    def test_rq6d_minus_rq1a_with_shared_openings(self):
+        import make_figures as mf
+        import robustness
+
+        a = [0.25, 0.75, 0.5, 1.0, 0.25, 0.5, 0.75, 0.5]
+        d = [0.5, 0.75, 0.5, 1.0, 0.25, 0.75]
+        rq1a = [{"fen": f"f{k}", "score": s} for k, s in enumerate(a)]
+        rq6d = [{"fen": f"f{k}", "score": s} for k, s in enumerate(d)]
+        with tempfile.TemporaryDirectory() as tmp:
+            mf.write_rq6d_contrast({"RQ1a": rq1a}, pathlib.Path(tmp))
+            self.assertFalse((pathlib.Path(tmp) / "rq6d.md").exists())
+            mf.write_rq6d_contrast({"RQ1a": rq1a, "RQ6d": rq6d}, pathlib.Path(tmp))
+            md = (pathlib.Path(tmp) / "rq6d.md").read_text()
+        con = robustness.linear_combination([(rq6d, 1.0), (rq1a, -1.0)])
+        self.assertAlmostEqual(
+            con["elo"],
+            robustness.elo_of_scores(d)["elo"] - robustness.elo_of_scores(a)["elo"],
+        )
+        self.assertIn(
+            f"| RQ6d minus RQ1a (hints and verification off) | {mf.fmt_pm(con['elo'], con['elo_pm'])} | 6 |",
+            md,
+        )
+        # the pair scores move together on the shared openings, so the contrast is tighter than
+        # the same two cells on disjoint openings
+        apart = [{"fen": f"g{k}", "score": s} for k, s in enumerate(d)]
+        indep = robustness.linear_combination([(apart, 1.0), (rq1a, -1.0)])
+        self.assertEqual(indep["shared_openings"], [0])
+        self.assertLess(con["elo_pm"], indep["elo_pm"])
+
+
 class OracleSamplingTest(unittest.TestCase):
     """Pins the stratified sampler of tools/paper/oracle_probe.py (protocol §11.6)."""
 

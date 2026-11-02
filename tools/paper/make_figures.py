@@ -1039,9 +1039,10 @@ def count_log_lines(path: pathlib.Path, patterns):
 def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
     """Final-reading analyses of amendment 12 and of the review (tools/paper/robustness.py):
     load regression, forfeit and opening variants with the load-sensitivity verdict, block
-    heterogeneity and the chunk bootstrap, load-log coverage, derived RQ2c, the set-aside games,
-    time per move by arm, adjudications, the arbiter's flags, GPU and memory covariates, the
-    outside processes and the oracle summary. Run only for the final reading (--final-analyses).
+    heterogeneity and the chunk bootstrap, load-log coverage, derived RQ2c, RQ6d against RQ1a,
+    the set-aside games, time per move by arm, adjudications, the arbiter's flags, GPU and memory
+    covariates, the outside processes and the oracle summary. Run only for the final reading
+    (--final-analyses).
     """
     import statistics
 
@@ -1235,6 +1236,7 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
                     f"| derived minus direct RQ2c | {fmt_pm(diff['elo'], diff['elo_pm'])} | {', '.join(map(str, diff['shared_openings']))} |"
                 )
     (tdir / "rq2c.md").write_text("\n".join(md) + "\n")
+    write_rq6d_contrast(pairs_by_cell, tdir)
 
     # the 183 games set aside by amendment 7, on their own
     rc1 = results / "RQ1a_rc1_partial" / "games.pgn"
@@ -1469,6 +1471,27 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
     osum = results / "RQ6b" / "oracle.jsonl.summary.json"
     if osum.exists():
         write_oracle_tables(load(osum), tdir)
+
+
+def write_rq6d_contrast(pairs_by_cell: dict, tdir: pathlib.Path):
+    """rq6d.md: RQ6d minus RQ1a (amendment 12(e)), the hints and the verification sub-search
+    switched off together, as an across-match contrast whose variance includes the covariance of
+    the two cells' pair scores on the openings they share. Written only once RQ6d has been played.
+    """
+    sys.path.insert(0, str(REPO / "tools" / "paper"))
+    import robustness  # noqa: E402
+
+    if "RQ6d" not in pairs_by_cell or "RQ1a" not in pairs_by_cell:
+        return
+    md = ["| Quantity | Elo | Shared openings |", "| --- | --- | --- |"]
+    con = robustness.linear_combination(
+        [(pairs_by_cell["RQ6d"], 1.0), (pairs_by_cell["RQ1a"], -1.0)]
+    )
+    if con:
+        md.append(
+            f"| RQ6d minus RQ1a (hints and verification off) | {fmt_pm(con['elo'], con['elo_pm'])} | {con['shared_openings'][0]} |"
+        )
+    (tdir / "rq6d.md").write_text("\n".join(md) + "\n")
 
 
 def write_oracle_tables(o: dict, tdir: pathlib.Path):
