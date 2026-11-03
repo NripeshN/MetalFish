@@ -654,3 +654,88 @@ L14 log counts (`sprt/L14_hybrid_lean_vs_ab8_30p03/engines.log.gz`, counted 2026
 `HybridTrace` lines and 3,413 time-safety lines; `subsearch stop grace expired` 0; `engines agree,
 stopping early` 0; each game's first `isready` answered `readyok` after the preload (2.5 s in the first
 game) and before the first `go`, which carried the full clock.
+
+**RQ1b final reading** (2026-11-03; block 3 ended 18:24 UTC; the cell is complete and was interpreted
+once, at 18:25 UTC, by amendments 12 (f) and 13). There was no interim reading of RQ1b: amendment 11's
+per-block readings cover the four MUST cells, and RQ1b's block boundaries (2026-11-01 22:53,
+2026-11-02 11:58 and 2026-11-03 03:24 UTC) were checked for health only (games, terminations, the
+binary and commit of every chunk, thermal log, memory), without computing a score. Computed from
+`RQ1b/games.pgn` with `penta_stats.py` and `robustness.py`. The tables cited below come from the table
+and analysis functions of `make_figures.py --final-analyses` (without the plots and the diagram export),
+run at main `02eff6b` on 2026-11-03 18:26:52–18:28:49 UTC on the full `results/paper_v2` into a scratch
+directory; in that run every row of the four version-1 cells reproduced the paper's tables exactly. No
+other cell was read. RQ1b used RQ1a's seed (`-srand 20261007`) and book, so its 500 pairs played, in
+order, the first 500 openings that RQ1a played.
+
+| Cell | Comparison | Games | Elo (95% CI) | nElo | LOS | Ptnml [0..2] | W / D / L | Time forfeits | Artifact |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| RQ1b | Hybrid(8) (shipped, oversubscribed) vs AB(8), **60+0.6**, `Hash` 2048 MB each, move overhead 50 ms each | 1,000 (500 pairs) | **−40.5 [−49.6, −31.4]** (± 9.1) | −96.9 ± 21.5 | 0.0% | [0, 158, 300, 42, 0] | 203 / 478 / 319 | 0 | `RQ1b/games.pgn`, `RQ1b/summary.json` |
+
+Reading (02 §5 RQ1; exploratory, amendment 12 (g), no alpha of its own): the 95% interval lies below
+zero. At 60+0.6, the time control with the most GPU participation, the shipped hybrid was weaker than
+plain alpha-beta with the same `Threads` setting on this machine, by about 40 Elo (31 to 50 Elo at 95%).
+The transformer was enabled on 83.1% of the hybrid's moves (53.1% in RQ1a at 30+0.3), and the arbiter
+played the MCTS move on 1 of 17,338 disagreements, so the deficit does not come from moves chosen by
+MCTS. RQ1a's interval at 30+0.3 was [−10.7, +2.0]; the two cells are separate matches at different time
+controls, and no contrast between them was registered.
+
+Sensitivity analyses (amendment 12 (b); the primary estimate's standard error is 4.6 Elo): zero outside
+load (pair-level regression; all 500 pairs have samples, 116 exposed; slope +0.025 ± 0.044 per unit
+fraction) −41.6 ± 9.9 (shift −1.1); low-load pairs only (amendment 8; 384 of 500 kept) −39.1 ± 10.6
+(shift +1.4); there were no time forfeits, so both forfeit variants equal the primary estimate. No
+estimate moves by more than one standard error, so RQ1b is **not load-sensitive**. In-game minutes with
+outside CPU above 300%: 229 of 3,208 (7.1%); median outside CPU 155%. Largest outside process in those
+minutes: the editor (Kiro) 114, Homebrew Python 3.12 30, Spotlight indexing 21, Python 3.14 18 (the
+interpreter of the runner and the analysis scripts; 11 of these minutes lie within about a minute of a
+chunk start, when the runner does its bookkeeping), WindowServer 9, WebKit web content 7, `top` 6,
+mediaanalysisd 5 (counted over RQ1b's games with `make_figures.parse_hostload_full` and
+`in_game_indices`, the helpers behind `outside_processes.md`; exposure by block with
+`robustness.pair_load_fraction`). Blocks
+(amendment 12 (g)): −27.9 ± 18.8, −54.6 ± 18.7, −33.5 ± 16.8, −46.1 ± 18.0 (draw ratio 42–52%);
+Cochran's Q = 4.98 (3 df), p = 0.17; bootstrap over the runner's 160 chunks, 95% interval
+[−49.3, −31.5]. Pairs exposed to a minute above 300%, by block (descriptive): 24 (19%), 25 (20%),
+31 (25%) and 36 (29%). Load-log coverage: complete in all four blocks. By macOS build (amendment 13 (b)):
+all 500 pairs started on the final release of macOS 27.2.
+
+Health (`health.md`, `compute.md`, `therm.md`): adjudicated 932 of 1,000 games (410 draws; wins 203 for
+the hybrid, 319 for AB(8)), 68 ended normally (all draws); no time forfeits and no other terminations;
+3.06 min per game over 51.0 h of play (2026-11-01 08:50 to 2026-11-03 18:24 UTC, with the gate's
+pauses); thermal log: 3,200 samples, no warning; every chunk's binary was the frozen one (SHA-256
+`8c534bb6…`, both arms) and every chunk's commit was on main with `src/` identical to `365f36a`. Host
+covariates (amendment 12 (c); `covariates.md`; all 3,208 in-game minutes carry them): GPU utilisation
+median 68% (p95 75%), GPU in-use memory median 952 MB, memory available median 51% (minimum 36%),
+65,165 page-outs during the cell's games. On 2026-11-02 from 15:00 to 15:22 UTC outside processes used
+nine to ten cores and available memory fell to 34%; the gate was closed from 14:44 to 15:55 UTC, so no
+game was played in that interval.
+
+Telemetry (M5, RQ6a; `telemetry.md`, `summary.json`): 63,835 hybrid moves; transformer enabled on 83.1%
+(53.1% in RQ1a); median 92 MCTS evaluations and 101 playouts per enabled move (36 and 38 in RQ1a);
+disagreement on 32.7% of the traced moves (17,338); MCTS move chosen on 1 of the 17,338 disagreements
+(`mcts_ultra_low_node_root_confidence`). Decision reasons: agreement 35,682, alpha-beta rejects the MCTS
+move 13,362, time-safety 10,815, alpha-beta default 3,975, the MCTS move 1. In-game MCTS evaluation rate
+(M3; amendment 12 (c); `gpu_health.md`): 52,988 of 52,988 transformer-enabled records matched by
+position; evaluations per second of move time, median 87 (10th percentile 31), total 57; by block
+87 (32), 91 (35), 87 (31) and 80 (26), totals 57, 61, 57 and 52.
+
+Time per move and clock use (`timing.md`, `timing_profile.tex`; PGN move comments): AB(8) 63,789 moves,
+mean 1.472 s (p99 9.977 s), median depth 24, median 10.25 million nodes per second; the hybrid 63,835
+moves, mean 1.410 s (p99 9.770 s), median depth 22, median 8.64 million: on its 53,020
+transformer-enabled moves mean 1.579 s, median depth 23, median 7.91 million; on its 10,815 time-safety
+moves mean 0.581 s, median depth 17, median 11.57 million. Mean time per move by the arm's own move
+number (1–10, 11–20, 21–30, 31–40, 41–60, 61+): AB(8) 2.66, 2.15, 1.67, 1.17, 0.81, 0.61 s; the hybrid
+1.58, 1.73, 1.91, 1.61, 1.05, 0.69 s, against matching profiles in RQ1a (1.31 against 1.33 s in moves
+1–10). Switches between the two classes in game order (`switches.md`): 518 from a time-safety to a
+transformer-enabled move and 912 the other way, over 1,000 games.
+
+Channels (`flags.md`; traced moves other than time-safety moves, and the engine log): root hints on
+47,585 of the 53,020 transformer-enabled moves (89.7%; RQ1a 83.7%), the verification sub-search on
+37,020 (69.8%; RQ1a 17.9%), and the agreement rule ("engines agree, stopping early") ended 25,774 of
+them early (48.6%; RQ1a 1.0%, RQ2b 16.8%); its condition includes at least 100 MCTS nodes (the median
+enabled move ran 101 playouts, against 38 in RQ1a); "subsearch stop grace expired" 0. On the
+disagreements: hints on 15,007 of 17,338, with the first hint the MCTS move on 10,484 and the
+alpha-beta move on 1,610. These logs show how the hybrid's search differed from AB(8)'s at 60+0.6
+without separating the causes: over all moves it reported a median of 8.64 million nodes per second
+against AB(8)'s 10.25 million in the same games (RQ1a: 10.52 against 10.78), nearly half of its
+transformer-enabled moves ended early by the agreement rule, and it spent less time than AB(8) in its
+first ten moves. No cell of the frozen build switches the agreement rule off, and RQ6d (hints and
+verification off) is played at 30+0.3.
