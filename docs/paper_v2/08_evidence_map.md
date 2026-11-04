@@ -739,3 +739,25 @@ against AB(8)'s 10.25 million in the same games (RQ1a: 10.52 against 10.78), nea
 transformer-enabled moves ended early by the agreement rule, and it spent less time than AB(8) in its
 first ten moves. No cell of the frozen build switches the agreement rule off, and RQ6d (hints and
 verification off) is played at 30+0.3.
+
+## F. Runner cells (GitHub-hosted Apple M1 runners, protocol amendment 15)
+
+**Runner probe** (2026-11-04; runs 41832147565, 41837556525 and 41846444311 of `.github/workflows/paper-runner-cells.yml`,
+one fresh runner per job; job logs and artifacts under `results/paper_v2/runner_probe/run_<id>/`). Not a
+cell: the probe fixed the runner settings of amendment 15 before any runner cell started, and none of its
+games or judgments enters an estimate. Values are given for the two probe runners in turn.
+
+| Quantity | Value | Artifact |
+| --- | --- | --- |
+| Runner | Apple M1 (Virtual), `VirtualMac2,1`, 3 cores, 7 GB (7,516,192,768 bytes); macOS 26.6.2 (25G83), Xcode 26.6, Apple clang 21.0.0 | `job_probe_engine.log`, "Runner inventory" |
+| GPU | Apple Paravirtual device (Metal, unified memory, 4,778 MB recommended working set); FP16 1024×1024×1024 MPSGraph product 7.09 / 4.97 ms (0.30 / 0.43 TFLOPS) | same |
+| Frozen engine built on the runner | tag `paper-v2-freeze-rc2` (no `src` difference from rc1); bench 2,497,913 nodes, the signature, at 719,859 / 765,526 nodes/s | same, build step |
+| BT4 latency, batch 1 (M1 on the runner) | FP16 21.35 / 19.65 ms; FP32 32.09 / 71.15 ms (workstation: 7.6 / 8.8 ms); FP16 at batch 32: 324.0 ms, 98.8 positions/s (first runner) | `runner_micro/nn_latency.json` |
+| AB scaling (M2 on the runner; depth 16, Hash 1024, median of 3) | 0.59 / 0.47 M nodes/s at 1 thread, 0.91 / 0.92 M at 2, 1.44 / 1.27 M at 3 | `runner_micro/ab_scaling.json` |
+| Hybrid(3) footprint at Hash 1024 | 2.75 / 3.20 GB maximum resident size (one traced search) | `job_probe_engine.log`, traced search |
+| Game pace, Hybrid(3) vs AB(3), 30+0.3, Hash 1024 | 4 games in 7.8 min on the first runner (1.95 min per game with engine restarts), game durations 1:20–1:45; no forfeit | `PROBE/games.pgn`, job log |
+| Syzygy 3-4-5 | 290 files from the lichess mirror, each matching the mirror's SHA-256 list, as do the workstation's 290 files | `results/paper_v2/runner_probe/lichess_sha256.txt`, `local_syzygy.txt` |
+| Oracle judges on the runner | Stockfish 19 (3 threads, 60 s): 84.6 M nodes, depth 36 on one middlegame position; Lc0 0.32.1 `backendbench`: 31.2 / 24.0 positions/s at batch 1, 63.8 / 62.1 at batch 32; the oracle's first two positions were unfinished after 61 min (each position: two 60 s Stockfish searches and three 30,000-node Lc0 searches) | `run_41846444311/job_probe_judges.log`, `run_41837556525/job_probe_judges_cancelled.log` |
+
+The two probe runners differed by 10–40% in GPU and CPU throughput, which is why amendment 15 (c)
+interleaves the blocks of the cells it compares.

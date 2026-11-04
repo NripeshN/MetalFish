@@ -571,6 +571,17 @@ def stratified_sample(
     return sample, info
 
 
+def shard_slice(items: List, spec: str) -> List:
+    """The I-th of K contiguous slices of `items` for `spec` = "I/K" (0-based). The K slices
+    concatenated in shard order give `items` back, so positions judged on separate runners and
+    joined in shard order keep the row order of a single run (protocol amendment 15)."""
+    i, k = (int(x) for x in spec.split("/"))
+    if not 0 <= i < k:
+        raise ValueError(f"shard {spec}: need 0 <= I < K")
+    n = len(items)
+    return items[i * n // k : (i + 1) * n // k]
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -621,6 +632,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--limit", type=int, help="smoke: judge only the first N sampled positions"
     )
     ap.add_argument(
+        "--shard",
+        help="I/K: judge only the I-th of K contiguous slices of the sample (0-based) and write "
+        "no summary; concatenate the K outputs in shard order and run --summarise-only on them",
+    )
+    ap.add_argument(
         "--bootstrap",
         type=int,
         default=10000,
@@ -669,6 +685,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
     if args.limit:
         sample = sample[: args.limit]
+    if args.shard:
+        sample = shard_slice(sample, args.shard)
     print(
         f"{n_recs} records, {len(dis)} disagreements, judging {len(sample)} "
         f"({sampling['method']})",
@@ -805,6 +823,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             for eng in judges.values():
                 eng.quit()
 
+    if args.shard:
+        print(f"shard {args.shard}: {len(rows)} rows in {args.out}", file=sys.stderr)
+        return 0
     summary = summarise(rows, judge_names, sampling, args.bootstrap, args.seed)
     summary["judging"] = judging
     summary["method"].update(

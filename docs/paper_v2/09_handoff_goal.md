@@ -71,6 +71,26 @@ block stdout: `results/paper_v2/queue_logs/`. ≈160 machine-hours from 2026-10-
   `docs/paper_v2` plan package, `tools/paper/`, book SHA-256, network SHA-256s). Reserve the DOI and
   cite it; the repository tag is cited for code.
 
+### Phase A on the runners (2026-11-04, the author's decision; protocol amendment 15)
+
+The author asked that nothing more run on the workstation: every remaining measurement runs on
+GitHub-hosted macOS arm64 (M1) runners, as many at once as the account allows. This replaces the
+workstation queue for everything not yet played; rules 2–5, 7 and 8 stand, and rule 6 applies per
+runner (one measurement per runner VM, no load gate needed, health from `vm_sampler.log`).
+
+- Workflow `.github/workflows/paper-runner-cells.yml`, dispatched on `main`: `task=oracle` (RQ6b-R in
+  contiguous shards), `task=games cells=…` (runner cells' blocks interleaved; `engine_run=<run id>`
+  reuses one engine build so that every runner cell is played by the same binary). Phases are
+  dispatched in order by `results/ars_pipeline/tools/runner_campaign.sh <phase file>` (RQ6b-R, then
+  RQ1a-R + RQ6d-R, then RQ2a-R + RQ2b-R + RQ2c-R); its log is `results/paper_v2/runner_campaign_log.txt`.
+- Health during a run: job status, and each job's "Health (no scores)" step (games, forfeits, pace,
+  GPU-active fraction, MCTS evaluations). Logs are public, so no score is printed; never read a
+  block's `fastchess_report.txt` or `summary.json` before the cell's last block.
+- Reading, once per cell after its last block: `python3 tools/paper/fetch_runner_cell.py <cell> --run <id>`
+  joins the blocks into `results/paper_v2/<cell>/`; the oracle's shards are joined in shard order and
+  summarised with `oracle_probe.py --summarise-only` on the same input and sample arguments.
+- Runner cells are compared only with runner cells (amendment 15); the workstation results stand.
+
 ## Phase B — the arXiv preprint (the author decided: do it)
 
 Invoke `/academic-research-skills:ars-full` with the plan package as the Stage-1 input (treat

@@ -56,6 +56,12 @@ DISPLAY_ARMS = {
     "RQ5a": "MCTS(1) vs Lc0-mb1, 30+0.3",
     "RQ5c": "AB(8) vs SF19(8), 30+0.3",
     "RQ6d": "Hybrid(8) without hints and verification vs AB(8), 30+0.3",
+    # runner cells (amendment 15): GitHub-hosted M1 runners, T = 3; compared only with each other
+    "RQ1a-R": "Hybrid(3) vs AB(3), 30+0.3, runner",
+    "RQ6d-R": "Hybrid(3) without hints and verification vs AB(3), 30+0.3, runner",
+    "RQ2a-R": "AB(1) vs AB(3), 30+0.3, runner",
+    "RQ2b-R": "Hybrid-split(3) vs AB(1), 30+0.3, runner",
+    "RQ2c-R": "Hybrid-split(3) vs AB(3), 30+0.3, runner",
 }
 
 
