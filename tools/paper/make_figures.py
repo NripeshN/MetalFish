@@ -62,6 +62,8 @@ DISPLAY_ARMS = {
     "RQ2a-R": "AB(1) vs AB(3), 30+0.3, runner",
     "RQ2b-R": "Hybrid-split(3) vs AB(1), 30+0.3, runner",
     "RQ2c-R": "Hybrid-split(3) vs AB(3), 30+0.3, runner",
+    "RQ1c-R": "Hybrid(3) vs AB(3), 10+0.1, runner",
+    "RQ5a-R": "MCTS(1) vs Lc0-mb1, 30+0.3, runner",
 }
 
 

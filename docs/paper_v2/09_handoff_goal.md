@@ -82,7 +82,9 @@ runner (one measurement per runner VM, no load gate needed, health from `vm_samp
   contiguous shards), `task=games cells=…` (runner cells' blocks interleaved; `engine_run=<run id>`
   reuses one engine build so that every runner cell is played by the same binary). Phases are
   dispatched in order by `results/ars_pipeline/tools/runner_campaign.sh <phase file>` (RQ6b-R, then
-  RQ1a-R + RQ6d-R, then RQ2a-R + RQ2b-R + RQ2c-R); its log is `results/paper_v2/runner_campaign_log.txt`.
+  RQ1a-R + RQ6d-R, then RQ2a-R + RQ2b-R + RQ2c-R, then RQ1c-R and RQ5a-R, amendment 15 (g)); its log is
+  `results/paper_v2/runner_campaign_log.txt`. `task=micro engine_run=<id>` runs M1/M2 on a runner with
+  the build that plays the game cells.
 - Health during a run: job status, and each job's "Health (no scores)" step (games, forfeits, pace,
   GPU-active fraction, MCTS evaluations). Logs are public, so no score is printed; never read a
   block's `fastchess_report.txt` or `summary.json` before the cell's last block.

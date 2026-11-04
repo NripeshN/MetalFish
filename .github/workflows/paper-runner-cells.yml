@@ -16,6 +16,8 @@
 #   oracle - RQ6b on the runners: Stockfish 19 built once, then one job per contiguous shard of
 #            the 600-position sample (`oracle_probe.py --shard i/K`); each shard leaves an
 #            artifact oracle-shard-<i>; the shards are joined in order and summarised once.
+#   micro  - the microbenchmarks M1 (NN latency, MetalFish and Lc0) and M2 (alpha-beta thread
+#            scaling) on a runner with the campaign's engine build (`engine_run`).
 # Job logs are public while a cell runs, so the jobs print health only (games, forfeits, pace,
 # GPU activity), never a score: each cell is read once, after its last block (amendment 12(f)).
 # =============================================================================
@@ -26,11 +28,11 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "probe | games | oracle"
+        description: "probe | games | oracle | micro"
         required: true
         default: probe
         type: choice
-        options: [probe, games, oracle]
+        options: [probe, games, oracle, micro]
       cells:
         description: "games: runner cells whose blocks run interleaved, e.g. RQ1a-R,RQ6d-R"
         default: ""
@@ -50,7 +52,7 @@ on:
         description: "runners at once for this run"
         default: "2"
       engine_run:
-        description: "games: run id whose 'engine' artifact to play (empty = build it in this run)"
+        description: "games, micro: run id whose 'engine' artifact to use (empty = build it in this run)"
         default: ""
       judges_run:
         description: "oracle: run id whose 'judges' artifact to use (empty = build it in this run)"
@@ -270,7 +272,7 @@ jobs:
 
   plan:
     name: Plan
-    if: inputs.task != 'probe'
+    if: inputs.task == 'games' || inputs.task == 'oracle'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -287,7 +289,7 @@ jobs:
 
   build-engine:
     name: Build the frozen engine
-    if: inputs.task == 'games' && inputs.engine_run == ''
+    if: (inputs.task == 'games' || inputs.task == 'micro') && inputs.engine_run == ''
     runs-on: macos-26
     timeout-minutes: 90
     steps:
@@ -379,6 +381,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-engine-networks-bt4-nnue-
             ${{ runner.os }}-engine-networks-
+      - name: Lc0, for a cell that plays it
+        run: |
+          if python3 - <<'EOF'
+          import json, os, sys
+          e = json.load(open("docs/paper_v2/experiments.json"))
+          cell = {c["id"]: c for c in e["cells"]}[os.environ["CELL"]]
+          sys.exit(0 if any(e["engines"][cell[k]["engine"]]["cmd"].endswith("lc0") for k in ("a", "b")) else 1)
+          EOF
+          then
+            brew install lc0
+            v=$(brew list --versions lc0); echo "$v"
+            [ "$v" = "lc0 0.32.1" ] || { echo "::error::the protocol's Lc0 is 0.32.1"; exit 1; }
+          fi
       - name: Network, fastchess, book
         env:
           GH_TOKEN: ${{ github.token }}
@@ -420,6 +435,62 @@ jobs:
         with:
           name: ${{ inputs.smoke_pairs && 'smoke-' || '' }}games-${{ matrix.cell }}-b${{ matrix.block }}
           path: ${{ env.OUT_DIR }}/
+          retention-days: 90
+
+  micro:
+    name: Microbenchmarks M1 and M2 (campaign build)
+    needs: [build-engine]
+    if: >-
+      always() && inputs.task == 'micro' &&
+      (needs.build-engine.result == 'success' || needs.build-engine.result == 'skipped')
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Python tools and Lc0
+        run: |
+          python3 -m pip install -r tests/requirements.txt
+          brew install lc0
+          v=$(brew list --versions lc0); echo "$v"
+          [ "$v" = "lc0 0.32.1" ] || { echo "::error::the protocol's Lc0 is 0.32.1"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine
+          path: build
+          run-id: ${{ inputs.engine_run || github.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-t1-v3
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-bt4-nnue-
+            ${{ runner.os }}-engine-networks-
+      - name: The campaign build and the network
+        run: |
+          chmod +x build/metalfish build/metalfish_nn_probe
+          (cd build && shasum -a 256 -c SHA256SUMS)
+          cat build/ENGINE.txt
+          python3 tools/download_engine_networks.py --bt4-only --dest networks --cache-dir "$METALFISH_NETWORK_CACHE_DIR"
+          echo "$BT4_SHA256  networks/$BT4" | shasum -a 256 -c
+      - name: M1 (NN latency by batch, MetalFish and Lc0) and M2 (alpha-beta, 1-3 threads)
+        run: |
+          OUT=results/paper_v2/runner_micro
+          mkdir -p "$OUT"
+          tools/paper/runner_setup.sh runner "$OUT/runner.json" > /dev/null
+          cp build/ENGINE.txt "$OUT/"
+          rc=0
+          python3 tools/paper/microbench.py nn --out "$OUT/nn_latency.json" --lc0 "$(brew --prefix)/bin/lc0" || rc=$?
+          python3 tools/paper/microbench.py ab --out "$OUT/ab_scaling.json" --threads 1,2,3 || rc=$?
+          exit $rc
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: micro
+          path: results/paper_v2/runner_micro/
           retention-days: 90
 
   build-judges:

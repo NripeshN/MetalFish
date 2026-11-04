@@ -616,6 +616,49 @@
       },
       "est_hours": 32,
       "note": "Protocol amendment 15 (2026-11-04): played on GitHub-hosted macOS arm64 runners (Apple M1 VM, 3 cores, 7 GB), one block per runner, T = 3 for the protocol's T = 8, Hash 1024 MB per engine; compared only with runner cells. RQ2c on the runner: Hybrid-split(3) vs AB(3); direct vs RQ2b-R + RQ2a-R derived."
+    },
+    {
+      "id": "RQ1c-R",
+      "rq": "RQ1",
+      "priority": "SHOULD",
+      "machine": "runner",
+      "tc": "10+0.1",
+      "pairs": 1000,
+      "blocks": 10,
+      "hash_mb": 1024,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 3
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 3
+      },
+      "est_hours": 27,
+      "note": "Protocol amendment 15 (2026-11-04): played on GitHub-hosted macOS arm64 runners (Apple M1 VM, 3 cores, 7 GB), one block per runner, T = 3 for the protocol's T = 8, Hash 1024 MB per engine; compared only with runner cells. RQ1c on the runner (amendment 15 (g)): the fallback regime; the GPU-active fraction is the covariate."
+    },
+    {
+      "id": "RQ5a-R",
+      "rq": "RQ5",
+      "priority": "SHOULD",
+      "machine": "runner",
+      "tc": "30+0.3",
+      "pairs": 300,
+      "blocks": 6,
+      "hash_mb": 1024,
+      "a": {
+        "engine": "MCTS1",
+        "threads": 1
+      },
+      "b": {
+        "engine": "Lc0mb1",
+        "threads": 1,
+        "options": {
+          "MoveOverheadMs": "50"
+        }
+      },
+      "est_hours": 19,
+      "note": "Protocol amendment 15 (2026-11-04): played on GitHub-hosted macOS arm64 runners (Apple M1 VM, 3 cores, 7 GB), one block per runner, T = 3 for the protocol's T = 8, Hash 1024 MB per engine; compared only with runner cells. RQ5a on the runner (amendment 15 (g)): MCTS(1) vs Lc0 0.32.1 at minibatch 1 on the same GPU; Lc0 gets the MetalFish arm's 50 ms move overhead (amendment 12 (g))."
     }
   ],
   "non_game_tasks": [

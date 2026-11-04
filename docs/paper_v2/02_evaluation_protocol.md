@@ -627,3 +627,12 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     own; RQ6d-R − RQ1a-R is reported as in 12(e), and the direct RQ2c-R next to RQ2b-R + RQ2a-R. The
     microbenchmarks M1 and M2 are measured on a runner with the campaign's build and reported with
     the runner cells; M3–M6 come from the runner traces as for the workstation.
+    (g) **Addendum (2026-11-04, before any runner cell started).** Two more SHOULD cells that a
+    runner can play are added after RQ2a-R–RQ2c-R, under the rules above: RQ1c-R (Hybrid(3) vs
+    AB(3), 10+0.1, 1,000 pairs in 10 blocks, the fallback regime, with the GPU-active fraction as
+    the covariate) and RQ5a-R (MCTS(1) vs Lc0 0.32.1 at minibatch 1 with the BT4 network, 30+0.3,
+    300 pairs in 6 blocks; both arms get a 50 ms move overhead, as amendment 12(g) requires). The
+    other SHOULD cells are not played: RQ6c and RQ4 need engine changes (C11, C12) that the freeze
+    excludes, RQ3 needs more cores than a runner has, and RQ8 needs a gauntlet runner that does not
+    exist. The microbenchmarks M1 and M2 of (f) run as the workflow's `micro` task with the build
+    that plays the game cells.
