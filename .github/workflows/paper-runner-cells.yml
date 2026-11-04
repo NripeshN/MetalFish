@@ -57,6 +57,9 @@ on:
       judges_run:
         description: "oracle: run id whose 'judges' artifact to use (empty = build it in this run)"
         default: ""
+      resume_run:
+        description: "games, oracle: run id of a failed attempt at this block or shard, resumed from its artifact"
+        default: ""
 
 permissions:
   contents: read
@@ -356,6 +359,7 @@ jobs:
       BLOCK: ${{ matrix.block }}
       OUT_DIR: results/paper_v2/${{ matrix.cell }}${{ inputs.smoke_pairs && '_smoke' || '' }}
       SMOKE_PAIRS: ${{ inputs.smoke_pairs }}
+      RESUME_RUN: ${{ inputs.resume_run }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -403,13 +407,26 @@ jobs:
           tools/paper/runner_setup.sh fastchess
           tools/paper/runner_setup.sh book
       - name: Play the block
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$OUT_DIR"
+          resume=()
+          if [ -n "$RESUME_RUN" ] && gh run download "$RESUME_RUN" -n "games-$CELL-b$BLOCK" -D "$OUT_DIR"; then
+            # a failed attempt's games stay: the block resumes after its last complete pair
+            for z in "$OUT_DIR"/*.zst; do [ -e "$z" ] && zstd -q -d --rm "$z"; done
+            rm -f "$OUT_DIR/summary.json"
+            for f in runner.json vm_sampler.log; do
+              [ -e "$OUT_DIR/$f" ] && mv "$OUT_DIR/$f" "$OUT_DIR/prev_${RESUME_RUN}_$f"
+            done
+            echo "resuming from run $RESUME_RUN: $(grep -c '^\[Result ' "$OUT_DIR/games.pgn" || true) games"
+            resume=(--resume)
+          fi
           tools/paper/runner_setup.sh runner "$OUT_DIR/runner.json" > /dev/null
           tools/paper/runner_setup.sh sampler "$OUT_DIR/vm_sampler.log" < /dev/null > /dev/null 2>&1 &
           smoke=()
           [ -z "$SMOKE_PAIRS" ] || smoke=(--pairs "$SMOKE_PAIRS" --tag smoke)
-          python3 tools/paper/run_cell.py "$CELL" --block "$BLOCK" --engine-log --blind "${smoke[@]}"
+          python3 tools/paper/run_cell.py "$CELL" --block "$BLOCK" --engine-log --blind "${smoke[@]}" "${resume[@]}"
       - name: Health (no scores)
         if: always()
         run: |
@@ -542,6 +559,7 @@ jobs:
     env:
       SHARD: ${{ matrix.shard }}
       SHARDS: ${{ inputs.shards }}
+      RESUME_RUN: ${{ inputs.resume_run }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -582,8 +600,20 @@ jobs:
           shasum -a 256 docs/paper_v2/data/rq6b_disagreements.jsonl.gz
           gunzip -c docs/paper_v2/data/rq6b_disagreements.jsonl.gz > "$RUNNER_TEMP/disagreements.jsonl"
       - name: Judge the shard
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           OUT=results/paper_v2/RQ6b-R
+          resume=()
+          if [ -n "$RESUME_RUN" ] && gh run download "$RESUME_RUN" -n "oracle-shard-$SHARD" -D "$RUNNER_TEMP/prev"; then
+            # positions a failed attempt judged stay; the shard continues with the rest
+            for f in "$RUNNER_TEMP"/prev/*; do
+              b=$(basename "$f")
+              if [ "$b" = "shard_$SHARD.jsonl" ]; then cp "$f" "$OUT/$b"; else cp "$f" "$OUT/prev_${RESUME_RUN}_$b"; fi
+            done
+            echo "resuming from run $RESUME_RUN: $(wc -l < "$OUT/shard_$SHARD.jsonl") positions judged"
+            resume=(--resume)
+          fi
           tools/paper/runner_setup.sh runner "$OUT/runner_s$SHARD.json" > /dev/null
           tools/paper/runner_setup.sh sampler "$OUT/vm_sampler_s$SHARD.log" < /dev/null > /dev/null 2>&1 &
           LC0="$(brew --prefix)/bin/lc0"
@@ -594,7 +624,7 @@ jobs:
             --judge lc0="$LC0" --judge-arg lc0:--backend=metal \
             --judge-arg lc0:--weights="networks/$BT4" --nodes lc0:30000 \
             --judge-option lc0:SmartPruningFactor=0 \
-            --sample 600 --seed 1 --shard "$SHARD/$SHARDS" > "$OUT/stdout_s$SHARD.txt" 2> "$RUNNER_TEMP/stderr.txt" || rc=$?
+            --sample 600 --seed 1 --shard "$SHARD/$SHARDS" "${resume[@]}" > "$OUT/stdout_s$SHARD.txt" 2> "$RUNNER_TEMP/stderr.txt" || rc=$?
           grep -vi "mps module" "$RUNNER_TEMP/stderr.txt" > "$OUT/stderr_s$SHARD.txt" || true
           tail -3 "$OUT/stderr_s$SHARD.txt"
           exit $rc

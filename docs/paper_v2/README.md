@@ -76,4 +76,6 @@ designed so the paper is publishable whichever way the measurements come out.
   `RQ1a-R`, `RQ6d-R`, `RQ2a-R`, `RQ2b-R`, `RQ2c-R` and the oracle `RQ6b-R` in `experiments.json`, the
   oracle's input in `data/`, blocks joined by `tools/paper/fetch_runner_cell.py`. The workstation's
   RQ6b run was stopped unread after 74 of 600 positions; RQ6d and RQ2c had not started. Addendum
-  15 (g) adds RQ1c-R and RQ5a-R and the workflow's `micro` task (M1/M2 with the campaign's build).
+  15 (g) adds RQ1c-R and RQ5a-R and the workflow's `micro` task (M1/M2 with the campaign's build);
+  15 (h) runs each block and shard as its own workflow run, resuming failed attempts, because GitHub
+  cancels macOS arm64 jobs it cannot place.

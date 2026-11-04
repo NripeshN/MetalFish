@@ -79,18 +79,22 @@ workstation queue for everything not yet played; rules 2–5, 7 and 8 stand, and
 runner (one measurement per runner VM, no load gate needed, health from `vm_sampler.log`).
 
 - Workflow `.github/workflows/paper-runner-cells.yml`, dispatched on `main`: `task=oracle` (RQ6b-R in
-  contiguous shards), `task=games cells=…` (runner cells' blocks interleaved; `engine_run=<run id>`
-  reuses one engine build so that every runner cell is played by the same binary). Phases are
-  dispatched in order by `results/ars_pipeline/tools/runner_campaign.sh <phase file>` (RQ6b-R, then
-  RQ1a-R + RQ6d-R, then RQ2a-R + RQ2b-R + RQ2c-R, then RQ1c-R and RQ5a-R, amendment 15 (g)); its log is
-  `results/paper_v2/runner_campaign_log.txt`. `task=micro engine_run=<id>` runs M1/M2 on a runner with
-  the build that plays the game cells.
+  150 contiguous shards), `task=games` (one block of a runner cell), `task=micro` (M1/M2); `engine_run` /
+  `judges_run` reuse the builds of the smoke runs 41853109012 / 41853090422, and `resume_run` resumes a
+  failed attempt from its artifact. The driver `results/ars_pipeline/tools/runner_driver.py` (detached
+  with `nohup`; state `results/paper_v2/runner_campaign_state.json`, log `runner_campaign_log.txt`)
+  dispatches one run per block or shard in the order of amendment 15 (b) and (g) (RQ6b-R; RQ1a-R +
+  RQ6d-R; RQ2a-R + RQ2b-R + RQ2c-R; RQ1c-R + RQ5a-R; then `micro`), keeps a fixed number in flight, and
+  dispatches again whatever GitHub cancels (amendment 15 (h)). Restart it with `--resume` once the
+  workflow on `main` has the `resume_run` input; it picks up its state file.
 - Health during a run: job status, and each job's "Health (no scores)" step (games, forfeits, pace,
   GPU-active fraction, MCTS evaluations). Logs are public, so no score is printed; never read a
   block's `fastchess_report.txt` or `summary.json` before the cell's last block.
-- Reading, once per cell after its last block: `python3 tools/paper/fetch_runner_cell.py <cell> --run <id>`
-  joins the blocks into `results/paper_v2/<cell>/`; the oracle's shards are joined in shard order and
-  summarised with `oracle_probe.py --summarise-only` on the same input and sample arguments.
+- Reading, once per cell after its last block: `python3 tools/paper/fetch_runner_cell.py <cell>` finds the
+  blocks' artifacts in any run and joins them into `results/paper_v2/<cell>/`;
+  `python3 tools/paper/fetch_runner_oracle.py --shards 150 --stability results/paper_v2/RQ6b/oracle.jsonl`
+  joins the oracle's shards in shard order into `results/paper_v2/RQ6b-R/` (and runs the judge-stability
+  check), and `oracle_probe.py --summarise-only` on the same input and sample arguments summarises it.
 - Runner cells are compared only with runner cells (amendment 15); the workstation results stand.
 
 ## Phase B — the arXiv preprint (the author decided: do it)
