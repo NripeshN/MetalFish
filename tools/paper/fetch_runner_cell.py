@@ -47,7 +47,9 @@ def find_blocks(root: pathlib.Path, cell_id: str) -> Dict[int, List[pathlib.Path
     return found
 
 
-def join_cell(cell_id: str, cell: Dict, blocks: Dict[int, pathlib.Path], out: pathlib.Path) -> Dict:
+def join_cell(
+    cell_id: str, cell: Dict, blocks: Dict[int, pathlib.Path], out: pathlib.Path
+) -> Dict:
     """Write the joined cell directory from one complete directory per block; returns the
     summary (raises SystemExit on a missing, incomplete or inconsistent block)."""
     nblocks = int(cell["blocks"])
@@ -64,7 +66,9 @@ def join_cell(cell_id: str, cell: Dict, blocks: Dict[int, pathlib.Path], out: pa
         m = json.load(open(blocks[b] / "manifest.json"))
         builds.add(tuple(sorted((k, v["sha256"]) for k, v in m["arms"].items())))
     if len(builds) != 1:
-        raise SystemExit(f"{cell_id}: blocks were played by different binaries: {builds}")
+        raise SystemExit(
+            f"{cell_id}: blocks were played by different binaries: {builds}"
+        )
 
     out.mkdir(parents=True, exist_ok=True)
     if any(out.iterdir()):
@@ -79,15 +83,31 @@ def join_cell(cell_id: str, cell: Dict, blocks: Dict[int, pathlib.Path], out: pa
             d = blocks[b]
             pgn.write((d / "games.pgn").read_text())
             if (d / "engines.log.zst").exists():
-                log.write(subprocess.run(["zstd", "-dc", str(d / "engines.log.zst")],
-                                         capture_output=True, check=True).stdout)
+                log.write(
+                    subprocess.run(
+                        ["zstd", "-dc", str(d / "engines.log.zst")],
+                        capture_output=True,
+                        check=True,
+                    ).stdout
+                )
             m = json.load(open(d / "manifest.json"))
             manifest = manifest or m
             for h in m.get("history") or []:
-                history.append({**h, "games_before": games_before + (h.get("games_before") or 0)})
-            runner = json.load(open(d / "runner.json")) if (d / "runner.json").exists() else {}
+                history.append(
+                    {**h, "games_before": games_before + (h.get("games_before") or 0)}
+                )
+            runner = (
+                json.load(open(d / "runner.json"))
+                if (d / "runner.json").exists()
+                else {}
+            )
             runners.append({"block": b, "artifact": d.name, **runner})
-            for name in ("fastchess_cmd.txt", "fastchess_report.txt", "therm.log", "vm_sampler.log"):
+            for name in (
+                "fastchess_cmd.txt",
+                "fastchess_report.txt",
+                "therm.log",
+                "vm_sampler.log",
+            ):
                 if (d / name).exists():
                     with open(out / name, "a") as fh:
                         if name.endswith(".log"):
@@ -96,8 +116,13 @@ def join_cell(cell_id: str, cell: Dict, blocks: Dict[int, pathlib.Path], out: pa
             for line in (d / "fastchess_report.txt").read_text().splitlines():
                 r = REPORT_HEAD.match(line)
                 if r:
-                    reports.append({"block": int(r.group(1)), "elapsed_s": float(r.group(2)) * 3600,
-                                    "exit": int(r.group(3))})
+                    reports.append(
+                        {
+                            "block": int(r.group(1)),
+                            "elapsed_s": float(r.group(2)) * 3600,
+                            "exit": int(r.group(3)),
+                        }
+                    )
             games_before += count_games(d / "games.pgn")
     if not (out / "engines.log").stat().st_size:
         (out / "engines.log").unlink()
@@ -108,12 +133,23 @@ def join_cell(cell_id: str, cell: Dict, blocks: Dict[int, pathlib.Path], out: pa
 
 
 def main(argv: List[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("cell_id")
-    ap.add_argument("--run", action="append", default=[], help="workflow run id (repeatable)")
-    ap.add_argument("--from-dir", help="directory holding the downloaded games-<cell>-b<k> artifacts")
-    ap.add_argument("--use", action="append", default=[],
-                    help="BLOCK=RUN: the run whose artifact to take for a block played more than once")
+    ap.add_argument(
+        "--run", action="append", default=[], help="workflow run id (repeatable)"
+    )
+    ap.add_argument(
+        "--from-dir",
+        help="directory holding the downloaded games-<cell>-b<k> artifacts",
+    )
+    ap.add_argument(
+        "--use",
+        action="append",
+        default=[],
+        help="BLOCK=RUN: the run whose artifact to take for a block played more than once",
+    )
     ap.add_argument("--manifest", default=str(run_cell.MANIFEST_PATH))
     args = ap.parse_args(argv)
 
@@ -124,8 +160,19 @@ def main(argv: List[str] | None = None) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(args.from_dir or tmp)
         for run in args.run:
-            subprocess.run(["gh", "run", "download", run, "-p", f"games-{args.cell_id}-b*",
-                            "-D", str(root / run)], check=True)
+            subprocess.run(
+                [
+                    "gh",
+                    "run",
+                    "download",
+                    run,
+                    "-p",
+                    f"games-{args.cell_id}-b*",
+                    "-D",
+                    str(root / run),
+                ],
+                check=True,
+            )
         found = find_blocks(root, args.cell_id)
         use = dict(u.split("=", 1) for u in args.use)
         blocks = {}
@@ -133,13 +180,19 @@ def main(argv: List[str] | None = None) -> int:
             if len(dirs) > 1:
                 pick = [d for d in dirs if str(b) in use and use[str(b)] in d.parts]
                 if len(pick) != 1:
-                    raise SystemExit(f"block {b} was played more than once ({[str(d) for d in dirs]}); "
-                                     f"name the run with --use {b}=RUN")
+                    raise SystemExit(
+                        f"block {b} was played more than once ({[str(d) for d in dirs]}); "
+                        f"name the run with --use {b}=RUN"
+                    )
                 dirs = pick
             blocks[b] = dirs[0]
-        summary = join_cell(args.cell_id, cell, blocks, run_cell.RESULTS_ROOT / args.cell_id)
-    print(f"{args.cell_id}: {summary['stats'].get('games', '?')} games joined from "
-          f"{len(blocks)} blocks into {run_cell.RESULTS_ROOT / args.cell_id}")
+        summary = join_cell(
+            args.cell_id, cell, blocks, run_cell.RESULTS_ROOT / args.cell_id
+        )
+    print(
+        f"{args.cell_id}: {summary['stats'].get('games', '?')} games joined from "
+        f"{len(blocks)} blocks into {run_cell.RESULTS_ROOT / args.cell_id}"
+    )
     return 0
 
 

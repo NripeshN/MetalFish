@@ -76,7 +76,7 @@ env:
 jobs:
   probe-engine:
     name: Probe runner and frozen engine
-    if: github.event_name == 'push' || inputs.task == 'probe'
+    if: inputs.task == 'probe'
     runs-on: macos-26
     timeout-minutes: 150
     steps:
@@ -254,26 +254,17 @@ jobs:
             "$LC0" backendbench --backend=metal --weights="networks/$BT4" --start-batch-size=$b --max-batch-size=$b --batches=50 2>&1 | grep -vi "mps module" | tail -4 || true
           done
 
-      - name: Oracle wall time per position (first 2 sampled positions; timings only)
+      - name: Judge search times (Lc0 30,000 nodes; Stockfish 19 60 s with 3 threads)
         run: |
-          mkdir -p "$RUNNER_TEMP/oracle"
-          gunzip -c docs/paper_v2/data/rq6b_disagreements.jsonl.gz > "$RUNNER_TEMP/oracle/disagreements.jsonl"
-          shasum -a 256 docs/paper_v2/data/rq6b_disagreements.jsonl.gz
           LC0="$(brew --prefix)/bin/lc0"
-          start=$(date +%s)
-          python3 tools/paper/oracle_probe.py "$RUNNER_TEMP/oracle/disagreements.jsonl" --out "$RUNNER_TEMP/oracle/probe.jsonl" \
-            --judge sf19="$RUNNER_TEMP/sf19/src/stockfish" --judge-option sf19:Threads=3 \
-            --judge-option sf19:Hash=2048 --judge-option sf19:SyzygyPath=syzygy --movetime 60000 \
-            --judge lc0="$LC0" --judge-arg lc0:--backend=metal \
-            --judge-arg lc0:--weights="networks/$BT4" --nodes lc0:30000 \
-            --judge-option lc0:SmartPruningFactor=0 \
-            --sample 600 --seed 1 --limit 2 > /dev/null 2> "$RUNNER_TEMP/oracle/stderr.txt" || tail -20 "$RUNNER_TEMP/oracle/stderr.txt"
-          echo "positions judged: $(wc -l < "$RUNNER_TEMP/oracle/probe.jsonl"), wall: $(( $(date +%s) - start )) s"
-          grep -vi "mps module" "$RUNNER_TEMP/oracle/stderr.txt" | grep -v '^\s*$' | head -5
+          "$LC0" benchmark --backend=metal --weights="networks/$BT4" --nodes=30000 --num-positions=2 \
+            --smart-pruning-factor=0 2>&1 | grep -vi "mps module" | grep -E "Benchmark|nps|time|Positions|Total" | tail -12
+          printf 'uci\nsetoption name Threads value 3\nsetoption name Hash value 2048\nsetoption name SyzygyPath value syzygy\nisready\nposition fen r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N2N2/PP2BPPP/R2QKB1R w KQ - 0 9\ngo movetime 60000\n' > "$RUNNER_TEMP/sf_in.txt"
+          ( cat "$RUNNER_TEMP/sf_in.txt"; sleep 63; printf 'quit\n' ) | "$RUNNER_TEMP/sf19/src/stockfish" | grep -E "^info depth" | tail -1 | grep -oE "depth [0-9]+|nodes [0-9]+|nps [0-9]+|time [0-9]+" | tr '\n' ' '
 
   plan:
     name: Plan
-    if: github.event_name == 'workflow_dispatch' && inputs.task != 'probe'
+    if: inputs.task != 'probe'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -290,7 +281,7 @@ jobs:
 
   build-engine:
     name: Build the frozen engine
-    if: github.event_name == 'workflow_dispatch' && inputs.task == 'games' && inputs.engine_run == ''
+    if: inputs.task == 'games' && inputs.engine_run == ''
     runs-on: macos-26
     timeout-minutes: 90
     steps:
@@ -427,7 +418,7 @@ jobs:
 
   build-judges:
     name: Build Stockfish 19 (oracle judge)
-    if: github.event_name == 'workflow_dispatch' && inputs.task == 'oracle' && inputs.judges_run == ''
+    if: inputs.task == 'oracle' && inputs.judges_run == ''
     runs-on: macos-26
     timeout-minutes: 90
     steps:

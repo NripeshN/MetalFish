@@ -740,7 +740,8 @@ class OracleShardTest(unittest.TestCase):
 
 class RunnerCampaignTest(unittest.TestCase):
     """Pins the runner campaign's job plan and the joining of a runner cell's blocks
-    (tools/paper/runner_plan.py, tools/paper/fetch_runner_cell.py; protocol amendment 15)."""
+    (tools/paper/runner_plan.py, tools/paper/fetch_runner_cell.py; protocol amendment 15).
+    """
 
     def setUp(self):
         import fetch_runner_cell
@@ -762,10 +763,16 @@ class RunnerCampaignTest(unittest.TestCase):
             [("X-R", 0), ("Y-R", 0), ("X-R", 1), ("Y-R", 1), ("X-R", 2)],
         )
         jobs = self.plan.games_matrix(spec, ["X-R", "Y-R"], [1])
-        self.assertEqual([(j["cell"], j["block"]) for j in jobs], [("X-R", 1), ("Y-R", 1)])
+        self.assertEqual(
+            [(j["cell"], j["block"]) for j in jobs], [("X-R", 1), ("Y-R", 1)]
+        )
         with self.assertRaises(SystemExit):
-            self.plan.games_matrix(spec, ["Z"], None)  # a workstation cell never runs here
-        self.assertEqual(self.plan.oracle_matrix(4, [0, 3]), [{"shard": 0}, {"shard": 3}])
+            self.plan.games_matrix(
+                spec, ["Z"], None
+            )  # a workstation cell never runs here
+        self.assertEqual(
+            self.plan.oracle_matrix(4, [0, 3]), [{"shard": 0}, {"shard": 3}]
+        )
 
     def _block(self, root, b, results, sha="aa"):
         d = pathlib.Path(root) / f"games-T-R-b{b}"
@@ -802,10 +809,14 @@ class RunnerCampaignTest(unittest.TestCase):
             self.assertEqual(summary["stats"]["pairs"], 4)
             m = json.load(open(out / "manifest.json"))
             self.assertEqual([h["games_before"] for h in m["history"]], [0, 4])
-            self.assertEqual([r["image"] for r in m["runner_blocks"]], ["macos-26 0", "macos-26 1"])
+            self.assertEqual(
+                [r["image"] for r in m["runner_blocks"]], ["macos-26 0", "macos-26 1"]
+            )
             self.assertEqual([r["block"] for r in summary["blocks_run"]], [0, 1])
             pgn = (out / "games.pgn").read_text()
-            self.assertLess(pgn.index('[Result "1-0"]'), pgn.index('[Result "1/2-1/2"]'))
+            self.assertLess(
+                pgn.index('[Result "1-0"]'), pgn.index('[Result "1/2-1/2"]')
+            )
             self.assertFalse((out / "engines.log").exists())
             with self.assertRaises(SystemExit):  # a joined cell is written once
                 self.fetch.join_cell("T-R", cell, blocks, out)
