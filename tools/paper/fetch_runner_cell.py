@@ -10,8 +10,13 @@ read: games.pgn and engines.log joined in block order, manifest.json with one hi
 block (games_before counted over the joined PGN) and each block's runner in `runner_blocks`, and
 summary.json from run_cell.write_summary.
 
+    python3 tools/paper/fetch_runner_cell.py RQ6d-R          # finds the blocks' artifacts in any run
     python3 tools/paper/fetch_runner_cell.py RQ6d-R --run 12345 [--run 12399 ...]
     python3 tools/paper/fetch_runner_cell.py RQ6d-R --from-dir DIR    # artifacts already here
+
+A block tried more than once (GitHub cancels a job no runner takes; a failed attempt is resumed
+by the next) contributes its one complete attempt, which holds every game of the attempts before
+it; `--use BLOCK=RUN` names the attempt when that is ambiguous.
 """
 
 from __future__ import annotations
@@ -36,6 +41,52 @@ REPORT_HEAD = re.compile(r"^# block (\d+) \(([\d.]+) h, exit (-?\d+)\)$")
 
 def count_games(pgn: pathlib.Path) -> int:
     return run_cell.count_pgn_games(pgn) if pgn.exists() else 0
+
+
+def download_artifacts(names: List[str], root: pathlib.Path) -> None:
+    """Every unexpired artifact with one of `names`, from any run of the repository, into
+    root/<run id>/<name>/ (one run per block or shard, retries included)."""
+    repo = subprocess.run(
+        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    for name in names:
+        listing = subprocess.run(
+            ["gh", "api", f"repos/{repo}/actions/artifacts?name={name}&per_page=100"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        for a in json.loads(listing).get("artifacts", []):
+            if a.get("expired"):
+                continue
+            run = str(a["workflow_run"]["id"])
+            subprocess.run(
+                [
+                    "gh",
+                    "run",
+                    "download",
+                    run,
+                    "-n",
+                    name,
+                    "-D",
+                    str(root / run / name),
+                ],
+                check=True,
+            )
+
+
+def pick_attempt(dirs: List[pathlib.Path], complete, use: str | None = None):
+    """The one attempt to join for a block or shard tried more than once: the run named with
+    `use`, else the only complete attempt (a resumed attempt holds every game of the ones before
+    it); None when that is ambiguous."""
+    if use:
+        named = [d for d in dirs if use in d.parts]
+        return named[0] if len(named) == 1 else None
+    done = [d for d in dirs if complete(d)]
+    return done[0] if len(done) == 1 else (dirs[0] if len(dirs) == 1 else None)
 
 
 def find_blocks(root: pathlib.Path, cell_id: str) -> Dict[int, List[pathlib.Path]]:
@@ -157,6 +208,14 @@ def main(argv: List[str] | None = None) -> int:
     cell = {c["id"]: c for c in spec["cells"]}.get(args.cell_id)
     if not cell or cell.get("machine") != "runner":
         raise SystemExit(f"{args.cell_id} is not a runner cell")
+    nblocks = int(cell["blocks"])
+    per_block = -(-int(cell["pairs"]) // nblocks)
+
+    def complete(d: pathlib.Path) -> bool:
+        b = int(BLOCK_DIR.match(d.name).group("block"))
+        want = 2 * min(per_block, int(cell["pairs"]) - b * per_block)
+        return count_games(d / "games.pgn") == want
+
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(args.from_dir or tmp)
         for run in args.run:
@@ -173,19 +232,21 @@ def main(argv: List[str] | None = None) -> int:
                 ],
                 check=True,
             )
+        if not args.run and not args.from_dir:
+            download_artifacts(
+                [f"games-{args.cell_id}-b{b}" for b in range(nblocks)], root
+            )
         found = find_blocks(root, args.cell_id)
         use = dict(u.split("=", 1) for u in args.use)
         blocks = {}
         for b, dirs in found.items():
-            if len(dirs) > 1:
-                pick = [d for d in dirs if str(b) in use and use[str(b)] in d.parts]
-                if len(pick) != 1:
-                    raise SystemExit(
-                        f"block {b} was played more than once ({[str(d) for d in dirs]}); "
-                        f"name the run with --use {b}=RUN"
-                    )
-                dirs = pick
-            blocks[b] = dirs[0]
+            pick = pick_attempt(dirs, complete, use.get(str(b)))
+            if pick is None:
+                raise SystemExit(
+                    f"block {b}: {len(dirs)} attempts and no single complete one "
+                    f"({[str(d) for d in dirs]}); name the run with --use {b}=RUN"
+                )
+            blocks[b] = pick
         summary = join_cell(
             args.cell_id, cell, blocks, run_cell.RESULTS_ROOT / args.cell_id
         )

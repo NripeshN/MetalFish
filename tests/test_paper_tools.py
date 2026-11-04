@@ -892,6 +892,88 @@ class RunnerCellDefinitionsTest(unittest.TestCase):
                     self.assertNotIn("option.Hash=", part, cell["id"])
 
 
+class RunnerAttemptsTest(unittest.TestCase):
+    """Pins the choice among a block's or shard's attempts and the joining of the oracle shards
+    (tools/paper/fetch_runner_cell.py, tools/paper/fetch_runner_oracle.py; amendment 15).
+    """
+
+    def setUp(self):
+        import fetch_runner_cell
+        import fetch_runner_oracle
+
+        self.cell, self.oracle = fetch_runner_cell, fetch_runner_oracle
+
+    def _row(self, n, verdict="tie", delta=0.0):
+        return {
+            "fen": f"f{n}",
+            "ab_move": "e2e4",
+            "mcts_move": "d2d4",
+            "cluster": f"c{n}",
+            "judges": {"sf19": {"verdict": verdict, "delta_cp": delta}},
+        }
+
+    def _shard(self, root, run, i, rows):
+        d = pathlib.Path(root) / run / f"oracle-shard-{i}"
+        d.mkdir(parents=True)
+        (d / f"shard_{i}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        (d / f"runner_s{i}.json").write_text(json.dumps({"image": run}))
+        return d
+
+    def test_complete_attempt_wins(self):
+        with tempfile.TemporaryDirectory() as d:
+            a = self._shard(d, "100", 0, [self._row(0)])
+            b = self._shard(d, "200", 0, [self._row(0), self._row(1)])
+            complete = lambda x: len(self.oracle.rows_of(x / "shard_0.jsonl")) == 2
+            self.assertEqual(self.cell.pick_attempt([a, b], complete), b)
+            self.assertEqual(self.cell.pick_attempt([a, b], complete, "100"), a)
+            self.assertIsNone(self.cell.pick_attempt([a, b], lambda x: True))
+
+    def test_shards_join_in_order_once(self):
+        # 7 positions in 3 shards of 2, 2 and 3; shard 1 was attempted twice
+        with tempfile.TemporaryDirectory() as d:
+            found = {
+                0: [self._shard(d, "1", 0, [self._row(0), self._row(1)])],
+                1: [
+                    self._shard(d, "2", 1, [self._row(2)]),
+                    self._shard(d, "3", 1, [self._row(2), self._row(3)]),
+                ],
+                2: [self._shard(d, "4", 2, [self._row(4), self._row(5), self._row(6)])],
+            }
+            out = pathlib.Path(d) / "out"
+            info = self.oracle.join_shards(found, 3, 7, out)
+            rows = self.oracle.rows_of(out / "oracle.jsonl")
+            self.assertEqual([r["fen"] for r in rows], [f"f{n}" for n in range(7)])
+            self.assertEqual([s["run"] for s in info["by_shard"]], ["1", "3", "4"])
+            self.assertTrue((out / "shards" / "1" / "runner_s1.json").exists())
+            with self.assertRaises(SystemExit):
+                self.oracle.join_shards(found, 3, 7, out)
+            with self.assertRaises(SystemExit):  # a shard without a complete attempt
+                self.oracle.join_shards(
+                    {**found, 1: found[1][:1]}, 3, 7, pathlib.Path(d) / "o2"
+                )
+            with self.assertRaises(SystemExit):  # a missing shard
+                self.oracle.join_shards(
+                    {0: found[0], 1: found[1]}, 3, 7, pathlib.Path(d) / "o3"
+                )
+
+    def test_judge_stability(self):
+        runner = [
+            self._row(0, "ab", 30.0),
+            self._row(1, "tie", 5.0),
+            self._row(2, "mcts", -40.0),
+        ]
+        ws = [
+            self._row(0, "ab", 25.0),
+            self._row(1, "ab", 15.0),
+            self._row(2, "mcts", -50.0),
+            self._row(9),
+        ]
+        st = self.oracle.judge_stability(runner, ws)["sf19"]
+        self.assertEqual(st["positions"], 3)
+        self.assertAlmostEqual(st["same_verdict"], 2 / 3)
+        self.assertGreater(st["delta_cp_correlation"], 0.9)
+
+
 class FakeJudge:
     """Stands in for a UCI judge: scores every position +50 cp for the side to move and
     records each call."""

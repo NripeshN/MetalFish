@@ -636,3 +636,16 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     excludes, RQ3 needs more cores than a runner has, and RQ8 needs a gauntlet runner that does not
     exist. The microbenchmarks M1 and M2 of (f) run as the workflow's `micro` task with the build
     that plays the game cells.
+    (h) **Addendum (2026-11-04, scheduling; written before any runner block or shard had
+    finished).** On the first smoke runs GitHub cancelled the macOS arm64 jobs that no runner had
+    taken within about 15 minutes ("not acquired … due to capacity constraints"), and a workflow run
+    can be re-run only after all of its jobs have ended. Each block and each shard is therefore
+    dispatched as its own workflow run, in the order of (b), by a driver that keeps a fixed number
+    of runs in flight and dispatches again any run that ends without success: from scratch when its
+    job never started, otherwise resuming from the failed attempt's artifact (`resume_run`:
+    `run_cell.py --resume`, `oracle_probe.py --resume`), so that no game and no judged position is
+    discarded, as with the interrupted blocks on the workstation. The joiners
+    (`tools/paper/fetch_runner_cell.py`, `tools/paper/fetch_runner_oracle.py`) take for each block
+    or shard its one complete attempt, which holds everything its earlier attempts played or judged.
+    The engine and judge builds of the smoke runs (runs 41853109012 and 41853090422) serve every
+    block and shard.
