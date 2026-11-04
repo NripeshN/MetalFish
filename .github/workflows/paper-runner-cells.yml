@@ -23,8 +23,6 @@
 name: Paper Runner Cells
 
 on:
-  push:
-    branches: [paper-runner-cells]
   workflow_dispatch:
     inputs:
       task:
@@ -43,8 +41,8 @@ on:
         description: "games: pipeline check only - play this many pairs per job into <cell>_smoke (enters no cell)"
         default: ""
       shards:
-        description: "oracle: contiguous shards of the 600-position sample"
-        default: "30"
+        description: "oracle: contiguous shards of the 600-position sample (150 = 4 positions each)"
+        default: "150"
       shard_list:
         description: "oracle: only these 0-based shards (comma-separated; empty = all)"
         default: ""
@@ -208,7 +206,7 @@ jobs:
 
   probe-judges:
     name: Probe the oracle judges
-    if: github.event_name == 'push' || inputs.task == 'probe'
+    if: inputs.task == 'probe'
     runs-on: macos-26
     timeout-minutes: 150
     steps:
@@ -254,13 +252,21 @@ jobs:
             "$LC0" backendbench --backend=metal --weights="networks/$BT4" --start-batch-size=$b --max-batch-size=$b --batches=50 2>&1 | grep -vi "mps module" | tail -4 || true
           done
 
-      - name: Judge search times (Lc0 30,000 nodes; Stockfish 19 60 s with 3 threads)
+      - name: Judge search times (Lc0 30,000 nodes from a fresh tree, as the oracle runs it)
         run: |
           LC0="$(brew --prefix)/bin/lc0"
-          "$LC0" benchmark --backend=metal --weights="networks/$BT4" --nodes=30000 --num-positions=2 \
-            --smart-pruning-factor=0 2>&1 | grep -vi "mps module" | grep -E "Benchmark|nps|time|Positions|Total" | tail -12
-          printf 'uci\nsetoption name Threads value 3\nsetoption name Hash value 2048\nsetoption name SyzygyPath value syzygy\nisready\nposition fen r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N2N2/PP2BPPP/R2QKB1R w KQ - 0 9\ngo movetime 60000\n' > "$RUNNER_TEMP/sf_in.txt"
-          ( cat "$RUNNER_TEMP/sf_in.txt"; sleep 63; printf 'quit\n' ) | "$RUNNER_TEMP/sf19/src/stockfish" | grep -E "^info depth" | tail -1 | grep -oE "depth [0-9]+|nodes [0-9]+|nps [0-9]+|time [0-9]+" | tr '\n' ' '
+          python3 - "$LC0" "networks/$BT4" <<'EOF'
+          import sys, time, chess, chess.engine
+          eng = chess.engine.SimpleEngine.popen_uci([sys.argv[1], "--backend=metal", f"--weights={sys.argv[2]}"], stderr=open("/dev/null", "w"))
+          eng.configure({"SmartPruningFactor": 0})
+          for fen in ("r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N2N2/PP2BPPP/R2QKB1R w KQ - 0 9",
+                      "2r2rk1/pp1q1ppp/2n1pn2/3p4/3P4/P1NBPN2/1P3PPP/2RQ1RK1 b - - 2 14"):
+              t0 = time.time()
+              info = eng.analyse(chess.Board(fen), chess.engine.Limit(nodes=30000), game=object())
+              dt = time.time() - t0
+              print(f"lc0 30000 nodes: {dt:.1f} s, nodes {info.get('nodes')}, nps {info.get('nps')}, depth {info.get('depth')}", flush=True)
+          eng.quit()
+          EOF
 
   plan:
     name: Plan
@@ -385,7 +391,7 @@ jobs:
         run: |
           mkdir -p "$OUT_DIR"
           tools/paper/runner_setup.sh runner "$OUT_DIR/runner.json" > /dev/null
-          tools/paper/runner_setup.sh sampler "$OUT_DIR/vm_sampler.log" &
+          tools/paper/runner_setup.sh sampler "$OUT_DIR/vm_sampler.log" < /dev/null > /dev/null 2>&1 &
           smoke=()
           [ -z "$SMOKE_PAIRS" ] || smoke=(--pairs "$SMOKE_PAIRS" --tag smoke)
           python3 tools/paper/run_cell.py "$CELL" --block "$BLOCK" --engine-log --blind "${smoke[@]}"
@@ -496,7 +502,8 @@ jobs:
           chmod +x judges/stockfish
           (cd judges && shasum -a 256 -c SHA256SUMS)
           cat judges/JUDGES.txt
-          brew list --versions lc0 | tee /dev/stderr | grep -q " 0.32.1$" || { echo "::error::the protocol's Lc0 judge is 0.32.1"; exit 1; }
+          v=$(brew list --versions lc0); echo "$v"
+          [ "$v" = "lc0 0.32.1" ] || { echo "::error::the protocol's Lc0 judge is 0.32.1"; exit 1; }
           python3 tools/download_engine_networks.py --bt4-only --dest networks --cache-dir "$METALFISH_NETWORK_CACHE_DIR"
           echo "$BT4_SHA256  networks/$BT4" | shasum -a 256 -c
           tools/paper/runner_setup.sh syzygy
@@ -507,7 +514,7 @@ jobs:
         run: |
           OUT=results/paper_v2/RQ6b-R
           tools/paper/runner_setup.sh runner "$OUT/runner_s$SHARD.json" > /dev/null
-          tools/paper/runner_setup.sh sampler "$OUT/vm_sampler_s$SHARD.log" &
+          tools/paper/runner_setup.sh sampler "$OUT/vm_sampler_s$SHARD.log" < /dev/null > /dev/null 2>&1 &
           LC0="$(brew --prefix)/bin/lc0"
           rc=0
           python3 tools/paper/oracle_probe.py "$RUNNER_TEMP/disagreements.jsonl" --out "$OUT/shard_$SHARD.jsonl" \

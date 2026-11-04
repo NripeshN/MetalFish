@@ -654,7 +654,6 @@
         "RQ1b"
       ],
       "input": "docs/paper_v2/data/rq6b_disagreements.jsonl.gz",
-      "shards": 30,
       "judges": [
         {
           "engine": "SF19",
@@ -670,7 +669,7 @@
           "nodes": 30000
         }
       ],
-      "note": "Protocol amendment 15: RQ6b re-run in full on GitHub-hosted M1 runners (the workstation run stopped at 74 of 600 positions, unread); same sample, Stockfish 19 with the runner's 3 threads; the 74 workstation rows are a judge-stability check only."
+      "note": "Protocol amendment 15: judged in contiguous shards sized to the 6-hour job limit (K recorded with the run); RQ6b re-run in full on GitHub-hosted M1 runners (the workstation run stopped at 74 of 600 positions, unread); same sample, Stockfish 19 with the runner's 3 threads; the 74 workstation rows are a judge-stability check only."
     },
     {
       "id": "RQ7",

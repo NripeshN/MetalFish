@@ -742,7 +742,7 @@ verification off) is played at 30+0.3.
 
 ## F. Runner cells (GitHub-hosted Apple M1 runners, protocol amendment 15)
 
-**Runner probe** (2026-11-04; runs 41832147565 and 41837556525 of `.github/workflows/paper-runner-cells.yml`,
+**Runner probe** (2026-11-04; runs 41832147565, 41837556525 and 41846444311 of `.github/workflows/paper-runner-cells.yml`,
 one fresh runner per job; job logs and artifacts under `results/paper_v2/runner_probe/run_<id>/`). Not a
 cell: the probe fixed the runner settings of amendment 15 before any runner cell started, and none of its
 games or judgments enters an estimate. Values are given for the two probe runners in turn.
@@ -757,7 +757,7 @@ games or judgments enters an estimate. Values are given for the two probe runner
 | Hybrid(3) footprint at Hash 1024 | 2.75 / 3.20 GB maximum resident size (one traced search) | `job_probe_engine.log`, traced search |
 | Game pace, Hybrid(3) vs AB(3), 30+0.3, Hash 1024 | 4 games in 7.8 min on the first runner (1.95 min per game with engine restarts), game durations 1:20–1:45; no forfeit | `PROBE/games.pgn`, job log |
 | Syzygy 3-4-5 | 290 files from the lichess mirror, each matching the mirror's SHA-256 list, as do the workstation's 290 files | `results/paper_v2/runner_probe/lichess_sha256.txt`, `local_syzygy.txt` |
-| Oracle wall time per position | {{ORACLE}} | `job_probe_judges.log` |
+| Oracle judges on the runner | Stockfish 19 (3 threads, 60 s): 84.6 M nodes, depth 36 on one middlegame position; Lc0 0.32.1 `backendbench`: 31.2 / 24.0 positions/s at batch 1, 63.8 / 62.1 at batch 32; the oracle's first two positions were unfinished after 61 min (each position: two 60 s Stockfish searches and three 30,000-node Lc0 searches) | `run_41846444311/job_probe_judges.log`, `run_41837556525/job_probe_judges_cancelled.log` |
 
 The two probe runners differed by 10–40% in GPU and CPU throughput, which is why amendment 15 (c)
 interleaves the blocks of the cells it compares.
