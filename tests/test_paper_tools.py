@@ -846,6 +846,52 @@ class RunnerCampaignTest(unittest.TestCase):
                 self.fetch.join_cell("T-R", cell, mixed, pathlib.Path(d) / "o2")
 
 
+class RunnerCellDefinitionsTest(unittest.TestCase):
+    """Dry-runs every runner cell of docs/paper_v2/experiments.json (protocol amendment 15): one
+    block per runner over contiguous openings, at most the runner's 3 threads, Hash 1024 MB on
+    MetalFish arms, and a 50 ms move overhead on every arm, Lc0's included (amendment 12 (g)).
+    """
+
+    def test_runner_cells_dry_run(self):
+        import run_cell
+
+        spec = json.load(open(ROOT / "docs" / "paper_v2" / "experiments.json"))
+        cells = [c for c in spec["cells"] if c.get("machine") == "runner"]
+        self.assertGreaterEqual(len(cells), 7)
+        for cell in cells:
+            with tempfile.TemporaryDirectory() as d:
+                saved = run_cell.RESULTS_ROOT
+                run_cell.RESULTS_ROOT = pathlib.Path(d)
+                buf = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(buf):
+                        rc = run_cell.main([cell["id"], "--dry-run"])
+                finally:
+                    run_cell.RESULTS_ROOT = saved
+            self.assertEqual(rc, 0, cell["id"])
+            out = buf.getvalue()
+            blocks = re.findall(r"block (\d+): (\d+) pairs, openings start=(\d+)", out)
+            self.assertEqual(len(blocks), cell["blocks"], cell["id"])
+            per = -(-cell["pairs"] // cell["blocks"])
+            for b, n, start in blocks:
+                self.assertEqual(int(start), 1 + int(b) * per, cell["id"])
+            self.assertEqual(
+                sum(int(n) for _, n, _ in blocks), cell["pairs"], cell["id"]
+            )
+            cmd = out.splitlines()[1]
+            self.assertTrue(
+                all(int(t) <= 3 for t in re.findall(r"option\.Threads=(\d+)", cmd)),
+                cell["id"],
+            )
+            for part in cmd.split(" -engine ")[1:]:
+                if "metalfish" in part.split()[0]:
+                    self.assertIn("option.Hash=1024", part, cell["id"])
+                    self.assertIn("'option.Move Overhead=50'", part, cell["id"])
+                else:
+                    self.assertIn("option.MoveOverheadMs=50", part, cell["id"])
+                    self.assertNotIn("option.Hash=", part, cell["id"])
+
+
 class FakeJudge:
     """Stands in for a UCI judge: scores every position +50 cp for the side to move and
     records each call."""
