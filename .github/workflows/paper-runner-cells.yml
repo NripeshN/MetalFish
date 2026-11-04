@@ -1,0 +1,245 @@
+# =============================================================================
+# Paper measurements on GitHub-hosted Apple Silicon runners (protocol amendment 15)
+# =============================================================================
+# The paper's remaining measurements run here instead of on the author's workstation.
+# Each job is one fresh macOS arm64 VM (Apple M1, 3 vCPU, 7 GB): one measurement per VM at
+# concurrency 1, so a job never shares its machine with another measurement of ours.
+#
+#   probe  - runner inventory (CPU, memory, Metal/MPSGraph), the frozen engine built from the
+#            freeze tag and checked against its bench signature, the M1/M2 microbenchmarks at
+#            the runner's sizes, one traced hybrid search, two pairs of game pace, and the
+#            oracle judges' wall time per position (timings only: no verdict is printed).
+# =============================================================================
+
+name: Paper Runner Cells
+
+on:
+  push:
+    branches: [paper-runner-cells]
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "probe"
+        required: true
+        default: "probe"
+
+permissions:
+  contents: read
+
+env:
+  FREEZE_TAG: paper-v2-freeze-rc2
+  METALFISH_NETWORK_CACHE_DIR: ~/.cache/metalfish/networks
+  FASTCHESS_RELEASE: v1.8.2-alpha
+  FASTCHESS_SHA256: 2589982a4f33882a6507936cb21db8576bd717a92c92e2e37a58338d22f4b393
+  BOOK_URL: https://github.com/official-stockfish/books/raw/master/UHO_Lichess_4852_v1.epd.zip
+  BOOK_SHA256: 7a7f6470615a69c6cf23d565417701d38732876f480af90d67b42abade35644a
+  BT4: BT4-1024x15x32h-swa-6147500.pb
+  BT4_SHA256: 8accc462cd1ae554e85cb05f01998df058488fe29161ed1041e936d1d552508e
+  BENCH_SIGNATURE: "2497913"
+
+jobs:
+  probe-engine:
+    name: Probe runner and frozen engine
+    if: github.event_name == 'push' || inputs.task == 'probe'
+    runs-on: macos-26
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Runner inventory
+        run: |
+          sw_vers; uname -a
+          sysctl -n machdep.cpu.brand_string hw.model hw.ncpu hw.physicalcpu hw.memsize
+          sysctl hw.perflevel0.physicalcpu hw.perflevel1.physicalcpu 2>/dev/null || true
+          system_profiler SPHardwareDataType SPDisplaysDataType
+          xcodebuild -version; clang --version | head -1
+          cat > "$RUNNER_TEMP/metal.swift" <<'EOF'
+          import Foundation
+          import Metal
+          import MetalPerformanceShadersGraph
+          guard let d = MTLCreateSystemDefaultDevice() else { print("Metal: no device"); exit(0) }
+          print("Metal device: \(d.name)")
+          print("unified memory: \(d.hasUnifiedMemory), recommendedMaxWorkingSetSize: \(d.recommendedMaxWorkingSetSize / 1_048_576) MB, maxBufferLength: \(d.maxBufferLength / 1_048_576) MB")
+          print("families: apple7 \(d.supportsFamily(.apple7)), apple8 \(d.supportsFamily(.apple8)), mac2 \(d.supportsFamily(.mac2))")
+          let n = 1024
+          let shape = [NSNumber(value: n), NSNumber(value: n)]
+          let g = MPSGraph()
+          let a = g.placeholder(shape: shape, dataType: .float16, name: nil)
+          let b = g.placeholder(shape: shape, dataType: .float16, name: nil)
+          let c = g.matrixMultiplication(primary: a, secondary: b, name: nil)
+          let q = d.makeCommandQueue()!
+          func td() -> MPSGraphTensorData {
+            MPSGraphTensorData(d.makeBuffer(length: n * n * 2, options: .storageModeShared)!, shape: shape, dataType: .float16)
+          }
+          let feeds = [a: td(), b: td()]
+          _ = g.run(with: q, feeds: feeds, targetTensors: [c], targetOperations: nil)
+          let iters = 50
+          let t0 = Date()
+          for _ in 0..<iters { _ = g.run(with: q, feeds: feeds, targetTensors: [c], targetOperations: nil) }
+          let dt = Date().timeIntervalSince(t0)
+          print(String(format: "MPSGraph fp16 1024x1024x1024 matmul: %.2f ms per run, %.2f TFLOPS", dt * 1000 / Double(iters), 2.0 * Double(n * n * n) * Double(iters) / dt / 1e12))
+          EOF
+          swift "$RUNNER_TEMP/metal.swift" || echo "Metal/MPSGraph check failed"
+          vm_stat | head -6
+
+      - name: Build dependencies and Python tools
+        run: |
+          brew install protobuf zlib abseil zstd
+          python3 -m pip install -r tests/requirements.txt
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-t1-v3
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-bt4-nnue-
+            ${{ runner.os }}-engine-networks-
+
+      - name: Networks
+        run: |
+          python3 tools/download_engine_networks.py --dest networks --cache-dir "$METALFISH_NETWORK_CACHE_DIR"
+          shasum -a 256 networks/*
+          echo "$BT4_SHA256  networks/$BT4" | shasum -a 256 -c
+
+      - name: Build the frozen engine from the freeze tag
+        run: |
+          git diff --stat paper-v2-freeze-rc1 "$FREEZE_TAG" -- src CMakeLists.txt cmake | tail -1
+          git worktree add "$RUNNER_TEMP/engine" "$FREEZE_TAG"
+          cp -R networks "$RUNNER_TEMP/engine/networks"
+          cmake -S "$RUNNER_TEMP/engine" -B "$RUNNER_TEMP/engine/build" -DCMAKE_BUILD_TYPE=Release -DUSE_METAL=ON
+          cmake --build "$RUNNER_TEMP/engine/build" --target metalfish metalfish_nn_probe -j"$(sysctl -n hw.ncpu)"
+          mkdir -p build
+          cp "$RUNNER_TEMP/engine/build/metalfish" "$RUNNER_TEMP/engine/build/metalfish_nn_probe" build/
+          cp "$RUNNER_TEMP"/engine/build/*.nnue build/ 2>/dev/null || true
+          python3 tools/paper/bundle_dylibs.py build/metalfish build/metalfish_nn_probe --lib-dir build/lib
+          shasum -a 256 build/metalfish build/metalfish_nn_probe build/lib/*
+          ./build/metalfish bench 2>&1 | tail -4 | tee "$RUNNER_TEMP/bench.txt"
+          grep -q "Nodes searched *: *$BENCH_SIGNATURE" "$RUNNER_TEMP/bench.txt" || { echo "::error::bench signature differs from $BENCH_SIGNATURE"; exit 1; }
+
+      - name: Microbenchmarks at the runner's sizes (M1 NN latency, M2 AB scaling)
+        run: |
+          mkdir -p results/paper_v2/runner_micro
+          python3 tools/paper/microbench.py nn --out results/paper_v2/runner_micro/nn_latency.json --batches 1,2,4,8,16,32 --iterations 20 --lc0 /nonexistent || true
+          python3 tools/paper/microbench.py ab --out results/paper_v2/runner_micro/ab_scaling.json --threads 1,2,3 --repeats 3 || true
+          cat results/paper_v2/runner_micro/*.json | head -150
+
+      - name: One traced hybrid search (3 threads, 30+0.3 clock)
+        run: |
+          W="$(pwd)/networks/$BT4"
+          /usr/bin/time -l sh -c "( printf 'uci\nsetoption name UseHybridSearch value true\nsetoption name NNWeights value $W\nsetoption name HybridMCTSThreads value 1\nsetoption name HybridTrace value true\nsetoption name Threads value 3\nsetoption name Hash value 1024\nisready\nposition startpos moves e2e4 c7c5 g1f3 d7d6\ngo wtime 29000 btime 29000 winc 300 binc 300\n'; sleep 12; printf 'position startpos moves e2e4 c7c5 g1f3 d7d6 d2d4\ngo movetime 5000\n'; sleep 8; printf 'quit\n' ) | ./build/metalfish > $RUNNER_TEMP/hybrid.txt 2>&1" 2> "$RUNNER_TEMP/time.txt"
+          grep -vE '^info depth [0-9]+ seldepth' "$RUNNER_TEMP/hybrid.txt" | tail -60
+          grep -E 'maximum resident|real' "$RUNNER_TEMP/time.txt" || tail -20 "$RUNNER_TEMP/time.txt"
+
+      - name: Game pace (2 pairs, Hybrid(3) vs AB(3), 30+0.3, Hash 1024)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p reference/fastchess reference/books/unzipped
+          gh release download "$FASTCHESS_RELEASE" -R Disservin/fastchess -p fastchess-mac-arm64.tar -D "$RUNNER_TEMP"
+          tar -xf "$RUNNER_TEMP/fastchess-mac-arm64.tar" -C "$RUNNER_TEMP"
+          find "$RUNNER_TEMP" -name fastchess -type f -perm -u+x -exec cp {} reference/fastchess/fastchess \;
+          shasum -a 256 reference/fastchess/fastchess
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/book.zip" "$BOOK_URL"
+          unzip -o -q "$RUNNER_TEMP/book.zip" -d reference/books/unzipped
+          echo "$BOOK_SHA256  reference/books/unzipped/UHO_Lichess_4852_v1.epd" | shasum -a 256 -c
+          python3 - <<'EOF'
+          import json
+          spec = json.load(open("docs/paper_v2/experiments.json"))
+          spec["cells"].append({"id": "PROBE", "tc": "30+0.3", "pairs": 2, "hash_mb": 1024,
+                                "a": {"engine": "Hybrid", "threads": 3}, "b": {"engine": "AB", "threads": 3}})
+          json.dump(spec, open("/tmp/probe_experiments.json", "w"), indent=1)
+          EOF
+          python3 tools/paper/run_cell.py PROBE --manifest /tmp/probe_experiments.json --blocks 1 --engine-log
+          grep -E '^\[(Result|Termination|GameDuration|PlyCount)' results/paper_v2/PROBE/games.pgn || true
+          python3 -c "import json; m=json.load(open('results/paper_v2/PROBE/manifest.json')); print(json.dumps(m.get('hardware'), indent=1)); print(m.get('fastchess_version'))"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-engine
+          path: |
+            results/paper_v2/runner_micro
+            results/paper_v2/PROBE/summary.json
+            results/paper_v2/PROBE/manifest.json
+            results/paper_v2/PROBE/games.pgn
+          retention-days: 30
+
+  probe-judges:
+    name: Probe the oracle judges
+    if: github.event_name == 'push' || inputs.task == 'probe'
+    runs-on: macos-26
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Judges and Python tools
+        run: |
+          python3 -m pip install -r tests/requirements.txt
+          brew install lc0
+          brew list --versions lc0
+          git clone -q --depth 1 --branch sf_19 https://github.com/official-stockfish/Stockfish.git "$RUNNER_TEMP/sf19"
+          make -C "$RUNNER_TEMP/sf19/src" -j"$(sysctl -n hw.ncpu)" profile-build ARCH=apple-silicon > "$RUNNER_TEMP/sf_build.txt" 2>&1 || { tail -30 "$RUNNER_TEMP/sf_build.txt"; exit 1; }
+          "$RUNNER_TEMP/sf19/src/stockfish" bench 2>&1 | tail -4
+          echo compiler | "$RUNNER_TEMP/sf19/src/stockfish" | tail -5
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-t1-v3
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-bt4-nnue-
+            ${{ runner.os }}-engine-networks-
+
+      - uses: actions/cache@v4
+        with:
+          path: syzygy
+          key: syzygy-345-v1
+
+      - name: Networks and Syzygy 3-4-5
+        run: |
+          python3 tools/download_engine_networks.py --bt4-only --dest networks --cache-dir "$METALFISH_NETWORK_CACHE_DIR"
+          echo "$BT4_SHA256  networks/$BT4" | shasum -a 256 -c
+          if [ "$(ls syzygy 2>/dev/null | wc -l)" -lt 290 ]; then
+            mkdir -p syzygy
+            for base in https://tablebase.lichess.ovh/tables/standard/3-4-5 http://tablebase.sesse.net/syzygy/3-4-5; do
+              curl -fsSL "$base/" | grep -oE 'href="[^"/]+\.rtb[wz]"' | cut -d'"' -f2 | sort -u > "$RUNNER_TEMP/tb.txt" || true
+              echo "$base: $(wc -l < "$RUNNER_TEMP/tb.txt") files listed"
+              [ "$(wc -l < "$RUNNER_TEMP/tb.txt")" -ge 290 ] || continue
+              (cd syzygy && xargs -P 8 -I{} curl -fsSL --retry 3 -O "$base/{}" < "$RUNNER_TEMP/tb.txt") && break
+            done
+          fi
+          ls syzygy | wc -l; du -sh syzygy
+
+      - name: Lc0 on the runner GPU
+        run: |
+          LC0="$(brew --prefix)/bin/lc0"
+          for b in 1 32; do
+            "$LC0" backendbench --backend=metal --weights="networks/$BT4" --start-batch-size=$b --max-batch-size=$b --batches=50 2>&1 | grep -vi "mps module" | tail -4 || true
+          done
+
+      - name: Oracle wall time per position (first 2 sampled positions; timings only)
+        run: |
+          mkdir -p "$RUNNER_TEMP/oracle"
+          gunzip -c docs/paper_v2/data/rq6b_disagreements.jsonl.gz > "$RUNNER_TEMP/oracle/disagreements.jsonl"
+          shasum -a 256 docs/paper_v2/data/rq6b_disagreements.jsonl.gz
+          LC0="$(brew --prefix)/bin/lc0"
+          start=$(date +%s)
+          python3 tools/paper/oracle_probe.py "$RUNNER_TEMP/oracle/disagreements.jsonl" --out "$RUNNER_TEMP/oracle/probe.jsonl" \
+            --judge sf19="$RUNNER_TEMP/sf19/src/stockfish" --judge-option sf19:Threads=3 \
+            --judge-option sf19:Hash=2048 --judge-option sf19:SyzygyPath=syzygy --movetime 60000 \
+            --judge lc0="$LC0" --judge-arg lc0:--backend=metal \
+            --judge-arg lc0:--weights="networks/$BT4" --nodes lc0:30000 \
+            --judge-option lc0:SmartPruningFactor=0 \
+            --sample 600 --seed 1 --limit 2 > /dev/null 2> "$RUNNER_TEMP/oracle/stderr.txt" || tail -20 "$RUNNER_TEMP/oracle/stderr.txt"
+          echo "positions judged: $(wc -l < "$RUNNER_TEMP/oracle/probe.jsonl"), wall: $(( $(date +%s) - start )) s"
+          grep -vi "mps module" "$RUNNER_TEMP/oracle/stderr.txt" | grep -v '^\s*$' | head -5
