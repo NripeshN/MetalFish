@@ -543,3 +543,67 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     other judge's evaluations score it. The projected Elo stays a labelled conversion of the
     per-position expected-score bound, and the paper states that it is not a prediction of game
     results. The positions, judges, budgets and sampling are unchanged; no oracle output exists yet.
+15. **2026-11-04 — the remaining measurements run on GitHub-hosted Apple Silicon runners (written
+    before RQ6b, RQ6d or RQ2c has been read: RQ6b had judged 74 of its 600 positions on the
+    workstation, unread, and no RQ6d or RQ2c game had been played).** At the author's request the
+    workstation runs no further measurement. The oracle study and every later game cell run on
+    GitHub-hosted macOS arm64 runners through `.github/workflows/paper-runner-cells.yml`: each job is
+    a fresh virtual machine of the `macos-26` image, which a probe on 2026-11-04 (run 41832147565)
+    found to be an Apple M1 virtual machine (`VirtualMac2,1`) with 3 cores and 7 GB of memory, running macOS 26.6.2 (25G83) with Xcode 26.6, whose GPU is Apple's paravirtualised Metal device (an FP16 1024×1024×1024 MPSGraph matrix product took 7.1 ms, 0.30 TFLOPS; the BT4 network evaluates one position in 21.4 ms in FP16, against 7.6 ms on the workstation, and levels off near 99 positions/s; alpha-beta searches 1.4 M nodes/s with 3 threads, and the frozen source's bench signature is unchanged), and each job runs one measurement at concurrency 1. A runner is a
+    different machine from the workstation (three cores instead of twelve, a smaller GPU behind a
+    virtualisation layer, 7 GB of memory instead of 32), so the runner cells form a second hardware
+    configuration: they are compared only with each other, never pooled with or contrasted against a
+    workstation cell, and they leave every workstation result as reported. Decisions:
+    (a) **RQ6b.** The workstation run was stopped on 2026-11-04 at 12:36 UTC after 74 of 600
+    positions; its rows were not read and enter no estimate. RQ6b is re-run in full on the runners,
+    on the same sample: the RQ1a and RQ1b disagreement records, selected by `oracle_probe.py`'s own
+    rule and kept in its order and fields, are committed as `docs/paper_v2/data/rq6b_disagreements.jsonl.gz`
+    (42,476 records; SHA-256 `cf578883349b66213aae121176c581431728c47384477f01bd585c47cdf86005`), and the stratified sample drawn from them with the
+    registered seed begins with the 74 workstation positions in the same order. The judges keep
+    their registered settings except where the runner forces a change: Stockfish 19 is built on a
+    runner from tag `sf_19` (bench 2,497,913) and searches 60 s with the runner's 3 threads instead
+    of 8 (Hash 2048 MB, Syzygy 3-4-5, restricted multi-PV over both candidates), so it reaches fewer
+    nodes; Lc0 0.32.1 keeps the BT4 network, the Metal backend, 30,000 nodes for each candidate from a
+    fresh tree and smart pruning off, so only its speed changes. The sample is judged in
+    {{SHARDS}} contiguous shards (`oracle_probe.py --shard i/{{SHARDS}}`), one runner each, and the
+    shard outputs are joined in shard order, which is the order of a single run, before the one
+    summary. The 74 workstation rows are compared, judge by judge, with the runner rows for the same
+    positions as a check of judge stability across the two machines (verdict agreement and the
+    correlation of the candidates' scores); the check enters no estimate.
+    (b) **Game cells.** A runner cell keeps every registered setting (book, seed 20261007 and
+    opening order, 30+0.3, move overhead 50 ms, adjudication, a fresh engine process per game,
+    concurrency 1, the frozen source) except: T = 3, the runner's core count, wherever the
+    workstation cells use T = 8, so `Hybrid(3)` and `AB(3)`, and `Hybrid-split(3)` is one MCTS worker
+    and T − 2 = 1 alpha-beta thread; Hash 1024 MB per engine instead of 2048, because the probe measured the hybrid's resident size at 2.75 GB with a 1024 MB table, so two 2048 MB tables would take the two engine processes to about 6 GB of the runner's 7 GB, and paging once cost this programme a spurious −42 Elo;
+    and 500 pairs in 10 blocks of 50 pairs, one runner per block. The registered comparisons need
+    both arms on one machine, so the runner also plays their baselines: RQ1a-R (the shipped hybrid at
+    T = 3) for the RQ6d-R contrast of amendment 12(e), and RQ2a-R and RQ2b-R for the check of the
+    direct RQ2c-R against RQ2b-R + RQ2a-R. All five cells play the same 500 openings (the first 500
+    of RQ1a's order), so every contrast is over fully shared openings. Order: RQ6b-R; then RQ1a-R
+    with RQ6d-R; then RQ2a-R, RQ2b-R and RQ2c-R. RQ3 needs more threads than a runner has and RQ4
+    needs C12, so neither is played; RQ1c, RQ5a and RQ8, if played, follow the same rules.
+    (c) **Blocks and runners.** The blocks of the cells that are compared run interleaved (block 0 of
+    each cell, then block 1, …) on as many runners at once as the account allows, so that variation
+    between runners and image updates falls on both arms alike. Each block records its runner
+    (image version, model, cores, memory, GPU) in `runner.json`, and samples the runner's busiest
+    processes, memory, swap and GPU utilisation once a minute (`vm_sampler.log`, health only). The
+    block-consistency test of amendment 12(g) becomes Cochran's Q over the 10 block estimates
+    (9 df), with the block bootstrap as before; each cell is also reported by image version for
+    every version with at least 100 pairs, as for the macOS builds of amendment 13.
+    (d) **Binary.** The engine is built once on a runner from tag `paper-v2-freeze-rc2` (source
+    identical to rc1), its Homebrew libraries bundled, its bench signature checked (2,497,913), and
+    that one build plays every block of every runner cell (its SHA-256 is in each block's manifest;
+    03 C20). The workstation binary is not used, because it was built for the M2 against the
+    workstation's libraries.
+    (e) **Host load.** A runner runs nothing of ours besides its one measurement, so the load gate,
+    the in-chunk watchdog and the host-load analyses of amendments 8–10 and 12(b)(i–ii) do not apply;
+    the forfeit analyses of 12(b)(iii) and the 0.5% forfeit health limit do. What other virtual
+    machines on the same physical host do cannot be observed or controlled; this is a limitation of
+    the runner cells, and the per-block estimates and Q show the heterogeneity it causes.
+    (f) **Reading.** The jobs' logs are public while a cell runs, so they print health only (games,
+    forfeits, pace, GPU activity) and the scores go only to the blocks' artifacts. Each runner cell
+    is read once, after its last block, when its blocks are joined
+    (`tools/paper/fetch_runner_cell.py`). All runner cells are exploratory, with no alpha of their
+    own; RQ6d-R − RQ1a-R is reported as in 12(e), and the direct RQ2c-R next to RQ2b-R + RQ2a-R. The
+    microbenchmarks M1 and M2 are measured on a runner with the campaign's build and reported with
+    the runner cells; M3–M6 come from the runner traces as for the workstation.

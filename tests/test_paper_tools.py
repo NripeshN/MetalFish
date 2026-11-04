@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import math
 import pathlib
+import re
 import sys
 import tempfile
 import unittest
@@ -351,6 +354,60 @@ class RunnerBookkeepingTest(unittest.TestCase):
                 [2],
             )
 
+    def test_cell_blocks_set_the_start_openings(self):
+        # a cell's own "blocks" overrides the default, so a cell split into one block per
+        # runner (amendment 15) plays contiguous slices of the same seeded opening order
+        spec = {
+            "defaults": {
+                "manager": "fc",
+                "book": "b.epd",
+                "book_format": "epd",
+                "book_order": "random",
+                "seed": 1,
+                "concurrency": 1,
+                "games_per_round": 2,
+                "draw": "movenumber=34",
+                "resign": "movecount=3",
+                "maxmoves": 200,
+                "hash_mb": 2048,
+                "report": "penta=true",
+                "ratinginterval": 50,
+                "blocks": 4,
+            },
+            "engines": {"E": {"cmd": "/bin/echo", "options": {}}},
+            "cells": [
+                {
+                    "id": "T-R",
+                    "tc": "30+0.3",
+                    "pairs": 500,
+                    "blocks": 10,
+                    "hash_mb": 1024,
+                    "a": {"engine": "E", "threads": 3},
+                    "b": {"engine": "E", "threads": 1},
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as d:
+            m = pathlib.Path(d) / "exp.json"
+            m.write_text(json.dumps(spec))
+            saved = self.rc.RESULTS_ROOT
+            self.rc.RESULTS_ROOT = pathlib.Path(d)
+            buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(buf):
+                    rc = self.rc.main(["T-R", "--manifest", str(m), "--dry-run"])
+            finally:
+                self.rc.RESULTS_ROOT = saved
+        self.assertEqual(rc, 0)
+        blocks = re.findall(
+            r"block (\d+): (\d+) pairs, openings start=(\d+)", buf.getvalue()
+        )
+        self.assertEqual(len(blocks), 10)
+        self.assertEqual(blocks[0], ("0", "50", "1"))
+        self.assertEqual(blocks[3], ("3", "50", "151"))
+        self.assertEqual(blocks[9], ("9", "50", "451"))
+        self.assertIn("option.Hash=1024", buf.getvalue())
+
     def test_block_ranges_and_game_time(self):
         hist = {
             "history": [
@@ -654,6 +711,128 @@ class OracleSamplingTest(unittest.TestCase):
         sample, info = self.op.stratified_sample(self._records()[:10], 600, seed=1)
         self.assertEqual(len(sample), 10)
         self.assertEqual(info["requested"], 10)
+
+
+class OracleShardTest(unittest.TestCase):
+    """Pins the contiguous shards of tools/paper/oracle_probe.py (protocol amendment 15)."""
+
+    def setUp(self):
+        try:
+            import oracle_probe  # noqa: F401
+        except ImportError as exc:  # python-chess missing
+            self.skipTest(f"oracle_probe unavailable: {exc}")
+        self.op = sys.modules["oracle_probe"]
+
+    def test_shards_partition_the_sample_in_order(self):
+        for n in (600, 7, 0):
+            items = list(range(n))
+            for k in (1, 3, 20):
+                parts = [self.op.shard_slice(items, f"{i}/{k}") for i in range(k)]
+                self.assertEqual([x for p in parts for x in p], items)
+                sizes = [len(p) for p in parts]
+                self.assertLessEqual(max(sizes) - min(sizes), 1)
+
+    def test_bad_shard_is_rejected(self):
+        for spec in ("3/3", "-1/3", "0/0"):
+            with self.assertRaises((ValueError, ZeroDivisionError)):
+                self.op.shard_slice([1, 2, 3], spec)
+
+
+class RunnerCampaignTest(unittest.TestCase):
+    """Pins the runner campaign's job plan and the joining of a runner cell's blocks
+    (tools/paper/runner_plan.py, tools/paper/fetch_runner_cell.py; protocol amendment 15)."""
+
+    def setUp(self):
+        import fetch_runner_cell
+        import runner_plan
+
+        self.plan, self.fetch = runner_plan, fetch_runner_cell
+
+    def test_games_are_interleaved_block_by_block(self):
+        spec = {
+            "cells": [
+                {"id": "X-R", "machine": "runner", "blocks": 3},
+                {"id": "Y-R", "machine": "runner", "blocks": 2},
+                {"id": "Z", "blocks": 4},
+            ]
+        }
+        jobs = self.plan.games_matrix(spec, ["X-R", "Y-R"], None)
+        self.assertEqual(
+            [(j["cell"], j["block"]) for j in jobs],
+            [("X-R", 0), ("Y-R", 0), ("X-R", 1), ("Y-R", 1), ("X-R", 2)],
+        )
+        jobs = self.plan.games_matrix(spec, ["X-R", "Y-R"], [1])
+        self.assertEqual([(j["cell"], j["block"]) for j in jobs], [("X-R", 1), ("Y-R", 1)])
+        with self.assertRaises(SystemExit):
+            self.plan.games_matrix(spec, ["Z"], None)  # a workstation cell never runs here
+        self.assertEqual(self.plan.oracle_matrix(4, [0, 3]), [{"shard": 0}, {"shard": 3}])
+
+    def _block(self, root, b, results, sha="aa"):
+        d = pathlib.Path(root) / f"games-T-R-b{b}"
+        d.mkdir(parents=True)
+        games = []
+        for i, (r1, r2) in enumerate(results):  # each block's rounds restart at 1
+            games.append(pgn_game(i + 1, "AB-T1", "AB-T3", r1))
+            games.append(pgn_game(i + 1, "AB-T3", "AB-T1", r2))
+        (d / "games.pgn").write_text("".join(games))
+        arms = {"a": {"sha256": sha}, "b": {"sha256": sha}}
+        hist = [{"block": b, "games_before": 0, "start_opening": 1 + 2 * b}]
+        (d / "manifest.json").write_text(json.dumps({"arms": arms, "history": hist}))
+        (d / "fastchess_report.txt").write_text(f"# block {b} (0.50 h, exit 0)\nok\n")
+        (d / "runner.json").write_text(json.dumps({"image": f"macos-26 {b}"}))
+        return d
+
+    def test_blocks_join_in_order_with_cumulative_history(self):
+        cell = {
+            "id": "T-R",
+            "machine": "runner",
+            "pairs": 4,
+            "blocks": 2,
+            "a": {"engine": "AB", "threads": 1},
+            "b": {"engine": "AB", "threads": 3},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            blocks = {
+                0: self._block(d, 0, [("1-0", "0-1"), ("1/2-1/2", "1/2-1/2")]),
+                1: self._block(d, 1, [("0-1", "1-0"), ("1-0", "1-0")]),
+            }
+            out = pathlib.Path(d) / "out"
+            summary = self.fetch.join_cell("T-R", cell, blocks, out)
+            self.assertEqual(summary["stats"]["games"], 8)
+            self.assertEqual(summary["stats"]["pairs"], 4)
+            m = json.load(open(out / "manifest.json"))
+            self.assertEqual([h["games_before"] for h in m["history"]], [0, 4])
+            self.assertEqual([r["image"] for r in m["runner_blocks"]], ["macos-26 0", "macos-26 1"])
+            self.assertEqual([r["block"] for r in summary["blocks_run"]], [0, 1])
+            pgn = (out / "games.pgn").read_text()
+            self.assertLess(pgn.index('[Result "1-0"]'), pgn.index('[Result "1/2-1/2"]'))
+            self.assertFalse((out / "engines.log").exists())
+            with self.assertRaises(SystemExit):  # a joined cell is written once
+                self.fetch.join_cell("T-R", cell, blocks, out)
+
+    def test_incomplete_or_mixed_blocks_are_refused(self):
+        cell = {
+            "id": "T-R",
+            "machine": "runner",
+            "pairs": 4,
+            "blocks": 2,
+            "a": {"engine": "AB", "threads": 1},
+            "b": {"engine": "AB", "threads": 3},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            short = {
+                0: self._block(d, 0, [("1-0", "0-1"), ("1-0", "0-1")]),
+                1: self._block(d, 1, [("1-0", "0-1")]),
+            }
+            with self.assertRaises(SystemExit):
+                self.fetch.join_cell("T-R", cell, short, pathlib.Path(d) / "o1")
+        with tempfile.TemporaryDirectory() as d:
+            mixed = {
+                0: self._block(d, 0, [("1-0", "0-1"), ("1-0", "0-1")], sha="aa"),
+                1: self._block(d, 1, [("1-0", "0-1"), ("1-0", "0-1")], sha="bb"),
+            }
+            with self.assertRaises(SystemExit):
+                self.fetch.join_cell("T-R", cell, mixed, pathlib.Path(d) / "o2")
 
 
 class FakeJudge:

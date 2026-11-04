@@ -10,7 +10,7 @@ Creates results/paper_v2/<cell_id>/ with:
   fastchess_report.txt   fastchess's own final report(s)
   summary.json           pentanomial statistics (tools/paper/penta_stats.py) + telemetry summary
 
-Blocks: the cell's pairs are split into N blocks (default from experiments.json
+Blocks: the cell's pairs are split into N blocks (the cell's "blocks", else experiments.json
 "defaults.blocks"); block b uses `-openings ... start=<offset>` so blocks draw disjoint
 openings from the same seeded shuffle. Run blocks of different cells interleaved by calling
 this script with --block b for each (b is 0-based); without --block all blocks run back to
@@ -492,6 +492,40 @@ def note_resume(manifest_path: pathlib.Path, block: int, info: Dict) -> None:
         json.dump(data, fh, indent=2)
 
 
+def write_summary(
+    cell_id: str, cell: Dict, out: pathlib.Path, reports: List[Dict]
+) -> Dict:
+    """summary.json from the cell's games.pgn (all blocks so far) and, when an engines.log is
+    present, the hybrid telemetry (moves.jsonl is rewritten from the log)."""
+    sys.path.insert(0, str(REPO / "tools" / "paper"))
+    import parse_hybrid_trace  # noqa: E402
+    import penta_stats  # noqa: E402
+
+    label_a = arm_label(cell["a"])
+    label_b = arm_label(cell["b"])
+    if label_a == label_b:
+        label_a += "-A"
+    games = penta_stats.read_games(str(out / "games.pgn"))
+    stats = penta_stats.compute(games, label_a)
+    summary = {
+        "cell": cell_id,
+        "arm_a": label_a,
+        "arm_b": label_b,
+        "blocks_run": reports,
+        "stats": stats,
+        "finished": dt.datetime.now().astimezone().isoformat(),
+    }
+    if (out / "engines.log").exists():
+        recs = parse_hybrid_trace.parse(str(out / "engines.log"))
+        summary["telemetry"] = parse_hybrid_trace.summarise(recs)
+        with open(out / "moves.jsonl", "w") as fh:
+            for r in recs:
+                fh.write(json.dumps(r) + "\n")
+    with open(out / "summary.json", "w") as fh:
+        json.dump(summary, fh, indent=2)
+    return summary
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -512,6 +546,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="log engine I/O (needed for hybrid traces)",
     )
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--blind",
+        action="store_true",
+        help="print neither fastchess's report nor the statistics (both are still written to "
+        "fastchess_report.txt and summary.json): for runs whose logs are public before the "
+        "cell is read (protocol amendment 15)",
+    )
     ap.add_argument(
         "--max-pairs",
         type=int,
@@ -552,7 +593,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 2
     pairs_total = args.pairs or cell["pairs"]
-    nblocks = args.blocks or int(defaults.get("blocks", 1))
+    nblocks = args.blocks or int(cell.get("blocks", defaults.get("blocks", 1)))
     per_block = -(-pairs_total // nblocks)
     out = RESULTS_ROOT / (args.cell_id + (f"_{args.tag}" if args.tag else ""))
     out.mkdir(parents=True, exist_ok=True)
@@ -675,41 +716,20 @@ def main(argv: Optional[List[str]] = None) -> int:
             fh.write(
                 f"# block {b} ({elapsed/3600:.2f} h, exit {proc.returncode})\n{tail}\n{proc.stderr[-2000:]}\n"
             )
-        print(tail)
+        if not args.blind:
+            print(tail)
         reports.append(
             {"block": b, "pairs": pairs, "elapsed_s": elapsed, "exit": proc.returncode}
         )
 
     if args.dry_run or args.status:
         return 0
-    # summary from the PGN (all blocks so far)
-    sys.path.insert(0, str(REPO / "tools" / "paper"))
-    import parse_hybrid_trace  # noqa: E402
+    summary = write_summary(args.cell_id, cell, out, reports)
+    if args.blind:
+        return 0
     import penta_stats  # noqa: E402
 
-    label_a = arm_label(cell["a"])
-    label_b = arm_label(cell["b"])
-    if label_a == label_b:
-        label_a += "-A"
-    games = penta_stats.read_games(str(out / "games.pgn"))
-    stats = penta_stats.compute(games, label_a)
-    summary = {
-        "cell": args.cell_id,
-        "arm_a": label_a,
-        "arm_b": label_b,
-        "blocks_run": reports,
-        "stats": stats,
-        "finished": dt.datetime.now().astimezone().isoformat(),
-    }
-    if (out / "engines.log").exists():
-        recs = parse_hybrid_trace.parse(str(out / "engines.log"))
-        summary["telemetry"] = parse_hybrid_trace.summarise(recs)
-        with open(out / "moves.jsonl", "w") as fh:
-            for r in recs:
-                fh.write(json.dumps(r) + "\n")
-    with open(out / "summary.json", "w") as fh:
-        json.dump(summary, fh, indent=2)
-    print(penta_stats.fmt(stats))
+    print(penta_stats.fmt(summary["stats"]))
     if "telemetry" in summary:
         print(json.dumps(summary["telemetry"], indent=2))
     return 0

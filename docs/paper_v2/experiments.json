@@ -8,7 +8,8 @@
     "est_hours assume 0.8 min/game at 10+0.1, 1.9 at 30+0.3, 3.7 at 60+0.6, concurrency 1, incl. engine restarts.",
     "RQ2c (hybrid oversubscription) requires engine option HybridOversubscribe (added 2026-10-12).",
     "All MetalFish arms get option 'Move Overhead'=defaults.move_overhead_ms (50 ms) unless the cell overrides it; a 12 ms overrun forfeit was observed at 10+0.1 with the 10 ms default.",
-    "2026-10-13 amendment (protocol 02 §11.3): the shipped hybrid is oversubscribed (HybridOversubscribe=true by default after gate L9): alpha-beta keeps all T UCI threads and the MCTS worker is an extra thread that mostly blocks on GPU inference. Hybrid arms therefore no longer pin HybridABThreads; the 6+1 split (HybridOversubscribe=false, HybridABThreads=T-2) is the ablation used by RQ2b and RQ2c."
+    "2026-10-13 amendment (protocol 02 §11.3): the shipped hybrid is oversubscribed (HybridOversubscribe=true by default after gate L9): alpha-beta keeps all T UCI threads and the MCTS worker is an extra thread that mostly blocks on GPU inference. Hybrid arms therefore no longer pin HybridABThreads; the 6+1 split (HybridOversubscribe=false, HybridABThreads=T-2) is the ablation used by RQ2b and RQ2c.",
+    "2026-11-04 amendment (protocol 02 §11.15): the remaining measurements run on GitHub-hosted macOS arm64 runners via .github/workflows/paper-runner-cells.yml. Runner cells carry \"machine\": \"runner\" and their own \"blocks\" (one block per runner job); they are compared only with each other."
   ],
   "defaults": {
     "manager": "reference/fastchess/fastchess",
@@ -503,6 +504,118 @@
       ],
       "rating": "ordo -a 0 -A \"SF19\" -s 1000",
       "est_hours": 57
+    },
+    {
+      "id": "RQ1a-R",
+      "rq": "RQ1",
+      "priority": "SHOULD",
+      "machine": "runner",
+      "tc": "30+0.3",
+      "pairs": 500,
+      "blocks": 10,
+      "hash_mb": 1024,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 3
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 3
+      },
+      "est_hours": 32,
+      "note": "Protocol amendment 15 (2026-11-04): played on GitHub-hosted macOS arm64 runners (Apple M1 VM, 3 cores, 7 GB), one block per runner, T = 3 for the protocol's T = 8, Hash 1024 MB per engine; compared only with runner cells. RQ1a's arms on the runner over the first 500 of RQ1a's openings: the same-machine baseline of RQ6d-R and RQ2c-R."
+    },
+    {
+      "id": "RQ6d-R",
+      "rq": "RQ6",
+      "priority": "SHOULD",
+      "machine": "runner",
+      "tc": "30+0.3",
+      "pairs": 500,
+      "blocks": 10,
+      "hash_mb": 1024,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 3,
+        "options": {
+          "HybridMCTSABRootHints": "false",
+          "HybridABCandidateVerifyMs": "0"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 3
+      },
+      "est_hours": 32,
+      "note": "Protocol amendment 15 (2026-11-04): played on GitHub-hosted macOS arm64 runners (Apple M1 VM, 3 cores, 7 GB), one block per runner, T = 3 for the protocol's T = 8, Hash 1024 MB per engine; compared only with runner cells. RQ6d on the runner; RQ6d-R minus RQ1a-R is the across-match contrast of amendment 12(e)."
+    },
+    {
+      "id": "RQ2a-R",
+      "rq": "RQ2",
+      "priority": "SHOULD",
+      "machine": "runner",
+      "tc": "30+0.3",
+      "pairs": 500,
+      "blocks": 10,
+      "hash_mb": 1024,
+      "a": {
+        "engine": "AB",
+        "threads": 1
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 3
+      },
+      "est_hours": 32,
+      "note": "Protocol amendment 15 (2026-11-04): played on GitHub-hosted macOS arm64 runners (Apple M1 VM, 3 cores, 7 GB), one block per runner, T = 3 for the protocol's T = 8, Hash 1024 MB per engine; compared only with runner cells. RQ2a on the runner: AB(T-2) vs AB(T) at T = 3."
+    },
+    {
+      "id": "RQ2b-R",
+      "rq": "RQ2",
+      "priority": "SHOULD",
+      "machine": "runner",
+      "tc": "30+0.3",
+      "pairs": 500,
+      "blocks": 10,
+      "hash_mb": 1024,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 3,
+        "options": {
+          "HybridOversubscribe": "false",
+          "HybridABThreads": "1"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 1
+      },
+      "est_hours": 32,
+      "note": "Protocol amendment 15 (2026-11-04): played on GitHub-hosted macOS arm64 runners (Apple M1 VM, 3 cores, 7 GB), one block per runner, T = 3 for the protocol's T = 8, Hash 1024 MB per engine; compared only with runner cells. RQ2b on the runner: Hybrid-split(3) (1 MCTS worker + 1 AB thread) vs AB(1)."
+    },
+    {
+      "id": "RQ2c-R",
+      "rq": "RQ2",
+      "priority": "SHOULD",
+      "machine": "runner",
+      "tc": "30+0.3",
+      "pairs": 500,
+      "blocks": 10,
+      "hash_mb": 1024,
+      "a": {
+        "engine": "Hybrid",
+        "threads": 3,
+        "options": {
+          "HybridOversubscribe": "false",
+          "HybridABThreads": "1"
+        }
+      },
+      "b": {
+        "engine": "AB",
+        "threads": 3
+      },
+      "est_hours": 32,
+      "note": "Protocol amendment 15 (2026-11-04): played on GitHub-hosted macOS arm64 runners (Apple M1 VM, 3 cores, 7 GB), one block per runner, T = 3 for the protocol's T = 8, Hash 1024 MB per engine; compared only with runner cells. RQ2c on the runner: Hybrid-split(3) vs AB(3); direct vs RQ2b-R + RQ2a-R derived."
     }
   ],
   "non_game_tasks": [
@@ -529,6 +642,35 @@
         }
       ],
       "est_hours": 20
+    },
+    {
+      "id": "RQ6b-R",
+      "priority": "MUST",
+      "type": "oracle",
+      "machine": "runner",
+      "positions": 600,
+      "source_cells": [
+        "RQ1a",
+        "RQ1b"
+      ],
+      "input": "docs/paper_v2/data/rq6b_disagreements.jsonl.gz",
+      "shards": 30,
+      "judges": [
+        {
+          "engine": "SF19",
+          "threads": 3,
+          "hash_mb": 2048,
+          "movetime_ms": 60000,
+          "multipv": 2,
+          "syzygy": "syzygy/"
+        },
+        {
+          "engine": "Lc0def",
+          "version": "0.32.1",
+          "nodes": 30000
+        }
+      ],
+      "note": "Protocol amendment 15: RQ6b re-run in full on GitHub-hosted M1 runners (the workstation run stopped at 74 of 600 positions, unread); same sample, Stockfish 19 with the runner's 3 threads; the 74 workstation rows are a judge-stability check only."
     },
     {
       "id": "RQ7",
