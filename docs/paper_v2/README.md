@@ -79,3 +79,9 @@ designed so the paper is publishable whichever way the measurements come out.
   15 (g) adds RQ1c-R and RQ5a-R and the workflow's `micro` task (M1/M2 with the campaign's build);
   15 (h) runs each block and shard as its own workflow run, resuming failed attempts, because GitHub
   cancels macOS arm64 jobs it cannot place.
+- **2026-11-06** — The oracle's Lc0 judge failed on the runners' paravirtualised GPU. Lc0 recorded an
+  error on 110 of the 116 positions judged in 47 hours; Stockfish 19 recorded none. The campaign was
+  stopped (amendment 15 (i), 08 §F). Every runner-GPU Lc0 judgment is discarded. `oracle_probe.py` now
+  restarts a judge that dies, overruns or reports a GPU error, and judges the position again. A shard
+  succeeds only when complete. The game blocks count GPU errors in the engines' stderr. The game cells
+  run before the oracle, whose Lc0 backend follows a CPU-backend probe (`judge-probe`).

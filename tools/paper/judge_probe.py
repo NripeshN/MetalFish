@@ -31,28 +31,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import oracle_probe  # noqa: E402
 
-GPU_ERROR_MARKS = (
-    "command buffer exited with error",
-    "kIOGPUCommandBuffer",
-    "MTLCommandBufferErrorDomain",
-    "failed assertion",
-)
-
-
-class StderrWatch(logging.Handler):
-    """Echo the engines' stderr lines (python-chess logs them on `chess.engine`) and count those
-    that report a GPU error."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.gpu_errors = 0
-
-    def emit(self, record: logging.LogRecord) -> None:
-        msg = record.getMessage()
-        if any(m in msg for m in GPU_ERROR_MARKS):
-            self.gpu_errors += 1
-        print(msg, file=sys.stderr)
-
 
 def outside_sample(path: str, n: int, seed: int) -> List[Dict]:
     """N disagreement records not in the registered sample (oracle_probe's filter, sample size 600,
@@ -104,7 +82,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--fen", action="append", default=[], help="time one search of FEN")
     args = ap.parse_args(argv)
 
-    watch = StderrWatch()
+    watch = oracle_probe.StderrWatch()
     log = logging.getLogger("chess.engine")
     log.addHandler(watch)
     log.propagate = False
@@ -128,7 +106,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             if args.fen
             else outside_sample(args.disagreements, args.positions, args.seed)
         ):
-            before = watch.gpu_errors
+            before = sum(watch.by_engine.values())
             t0 = time.time()
             try:
                 j = oracle_probe.judge_position(
@@ -148,7 +126,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             times.append(dt)
             print(
                 f"position {i}: {dt / 60:.1f} min for the position and both candidates; "
-                f"root nodes {nodes}; GPU error lines {watch.gpu_errors - before}",
+                f"root nodes {nodes}; GPU error lines {sum(watch.by_engine.values()) - before}",
                 flush=True,
             )
     finally:
@@ -157,10 +135,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(
             f"{len(times)} positions: mean {statistics.mean(times) / 60:.1f} min, "
             f"median {statistics.median(times) / 60:.1f} min, max {max(times) / 60:.1f} min; "
-            f"crashes {crashes}; GPU error lines {watch.gpu_errors}",
+            f"crashes {crashes}; GPU error lines {sum(watch.by_engine.values())}",
             flush=True,
         )
-    return 1 if crashes or watch.gpu_errors else 0
+    return 1 if crashes or any(watch.by_engine.values()) else 0
 
 
 if __name__ == "__main__":

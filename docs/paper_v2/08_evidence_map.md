@@ -761,3 +761,16 @@ games or judgments enters an estimate. Values are given for the two probe runner
 
 The two probe runners differed by 10–40% in GPU and CPU throughput, which is why amendment 15 (c)
 interleaves the blocks of the cells it compares.
+
+**Oracle judge failure on the runners' GPU** (2026-11-04 15:41 to 2026-11-06 14:38 UTC; amendment 15 (i)).
+Health only: counts and error messages from the shards' artifacts. No verdict, score or summary was
+read. Record in `results/paper_v2/runner_probe/oracle_gpu_failure/`: `health.txt`, the attempts'
+`stderr/`, the latest attempt per shard, and the driver log at the stop.
+
+| Quantity | Value | Artifact |
+| --- | --- | --- |
+| Dispatches; shards with judged rows | 86 workflow runs; 29 shards (116 positions), 27 of them marked done | `runner_campaign_log_at_stop.txt`, `health.txt` |
+| Judge errors | Lc0 110 of 116 positions (81 "engine event loop dead", 29 "engine process died unexpectedly (exit code: -6)"); Stockfish 19 none | `health.txt` |
+| Lc0 judgments without an error | 6 (4 in shard 12, 1 each in shards 1 and 7); each attempt's Lc0 stderr holds GPU errors (97,743, 51 and 888 lines) | `health.txt`, `stderr/` |
+| GPU errors in the last attempt that ran Lc0, per shard | all 29 attempts. First error: a hang (`kIOGPUCommandBufferCallbackErrorHang`) in 5, ignored submissions (`…SubmissionsIgnored`) in 24. A failed MPS assertion (`MTLComputePipelineStateCache unable to load function NDArrayVectorMatrixMultiply…`, then abort) in 28 | `health.txt`, `stderr/` |
+| Why it was missed | a resumed attempt found 4 rows, judged nothing and succeeded in 1–2 min; the health line printed the error count but did not fail the job | job logs of the resumed runs (e.g. 42175062903: "4 positions judged, 4 judge errors") |

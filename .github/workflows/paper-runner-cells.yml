@@ -491,7 +491,9 @@ jobs:
         if: always()
         run: |
           python3 - <<'EOF'
-          import json, os, pathlib, re
+          import json, os, pathlib, re, sys
+          sys.path.insert(0, "tools/paper")
+          import gpu_errors
           out = pathlib.Path(os.environ["OUT_DIR"])
           pgn = (out / "games.pgn").read_text(errors="replace") if (out / "games.pgn").exists() else ""
           games = pgn.count("[Result ")
@@ -502,8 +504,11 @@ jobs:
           tel = summ.get("telemetry", {})
           if "stats" in summ:  # the block's own tally; the PGN count above is for an interrupted block
               forfeits = sum(summ["stats"].get("time_forfeits_by", {}).values())
+          gpu = gpu_errors.count_in(out / "engines.log") if (out / "engines.log").exists() else None
           print(f"games {games}, time forfeits {forfeits}, block hours/exit {head}, "
-                f"GPU-active fraction {tel.get('gpu_active_fraction')}, median MCTS evals {tel.get('mcts_evals_median')}")
+                f"GPU-active fraction {tel.get('gpu_active_fraction')}, median MCTS evals {tel.get('mcts_evals_median')}, "
+                f"GPU error lines {gpu}")
+          json.dump({"gpu_error_lines": gpu}, open(out / "gpu_health.json", "w"))
           EOF
           zstd -q -19 -T0 --rm "$OUT_DIR/engines.log" || true
           zstd -q -19 -T0 --rm "$OUT_DIR/moves.jsonl" || true
@@ -683,20 +688,32 @@ jobs:
             --judge-option sf19:Hash=2048 --judge-option sf19:SyzygyPath=syzygy --movetime 60000 \
             --judge lc0="$LC0" --judge-arg lc0:--backend=metal \
             --judge-arg lc0:--weights="networks/$BT4" --nodes lc0:30000 \
-            --judge-option lc0:SmartPruningFactor=0 \
+            --judge-option lc0:SmartPruningFactor=0 --retries 2 --keep-unrecorded sf19 \
             --sample 600 --seed 1 --shard "$SHARD/$SHARDS" "${resume[@]}" > "$OUT/stdout_s$SHARD.txt" 2> "$RUNNER_TEMP/stderr.txt" || rc=$?
           grep -vi "mps module" "$RUNNER_TEMP/stderr.txt" > "$OUT/stderr_s$SHARD.txt" || true
-          tail -3 "$OUT/stderr_s$SHARD.txt"
+          grep -E "^position |still lack|^resuming" "$OUT/stderr_s$SHARD.txt" | tail -8 || true
           exit $rc
       - name: Health (no verdicts)
         if: always()
         run: |
           python3 - <<'EOF'
-          import json, os, pathlib
-          p = pathlib.Path("results/paper_v2/RQ6b-R") / f"shard_{os.environ['SHARD']}.jsonl"
+          import json, os, pathlib, sys
+          sys.path.insert(0, "tools/paper")
+          import gpu_errors
+          i, k = int(os.environ["SHARD"]), int(os.environ["SHARDS"])
+          out = pathlib.Path("results/paper_v2/RQ6b-R")
+          p = out / f"shard_{i}.jsonl"
           rows = [json.loads(l) for l in open(p)] if p.exists() else []
+          want = (i + 1) * 600 // k - i * 600 // k
           errs = sum(1 for r in rows for j in r["judges"].values() if "error" in j)
-          print(f"shard {os.environ['SHARD']}/{os.environ['SHARDS']}: {len(rows)} positions judged, {errs} judge errors")
+          lacking = sum(1 for r in rows if set(r["judges"]) != {"sf19", "lc0"})
+          old_lc0 = sum(1 for r in rows if "config" not in r["judges"].get("lc0", {}))
+          again = sum(1 for r in rows for j in r["judges"].values() if j.get("attempts", 1) > 1)
+          gpu = gpu_errors.count_in(out / f"stderr_s{i}.txt")
+          print(f"shard {i}/{k}: {len(rows)} of {want} positions, {errs} judge errors, {lacking} rows lacking a judge, "
+                f"{old_lc0} Lc0 judgments of an earlier configuration, {again} judged again, {gpu} GPU error lines")
+          # a shard is complete only with a usable judgment from both judges on every position (amendment 15 (i))
+          raise SystemExit(0 if len(rows) == want and not (errs or lacking or old_lc0) else 1)
           EOF
       - uses: actions/upload-artifact@v4
         if: always()

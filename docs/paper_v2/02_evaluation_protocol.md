@@ -649,3 +649,43 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     or shard its one complete attempt, which holds everything its earlier attempts played or judged.
     The engine and judge builds of the smoke runs (runs 41853109012 and 41853090422) serve every
     block and shard.
+    (i) **Addendum (2026-11-06, judge failures on the runners' GPU; written before any runner cell
+    or oracle shard has been read).** The oracle's Lc0 judge failed on the runners' paravirtualised
+    GPU, so the expectation in (a) that only its speed would change was wrong. During its
+    30,000-node searches the device reported a hang (`kIOGPUCommandBufferCallbackErrorHang`) or
+    ignored the process's GPU work because of earlier errors
+    (`kIOGPUCommandBufferCallbackErrorSubmissionsIgnored`), and Metal Performance Shaders then
+    stopped Lc0 with a failed assertion (exit code −6). In the 47 hours from 2026-11-04 15:41 UTC,
+    29 shards left judged rows (116 positions): Lc0 recorded an error on 110 of them and
+    Stockfish 19 on none. The failure went unnoticed for three reasons. A resumed attempt counted a
+    row with an error as judged, finished in a minute or two, and so marked the shard done (27
+    shards). The probes of (a) never completed a 30,000-node Lc0 search: two positions were
+    unfinished after 61 minutes, and a benchmark printed nothing. And the judge's stderr, which held
+    the GPU errors, went to a file that was not printed. The campaign was stopped on 2026-11-06 at
+    14:38 UTC, and the eight runs then in flight were cancelled. Five of them had to be
+    force-cancelled, which skipped their artifacts, so whatever they had judged is lost unread. Only
+    counts were read (rows, errors per judge, the error messages and the GPU error lines on stderr),
+    never a verdict, score or summary. Decisions:
+    1. Every Lc0 judgment made on a runner's GPU is discarded. This includes the six without an
+       error, because each came from an attempt whose Lc0 process logged GPU errors, and Metal's own
+       message warns that the work of a failed command buffer may not have run. The Stockfish
+       judgments are kept: Stockfish runs on the CPU and recorded no error.
+    2. A judgment is not used if it ends in an error, overruns a time limit, or the engine reports a
+       GPU error on stderr during it. The judge is then restarted as a fresh process and the position
+       judged again, up to three attempts in one run (`oracle_probe.py --retries 2`). A resumed run
+       judges again every position that lacks a usable judgment from either judge, and keeps the
+       rest. Every judgment records its judge's configuration (engine, arguments, options, limit) and
+       its attempts. A resumed run keeps a judgment only if it was made with the same configuration,
+       or, for Stockfish, before configurations were recorded (`--keep-unrecorded sf19`). A shard
+       succeeds only when every position has a usable judgment from both judges; otherwise its job
+       fails and the driver resumes it. The summary reports, per judge, the configurations it holds
+       and how many judgments needed more than one attempt.
+    3. The game cells run first, then the oracle. MetalFish's MCTS (batch 1) and Lc0 at minibatch 1
+       (RQ5a-R) use the same GPU. Neither reported a GPU error in the probes, but each block's health
+       line now counts the GPU error lines the engines wrote to stderr (fastchess keeps them in
+       `engines.log`). The joiner refuses a cell with any such line until an amendment says how those
+       games are treated.
+    4. The Lc0 judge's backend for the rest of the oracle will be decided in a further addendum. It
+       follows a runner probe of Lc0 0.32.1's CPU (BLAS) backend (task `judge-probe`), which times the
+       oracle's procedure on positions outside the sample and records only timings, crashes and GPU
+       errors.
