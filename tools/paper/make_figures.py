@@ -1511,8 +1511,10 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
     cells.md, and runner_analyses.md with the contrasts the runner was given baselines for
     (RQ6d-R minus RQ1a-R; RQ2c-R direct against RQ2b-R + RQ2a-R; shared openings), and per cell the
     block estimates with Cochran's Q over its blocks and a block bootstrap, the forfeit variants,
-    the adjudications and the estimate by runner image (images with at least 100 pairs). None of
-    the workstation's host-load analyses applies to a runner (amendment 15 (e))."""
+    the games with a clock overrun and the cell under the registered referee rule (cells played
+    with a time margin, amendment 15 (j)), the adjudications and the estimate by runner image
+    (images with at least 100 pairs). None of the workstation's host-load analyses applies to a
+    runner (amendment 15 (e))."""
     sys.path.insert(0, str(REPO / "tools" / "paper"))
     import penta_stats  # noqa: E402
     import robustness  # noqa: E402
@@ -1553,8 +1555,8 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
     defs = {d["id"]: d for d in spec["cells"]}
     pairs_by_cell = {}
     blk = [
-        "| Cell | Block estimates | Cochran's Q (df) | p | Block-bootstrap 95% interval | Forfeits | Forfeit pairs removed | Forfeits as draws | Adjudicated draws / wins (first / second arm) | By runner image (pairs) |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Cell | Block estimates | Cochran's Q (df) | p | Block-bootstrap 95% interval | Forfeits | Forfeit pairs removed | Forfeits as draws | Games with a clock overrun (first / second arm) | Registered referee, no time margin | Adjudicated draws / wins (first / second arm) | By runner image (pairs) |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for c in cells:
         d = results / c["dir"]
@@ -1587,6 +1589,25 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
         q = robustness.cochran_q(ests, ses)
         boot = robustness.chunk_bootstrap(pairs, blocks)
         ff = robustness.forfeit_variants(games, c["arm_a"])
+        # a cell played with fastchess's time margin, scored as the registered referee (no margin)
+        # would have scored it: lost by the arm that overran its clock first (amendment 15 (j));
+        # "time-sensitive" when that moves the estimate by more than the primary standard error
+        over_txt = strict_txt = "—"
+        if cell.get("timemargin_ms") and cell.get("tc"):
+            sr = robustness.strict_referee(
+                games, str(d / "games.pgn"), cell["tc"], c["arm_a"]
+            )
+            by = sr["overruns_by"]
+            over_txt = f"{sr['games_with_overrun']} ({by.get(c['arm_a'], 0)} / {by.get(c['arm_b'], 0)})"
+            st = sr["stats"]
+            strict_txt = fmt_pm(st.get("elo"), st.get("elo_pm"))
+            if (
+                st.get("elo") is not None
+                and c.get("elo") is not None
+                and c.get("elo_pm")
+                and abs(st["elo"] - c["elo"]) > c["elo_pm"] / 1.96
+            ):
+                strict_txt += " (time-sensitive)"
         adj = robustness.adjudications(games, [c["arm_a"], c["arm_b"]])
         images = {}
         try:
@@ -1615,7 +1636,7 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
         adj_txt = f"{adj['draws']} / {adj['wins'].get(c['arm_a'], 0)} / {adj['wins'].get(c['arm_b'], 0)}"
         blk.append(
             f"| {c['cell']} | {est_txt} | {q_txt} | {p_txt} | {boot_txt} | {ff['forfeit_games']} | "
-            f"{removed} | {drawn} | {adj_txt} | {'; '.join(by_image) or '—'} |"
+            f"{removed} | {drawn} | {over_txt} | {strict_txt} | {adj_txt} | {'; '.join(by_image) or '—'} |"
         )
     con = [
         "| Contrast (runner cells, shared openings) | Elo | Shared openings |",

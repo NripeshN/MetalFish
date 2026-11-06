@@ -229,6 +229,9 @@ def build_command(
         *engine_args(lb, b, engines, hash_mb, engine_log),
         "-each",
         f"tc={tc}",
+        # fastchess forgives a move that overruns the clock by at most this many ms (the clock is
+        # then 0 plus the increment); the engines are not told (runner cells, amendment 15 (j))
+        *([f"timemargin={cell['timemargin_ms']}"] if "timemargin_ms" in cell else []),
         "restart=on",
         "-rounds",
         str(pairs),
@@ -360,6 +363,7 @@ def write_manifest(
                 "started": manifest["started"],
                 "git_sha": git_sha,
                 "binary_sha256": {k: v["sha256"] for k, v in arms.items()},
+                "timemargin_ms": cell.get("timemargin_ms", 0),
             }
         )
         manifest["history"] = history

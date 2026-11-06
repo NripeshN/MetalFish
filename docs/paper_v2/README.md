@@ -85,3 +85,10 @@ designed so the paper is publishable whichever way the measurements come out.
   restarts a judge that dies, overruns or reports a GPU error, and judges the position again. A shard
   succeeds only when complete. The game blocks count GPU errors in the engines' stderr. The game cells
   run before the oracle, whose Lc0 backend follows a CPU-backend probe (`judge-probe`).
+- **2026-11-06 (later)** — The first three runner blocks lost 7 of 300 games on time (limit 0.5%). The
+  losing moves came with 0.43–1.62 s on the clock and arrived 39–217 ms late, or not within fastchess's
+  100 ms wait: the virtual machines' timing jitter (08 §F). Amendment 15 (j): fastchess forgives an
+  overrun of up to 1 s in every runner cell; the engines are unchanged. RQ1a-R and RQ6d-R restart from
+  block 0, and the blocks played without a margin are an unread pilot. Every runner cell also reports
+  the registered referee rule, rebuilt exactly from the PGN's clocks. Cancelling a run now stops its
+  jobs (`!cancelled()`).

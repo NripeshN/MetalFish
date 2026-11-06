@@ -406,7 +406,7 @@ jobs:
     name: ${{ matrix.cell }} block ${{ matrix.block }}
     needs: [plan, build-engine]
     if: >-
-      always() && inputs.task == 'games' && needs.plan.result == 'success' &&
+      !cancelled() && inputs.task == 'games' && needs.plan.result == 'success' &&
       (needs.build-engine.result == 'success' || needs.build-engine.result == 'skipped')
     runs-on: macos-26
     timeout-minutes: 340
@@ -505,9 +505,14 @@ jobs:
           if "stats" in summ:  # the block's own tally; the PGN count above is for an interrupted block
               forfeits = sum(summ["stats"].get("time_forfeits_by", {}).values())
           gpu = gpu_errors.count_in(out / "engines.log") if (out / "engines.log").exists() else None
+          # games in which a move overran its clock (forgiven by the time margin, amendment 15 (j)); no side
+          import robustness
+          cmd = (out / "fastchess_cmd.txt").read_text() if (out / "fastchess_cmd.txt").exists() else ""
+          tc = re.search(r"\btc=(\S+)", cmd)
+          overrun = len(robustness.first_overruns(str(out / "games.pgn"), tc.group(1))) if tc and pgn else None
           print(f"games {games}, time forfeits {forfeits}, block hours/exit {head}, "
                 f"GPU-active fraction {tel.get('gpu_active_fraction')}, median MCTS evals {tel.get('mcts_evals_median')}, "
-                f"GPU error lines {gpu}")
+                f"GPU error lines {gpu}, games with a clock overrun {overrun}")
           json.dump({"gpu_error_lines": gpu}, open(out / "gpu_health.json", "w"))
           EOF
           zstd -q -19 -T0 --rm "$OUT_DIR/engines.log" || true
@@ -523,7 +528,7 @@ jobs:
     name: Microbenchmarks M1 and M2 (campaign build)
     needs: [build-engine]
     if: >-
-      always() && inputs.task == 'micro' &&
+      !cancelled() && inputs.task == 'micro' &&
       (needs.build-engine.result == 'success' || needs.build-engine.result == 'skipped')
     runs-on: macos-26
     timeout-minutes: 120
@@ -613,7 +618,7 @@ jobs:
     name: RQ6b-R shard ${{ matrix.shard }}
     needs: [plan, build-judges]
     if: >-
-      always() && inputs.task == 'oracle' && needs.plan.result == 'success' &&
+      !cancelled() && inputs.task == 'oracle' && needs.plan.result == 'success' &&
       (needs.build-judges.result == 'success' || needs.build-judges.result == 'skipped')
     runs-on: macos-26
     timeout-minutes: 340

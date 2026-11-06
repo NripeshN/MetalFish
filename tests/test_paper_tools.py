@@ -774,7 +774,7 @@ class RunnerCampaignTest(unittest.TestCase):
             self.plan.oracle_matrix(4, [0, 3]), [{"shard": 0}, {"shard": 3}]
         )
 
-    def _block(self, root, b, results, sha="aa"):
+    def _block(self, root, b, results, sha="aa", margin=None):
         d = pathlib.Path(root) / f"games-T-R-b{b}"
         d.mkdir(parents=True)
         games = []
@@ -784,6 +784,8 @@ class RunnerCampaignTest(unittest.TestCase):
         (d / "games.pgn").write_text("".join(games))
         arms = {"a": {"sha256": sha}, "b": {"sha256": sha}}
         hist = [{"block": b, "games_before": 0, "start_opening": 1 + 2 * b}]
+        if margin is not None:
+            hist[0]["timemargin_ms"] = margin
         (d / "manifest.json").write_text(json.dumps({"arms": arms, "history": hist}))
         (d / "fastchess_report.txt").write_text(f"# block {b} (0.50 h, exit 0)\nok\n")
         (d / "runner.json").write_text(json.dumps({"image": f"macos-26 {b}"}))
@@ -883,11 +885,131 @@ class RunnerCampaignTest(unittest.TestCase):
             self.assertEqual(m["gpu_error_lines_by_block"], {"0": 0, "1": 1})
             self.assertEqual(m["gpu_errors_treated_by"], "15 (j)")
 
+    def test_only_attempts_with_the_cells_time_margin_are_joined(self):
+        import run_cell
+
+        cell = {
+            "id": "T-R",
+            "machine": "runner",
+            "pairs": 4,
+            "blocks": 2,
+            "timemargin_ms": 1000,
+            "a": {"engine": "AB", "threads": 1},
+            "b": {"engine": "AB", "threads": 3},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d) / "artifacts"
+            # block 0 was played twice: a pilot attempt without a margin, then with the cell's
+            self._block(root / "1", 0, [("1-0", "1-0"), ("1-0", "1-0")])
+            self._block(root / "2", 0, [("0-1", "0-1"), ("0-1", "0-1")], margin=1000)
+            self._block(root / "2", 1, [("1/2-1/2", "1/2-1/2")] * 2, margin=1000)
+            spec = pathlib.Path(d) / "spec.json"
+            spec.write_text(json.dumps({"cells": [cell]}))
+            saved = run_cell.RESULTS_ROOT
+            run_cell.RESULTS_ROOT = pathlib.Path(d) / "results"
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    rc = self.fetch.main(
+                        ["T-R", "--from-dir", str(root), "--manifest", str(spec)]
+                    )
+            finally:
+                run_cell.RESULTS_ROOT = saved
+            self.assertEqual(rc, 0)
+            out = pathlib.Path(d) / "results" / "T-R"
+            m = json.load(open(out / "manifest.json"))
+            self.assertEqual(m["excluded_attempts"], ["1/games-T-R-b0"])
+            self.assertEqual(m["timemargin_ms"], 1000)
+            self.assertNotIn('[Result "1-0"]', (out / "games.pgn").read_text())
+            # a block played (in part) with another margin is never joined
+            mixed = {
+                0: self._block(
+                    pathlib.Path(d) / "m", 0, [("1-0", "0-1")] * 2, margin=0
+                ),
+                1: root / "2" / "games-T-R-b1",
+            }
+            with self.assertRaises(SystemExit):
+                self.fetch.join_cell("T-R", cell, mixed, pathlib.Path(d) / "o3")
+
+
+class ClockOverrunTest(unittest.TestCase):
+    """Pins the overrun detection behind the registered-referee variant of the runner cells
+    played with fastchess's time margin (tools/paper/robustness.py; amendment 15 (j)): each clock
+    starts at base + increment, a move overruns when its time exceeds the clock its side had,
+    and a game with an overrun is lost by the engine that overran first."""
+
+    START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+    def _game(self, rnd, white, black, result, moves):
+        return (
+            f'[Event "t"]\n[Round "{rnd}"]\n[White "{white}"]\n[Black "{black}"]\n'
+            f'[Result "{result}"]\n[FEN "{self.START}"]\n[SetUp "1"]\n\n{moves} {result}\n\n'
+        )
+
+    def test_first_overrun_and_the_strict_referee(self):
+        import robustness
+
+        games = [
+            # A (White) overruns on its 2nd move: 30.200 s on a 30.100 s clock; forgiven, play on
+            self._game(
+                1,
+                "A",
+                "B",
+                "1/2-1/2",
+                "1. e4 {+0.10/10 0.500s, tl=30.100s} e5 {-0.10/10 0.400s, tl=30.200s} "
+                "2. Nf3 {+0.20/11 30.200s, tl=0.300s} Nc6 {-0.20/11 0.100s, tl=30.400s}",
+            ),
+            self._game(
+                1,
+                "B",
+                "A",
+                "0-1",
+                "1. d4 {+0.10/10 1.000s, tl=29.600s} d5 {-0.10/10 1.000s, tl=29.600s}",
+            ),
+            # B uses exactly its clock (no overrun); A then overruns; A already lost
+            self._game(
+                2,
+                "A",
+                "B",
+                "0-1",
+                "1. c4 {+0.10/10 0.300s, tl=30.300s} c5 {-0.10/10 30.300s, tl=0.300s} "
+                "2. Nc3 {+0.10/10 30.400s, tl=0.300s} Nc6 {+0.10/10 0.100s, tl=0.500s}",
+            ),
+            # no clock in the comments: A (Black) has 30.3 - 20.0 + 0.3 = 10.6 s, then takes 10.7
+            self._game(
+                2,
+                "B",
+                "A",
+                "1/2-1/2",
+                "1. g3 {+0.10/10 0.500s} g6 {+0.10/10 20.000s} "
+                "2. Bg2 {+0.10/10 0.500s} Bg7 {+0.10/10 10.700s}",
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            path = str(pathlib.Path(d) / "games.pgn")
+            pathlib.Path(path).write_text("".join(games))
+            self.assertEqual(robustness.parse_tc("30+0.3"), (30000, 300))
+            self.assertEqual(robustness.parse_tc("10+0.1"), (10000, 100))
+            over = robustness.first_overruns(path, "30+0.3")
+            self.assertEqual(over, {0: ("A", 2), 2: ("A", 2), 3: ("A", 2)})
+            played = penta_stats.read_games(path)
+            strict = robustness.strict_referee(played, path, "30+0.3", "A")
+            self.assertEqual(strict["games_with_overrun"], 3)
+            self.assertEqual(strict["overruns_by"], {"A": 3})
+            self.assertEqual(
+                strict["results_changed"], 2
+            )  # games 0 and 3; game 2 was lost
+            # A scores 0.5 + 1 + 0 + 0.5 of 4 as played, 0 + 1 + 0 + 0 under the registered rule
+            self.assertEqual(strict["stats"]["losses"], 3)
+            self.assertEqual(strict["stats"]["wins"], 1)
+            self.assertEqual(penta_stats.compute(played, "A")["draws"], 2)
+            self.assertEqual(strict["stats"]["time_forfeits_by"], {"A": 3})
+
 
 class RunnerCellDefinitionsTest(unittest.TestCase):
     """Dry-runs every runner cell of docs/paper_v2/experiments.json (protocol amendment 15): one
     block per runner over contiguous openings, at most the runner's 3 threads, Hash 1024 MB on
-    MetalFish arms, and a 50 ms move overhead on every arm, Lc0's included (amendment 12 (g)).
+    MetalFish arms, a 50 ms move overhead on every arm, Lc0's included (amendment 12 (g)), and
+    fastchess's 1000 ms time margin (amendment 15 (j)).
     """
 
     def test_runner_cells_dry_run(self):
@@ -921,6 +1043,9 @@ class RunnerCellDefinitionsTest(unittest.TestCase):
                 all(int(t) <= 3 for t in re.findall(r"option\.Threads=(\d+)", cmd)),
                 cell["id"],
             )
+            # fastchess forgives clock overruns of up to 1 s on every runner cell (15 (j))
+            self.assertIn(" -each tc=", cmd, cell["id"])
+            self.assertIn(" timemargin=1000 ", cmd, cell["id"])
             for part in cmd.split(" -engine ")[1:]:
                 if "metalfish" in part.split()[0]:
                     self.assertIn("option.Hash=1024", part, cell["id"])
@@ -1017,7 +1142,7 @@ class RunnerTablesTest(unittest.TestCase):
     from the workstation cells, the RQ6d-R contrast over shared openings, Q over the blocks.
     """
 
-    def _games(self, results, cell, outcomes):
+    def _games(self, results, cell, outcomes, overrun_pair=None):
         d = results / cell
         d.mkdir(parents=True)
         text = ""
@@ -1027,9 +1152,15 @@ class RunnerTablesTest(unittest.TestCase):
                 ("Hybrid-T3", "AB-T3", r1),
                 ("AB-T3", "Hybrid-T3", r2),
             ):
+                # the pair's first game: White overruns its 30.3 s clock, forgiven (15 (j))
+                move = (
+                    "1. e4 {+0.10/10 30.400s, tl=0.300s}"
+                    if n == overrun_pair and white == "Hybrid-T3"
+                    else "1. e4"
+                )
                 text += (
                     f'[Event "t"]\n[Round "{n + 1}"]\n[White "{white}"]\n[Black "{black}"]\n'
-                    f'[Result "{res}"]\n[Termination "normal"]\n[FEN "{fen}"]\n[SetUp "1"]\n\n1. e4 {res}\n\n'
+                    f'[Result "{res}"]\n[Termination "normal"]\n[FEN "{fen}"]\n[SetUp "1"]\n\n{move} {res}\n\n'
                 )
         (d / "games.pgn").write_text(text)
         st = penta_stats.compute(
@@ -1053,9 +1184,17 @@ class RunnerTablesTest(unittest.TestCase):
             "a": {"engine": "Hybrid", "threads": 3},
             "b": {"engine": "AB", "threads": 3},
         }
+        margin = {"tc": "30+0.3", "timemargin_ms": 1000}
         spec = {
             "cells": [
-                {"id": "RQ1a-R", "machine": "runner", "pairs": 12, "blocks": 2, **arms},
+                {
+                    "id": "RQ1a-R",
+                    "machine": "runner",
+                    "pairs": 12,
+                    "blocks": 2,
+                    **arms,
+                    **margin,
+                },
                 {"id": "RQ6d-R", "machine": "runner", "pairs": 12, "blocks": 2, **arms},
                 {"id": "RQ1a", "pairs": 12, **arms},
             ]
@@ -1075,7 +1214,7 @@ class RunnerTablesTest(unittest.TestCase):
                 ("1/2-1/2", "0-1"),
                 ("1-0", "1-0"),
             ]
-            self._games(results, "RQ1a-R", mix + mix[::-1])
+            self._games(results, "RQ1a-R", mix + mix[::-1], overrun_pair=0)
             self._games(results, "RQ6d-R", mix[1:] + mix[:1] + mix)
             self._games(results, "RQ1a", mix * 2)
             saved = mf.REPO
@@ -1106,6 +1245,15 @@ class RunnerTablesTest(unittest.TestCase):
                 ana, r"\| RQ1a-R \| [+-][0-9.]+, [+-][0-9.]+ \| [0-9.]+ \(1\) \|"
             )
             self.assertIn("macos26 A: — (6); macos26 B: — (6)", ana)
+            # the cell with a time margin: one overrun, by the first arm, and the
+            # registered-referee estimate (the Hybrid's 1-0 in pair 0 becomes a loss)
+            row = next(r for r in ana.splitlines() if r.startswith("| RQ1a-R |"))
+            self.assertIn("| 1 (1 / 0) | ", row)
+            self.assertRegex(
+                row, r"\| 1 \(1 / 0\) \| [+-][0-9.]+ ± [0-9.]+( \(time-sensitive\))? \|"
+            )
+            row = next(r for r in ana.splitlines() if r.startswith("| RQ6d-R |"))
+            self.assertIn("| — | — |", row)  # no margin: not applicable
 
 
 class FakeJudge:

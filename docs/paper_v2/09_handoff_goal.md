@@ -103,6 +103,13 @@ runner (one measurement per runner VM, no load gate needed, health from `vm_samp
   Lc0 error rows. A shard's job now fails until every position has a usable judgment from both judges.
   Each game block's health line shows "GPU error lines N". If any block of a cell shows one, stop and
   write an amendment before joining that cell: the joiner refuses it without `--allow-gpu-errors`.
+- **Amendment 15 (j) (2026-11-06).** The pilot blocks lost 7 of 300 games on time (08 §F), so every
+  runner cell now plays with fastchess's 1 s time margin (`timemargin_ms` in `experiments.json`). Before
+  the driver restarts, the state file's RQ1a-R and RQ6d-R items that have runs go back to `todo`, with
+  their runs moved to `runs_pilot` and no `resume`: a pilot attempt must never be resumed, because a
+  block must not mix referee rules. The joiner skips pilot attempts by their manifest history. The
+  health line now ends "games with a clock overrun N". If time forfeits stay above 0.5% with the
+  margin, stop and write an amendment.
 
 ## Phase B — the arXiv preprint (the author decided: do it)
 
