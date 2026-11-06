@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import pathlib
 import sys
 
@@ -69,6 +70,16 @@ DISPLAY_ARMS = {
 
 def arms_text(c) -> str:
     return DISPLAY_ARMS.get(c["cell"], f"{c['arm_a']} vs {c['arm_b']}")
+
+
+def runner_cell_ids() -> set:
+    """Ids of the runner cells (protocol amendment 15): compared only with each other, so they are
+    kept out of every workstation table and analysis and get tables of their own."""
+    try:
+        spec = load(REPO / "docs" / "paper_v2" / "experiments.json")
+    except (OSError, ValueError):
+        return set()
+    return {c["id"] for c in spec["cells"] if c.get("machine") == "runner"}
 
 
 def collect_cells(results: pathlib.Path):
@@ -1475,10 +1486,170 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
         + "\n"
     )
 
-    # oracle summary (RQ6b), written by tools/paper/oracle_probe.py
-    osum = results / "RQ6b" / "oracle.jsonl.summary.json"
+    # oracle summary, written by tools/paper/oracle_probe.py: RQ6b-R on the runners (amendment 15
+    # (a)); the workstation's RQ6b was stopped unread and has no summary
+    osum = results / "RQ6b-R" / "oracle.jsonl.summary.json"
     if osum.exists():
         write_oracle_tables(load(osum), tdir)
+    stab = results / "RQ6b-R" / "stability.json"
+    if stab.exists():
+        md = [
+            "| Judge | Positions judged on both machines | Same verdict | Correlation of the candidates' score difference |",
+            "| --- | --- | --- | --- |",
+        ]
+        for name, st in load(stab).items():
+            sv = st.get("same_verdict")
+            r = st.get("delta_cp_correlation")
+            md.append(
+                f"| {name} | {st.get('positions', 0)} | {f'{sv*100:.1f}%' if sv is not None else '—'} | {f'{r:.3f}' if r is not None else '—'} |"
+            )
+        (tdir / "oracle_stability.md").write_text("\n".join(md) + "\n")
+
+
+def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
+    """Tables of the runner cells (protocol amendment 15): runner_cells.md/.tex with the columns of
+    cells.md, and runner_analyses.md with the contrasts the runner was given baselines for
+    (RQ6d-R minus RQ1a-R; RQ2c-R direct against RQ2b-R + RQ2a-R; shared openings), and per cell the
+    block estimates with Cochran's Q over its blocks and a block bootstrap, the forfeit variants,
+    the adjudications and the estimate by runner image (images with at least 100 pairs). None of
+    the workstation's host-load analyses applies to a runner (amendment 15 (e))."""
+    sys.path.insert(0, str(REPO / "tools" / "paper"))
+    import penta_stats  # noqa: E402
+    import robustness  # noqa: E402
+
+    if not cells:
+        return
+    tdir = out / "tables"
+    tdir.mkdir(parents=True, exist_ok=True)
+    md = [
+        "| Cell | Arms | Games | Elo (95% CI) | nElo | LOS | Pentanomial | Transformer enabled | MCTS evals/move |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    tex = [
+        "\\begin{tabular}{llrrrrl}",
+        "\\toprule",
+        "Cell & Arms & Games & Elo & nElo & LOS & Transformer enabled \\\\",
+        "\\midrule",
+    ]
+    for c in cells:
+        t = c["telemetry"]
+        gpu = (
+            f"{t['gpu_active_fraction']*100:.0f}%"
+            if t.get("gpu_active_fraction") is not None
+            else "—"
+        )
+        ev = t.get("mcts_evals_median")
+        md.append(
+            f"| {c['cell']} | {arms_text(c)} | {c['games']} | {fmt_pm(c['elo'], c['elo_pm'])} | {fmt_pm(c['nelo'], c['nelo_pm'])} | {c['los']*100:.1f}% | {c['ptnml']} | {gpu} | {ev if ev is not None else '—'} |"
+        )
+        tex.append(
+            f"{c['cell']} & {arms_text(c)} & {c['games']} & ${fmt_pm(c['elo'], c['elo_pm']).replace('±', '\\pm')}$ & ${fmt_pm(c['nelo'], c['nelo_pm']).replace('±', '\\pm')}$ & {c['los']*100:.1f}\\% & {gpu.replace('%', '\\%')} \\\\"
+        )
+    tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "runner_cells.md").write_text("\n".join(md) + "\n")
+    (tdir / "runner_cells.tex").write_text("\n".join(tex).replace("_", "\\_") + "\n")
+
+    spec = load(REPO / "docs" / "paper_v2" / "experiments.json")
+    defs = {d["id"]: d for d in spec["cells"]}
+    pairs_by_cell = {}
+    blk = [
+        "| Cell | Block estimates | Cochran's Q (df) | p | Block-bootstrap 95% interval | Forfeits | Forfeit pairs removed | Forfeits as draws | Adjudicated draws / wins (first / second arm) | By runner image (pairs) |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for c in cells:
+        d = results / c["dir"]
+        if not (d / "games.pgn").exists() or not c["arm_a"] or c["cell"] not in defs:
+            continue
+        games = penta_stats.read_games(str(d / "games.pgn"))
+        pairs = robustness.pair_records(games, c["arm_a"])
+        pairs_by_cell[c["cell"]] = pairs
+        cell = defs[c["cell"]]
+        nb = int(cell["blocks"])
+        per = -(-int(cell["pairs"]) // nb)
+        # the joiner wrote every block complete and in order, so block b holds games
+        # [2 b per, 2 min((b + 1) per, pairs)) of the joined PGN
+        ranges = [
+            (b, 2 * b * per, 2 * min((b + 1) * per, int(cell["pairs"])))
+            for b in range(nb)
+        ]
+        ests, ses, blocks = [], [], []
+        for b, first, end in ranges:
+            st = penta_stats.compute(games[first:end], c["arm_a"])
+            if (
+                st.get("elo") is not None
+                and st.get("elo_pm")
+                and math.isfinite(st["elo_pm"])
+            ):
+                ests.append(st["elo"])
+                ses.append(st["elo_pm"] / 1.96)
+        for p in pairs:
+            blocks.append(next(b for b, first, end in ranges if first <= p["i"] < end))
+        q = robustness.cochran_q(ests, ses)
+        boot = robustness.chunk_bootstrap(pairs, blocks)
+        ff = robustness.forfeit_variants(games, c["arm_a"])
+        adj = robustness.adjudications(games, [c["arm_a"], c["arm_b"]])
+        images = {}
+        try:
+            runner_blocks = load(d / "manifest.json").get("runner_blocks") or []
+        except (OSError, ValueError):
+            runner_blocks = []
+        for rb in runner_blocks:
+            b = rb.get("block")
+            if b is None or b >= len(ranges):
+                continue
+            images.setdefault(rb.get("image") or "unknown", []).append(ranges[b])
+        by_image = []
+        for image, rs in sorted(images.items()):
+            sel = [g for _, first, end in rs for g in games[first:end]]
+            st = penta_stats.compute(sel, c["arm_a"])
+            n = st.get("pairs") or 0
+            by_image.append(
+                f"{image}: {fmt_pm(st.get('elo'), st.get('elo_pm')) if n >= 100 else '—'} ({n})"
+            )
+        q_txt = f"{q['q']:.2f} ({q['df']})" if q else "—"
+        p_txt = f"{q['p']:.3f}" if q else "—"
+        boot_txt = f"[{boot['ci95'][0]:+.1f}, {boot['ci95'][1]:+.1f}]" if boot else "—"
+        est_txt = ", ".join(f"{e:+.1f}" for e in ests)
+        removed = fmt_pm(ff["removed"].get("elo"), ff["removed"].get("elo_pm"))
+        drawn = fmt_pm(ff["as_draws"].get("elo"), ff["as_draws"].get("elo_pm"))
+        adj_txt = f"{adj['draws']} / {adj['wins'].get(c['arm_a'], 0)} / {adj['wins'].get(c['arm_b'], 0)}"
+        blk.append(
+            f"| {c['cell']} | {est_txt} | {q_txt} | {p_txt} | {boot_txt} | {ff['forfeit_games']} | "
+            f"{removed} | {drawn} | {adj_txt} | {'; '.join(by_image) or '—'} |"
+        )
+    con = [
+        "| Contrast (runner cells, shared openings) | Elo | Shared openings |",
+        "| --- | --- | --- |",
+    ]
+    if "RQ6d-R" in pairs_by_cell and "RQ1a-R" in pairs_by_cell:
+        r = robustness.linear_combination(
+            [(pairs_by_cell["RQ6d-R"], 1.0), (pairs_by_cell["RQ1a-R"], -1.0)]
+        )
+        if r:
+            con.append(
+                f"| RQ6d-R minus RQ1a-R (hints and verification off) | {fmt_pm(r['elo'], r['elo_pm'])} | {r['shared_openings'][0]} |"
+            )
+    if "RQ2a-R" in pairs_by_cell and "RQ2b-R" in pairs_by_cell:
+        der = robustness.linear_combination(
+            [(pairs_by_cell["RQ2b-R"], 1.0), (pairs_by_cell["RQ2a-R"], 1.0)]
+        )
+        if der:
+            con.append(
+                f"| RQ2c-R derived (RQ2b-R + RQ2a-R) | {fmt_pm(der['elo'], der['elo_pm'])} | {der['shared_openings'][0]} |"
+            )
+        if "RQ2c-R" in pairs_by_cell:
+            diff = robustness.linear_combination(
+                [
+                    (pairs_by_cell["RQ2b-R"], 1.0),
+                    (pairs_by_cell["RQ2a-R"], 1.0),
+                    (pairs_by_cell["RQ2c-R"], -1.0),
+                ]
+            )
+            if diff:
+                con.append(
+                    f"| derived minus direct RQ2c-R | {fmt_pm(diff['elo'], diff['elo_pm'])} | {', '.join(map(str, diff['shared_openings']))} |"
+                )
+    (tdir / "runner_analyses.md").write_text("\n".join(con + [""] + blk) + "\n")
 
 
 def write_rq6d_contrast(pairs_by_cell: dict, tdir: pathlib.Path):
@@ -1637,9 +1808,13 @@ def main(argv=None):
     args = ap.parse_args(argv)
     results = pathlib.Path(args.results)
     out = pathlib.Path(args.out)
-    cells = collect_cells(results)
+    runner_ids = runner_cell_ids()
+    all_cells = collect_cells(results)
+    cells = [c for c in all_cells if c["cell"] not in runner_ids]
+    runner_cells = [c for c in all_cells if c["cell"] in runner_ids]
     gates = collect_gates(results)
     write_tables(cells, gates, out)
+    write_runner_tables(runner_cells, results, out)
     write_extra_tables(cells, results, out)
     write_therm_table(cells, results, out)
     write_sensitivity_table(cells, results, out)
@@ -1653,7 +1828,7 @@ def main(argv=None):
     if args.final_analyses:
         write_final_analyses(cells, results, out)
     print(
-        f"cells: {len(cells)}, gates: {len(gates)} -> {out/'tables'}, {out/'figures'}"
+        f"cells: {len(cells)}, runner cells: {len(runner_cells)}, gates: {len(gates)} -> {out/'tables'}, {out/'figures'}"
     )
     return 0
 

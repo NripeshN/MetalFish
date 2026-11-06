@@ -974,6 +974,102 @@ class RunnerAttemptsTest(unittest.TestCase):
         self.assertGreater(st["delta_cp_correlation"], 0.9)
 
 
+class RunnerTablesTest(unittest.TestCase):
+    """Pins the runner cells' tables of tools/paper/make_figures.py (amendment 15): kept apart
+    from the workstation cells, the RQ6d-R contrast over shared openings, Q over the blocks.
+    """
+
+    def _games(self, results, cell, outcomes):
+        d = results / cell
+        d.mkdir(parents=True)
+        text = ""
+        for n, (r1, r2) in enumerate(outcomes):
+            fen = f"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 {n + 1}"
+            for white, black, res in (
+                ("Hybrid-T3", "AB-T3", r1),
+                ("AB-T3", "Hybrid-T3", r2),
+            ):
+                text += (
+                    f'[Event "t"]\n[Round "{n + 1}"]\n[White "{white}"]\n[Black "{black}"]\n'
+                    f'[Result "{res}"]\n[Termination "normal"]\n[FEN "{fen}"]\n[SetUp "1"]\n\n1. e4 {res}\n\n'
+                )
+        (d / "games.pgn").write_text(text)
+        st = penta_stats.compute(
+            penta_stats.read_games(str(d / "games.pgn")), "Hybrid-T3"
+        )
+        (d / "summary.json").write_text(
+            json.dumps(
+                {"cell": cell, "arm_a": "Hybrid-T3", "arm_b": "AB-T3", "stats": st}
+            )
+        )
+        blocks = [
+            {"block": 0, "image": "macos26 A"},
+            {"block": 1, "image": "macos26 B"},
+        ]
+        (d / "manifest.json").write_text(json.dumps({"runner_blocks": blocks}))
+
+    def test_runner_tables(self):
+        import make_figures as mf
+
+        arms = {
+            "a": {"engine": "Hybrid", "threads": 3},
+            "b": {"engine": "AB", "threads": 3},
+        }
+        spec = {
+            "cells": [
+                {"id": "RQ1a-R", "machine": "runner", "pairs": 12, "blocks": 2, **arms},
+                {"id": "RQ6d-R", "machine": "runner", "pairs": 12, "blocks": 2, **arms},
+                {"id": "RQ1a", "pairs": 12, **arms},
+            ]
+        }
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            (root / "docs" / "paper_v2").mkdir(parents=True)
+            (root / "docs" / "paper_v2" / "experiments.json").write_text(
+                json.dumps(spec)
+            )
+            results = root / "results"
+            mix = [
+                ("1-0", "0-1"),
+                ("1/2-1/2", "1/2-1/2"),
+                ("0-1", "1/2-1/2"),
+                ("1-0", "1/2-1/2"),
+                ("1/2-1/2", "0-1"),
+                ("1-0", "1-0"),
+            ]
+            self._games(results, "RQ1a-R", mix + mix[::-1])
+            self._games(results, "RQ6d-R", mix[1:] + mix[:1] + mix)
+            self._games(results, "RQ1a", mix * 2)
+            saved = mf.REPO
+            mf.REPO = root
+            try:
+                ids = mf.runner_cell_ids()
+                cells = mf.collect_cells(results)
+                mf.write_runner_tables(
+                    [c for c in cells if c["cell"] in ids], results, root / "out"
+                )
+            finally:
+                mf.REPO = saved
+            self.assertEqual(ids, {"RQ1a-R", "RQ6d-R"})
+            rows = (
+                (root / "out" / "tables" / "runner_cells.md")
+                .read_text()
+                .splitlines()[2:]
+            )
+            self.assertEqual(
+                [r.split(" | ")[0] for r in rows], ["| RQ1a-R", "| RQ6d-R"]
+            )
+            ana = (root / "out" / "tables" / "runner_analyses.md").read_text()
+            self.assertRegex(
+                ana,
+                r"\| RQ6d-R minus RQ1a-R \(hints and verification off\) \| [+-][0-9.]+ ± [0-9.]+ \| 12 \|",
+            )
+            self.assertRegex(
+                ana, r"\| RQ1a-R \| [+-][0-9.]+, [+-][0-9.]+ \| [0-9.]+ \(1\) \|"
+            )
+            self.assertIn("macos26 A: — (6); macos26 B: — (6)", ana)
+
+
 class FakeJudge:
     """Stands in for a UCI judge: scores every position +50 cp for the side to move and
     records each call."""
