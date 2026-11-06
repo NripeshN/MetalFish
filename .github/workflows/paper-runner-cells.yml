@@ -691,9 +691,9 @@ jobs:
           python3 tools/paper/oracle_probe.py "$RUNNER_TEMP/disagreements.jsonl" --out "$OUT/shard_$SHARD.jsonl" \
             --judge sf19=judges/stockfish --judge-option sf19:Threads=3 \
             --judge-option sf19:Hash=2048 --judge-option sf19:SyzygyPath=syzygy --movetime 60000 \
-            --judge lc0="$LC0" --judge-arg lc0:--backend=metal \
+            --judge lc0="$LC0" --judge-arg lc0:--backend=blas \
             --judge-arg lc0:--weights="networks/$BT4" --nodes lc0:30000 \
-            --judge-option lc0:SmartPruningFactor=0 --retries 2 --keep-unrecorded sf19 \
+            --judge-option lc0:SmartPruningFactor=0 --retries 2 --judge-timeout 9000 --keep-unrecorded sf19 \
             --sample 600 --seed 1 --shard "$SHARD/$SHARDS" "${resume[@]}" > "$OUT/stdout_s$SHARD.txt" 2> "$RUNNER_TEMP/stderr.txt" || rc=$?
           grep -vi "mps module" "$RUNNER_TEMP/stderr.txt" > "$OUT/stderr_s$SHARD.txt" || true
           grep -E "^position |still lack|^resuming" "$OUT/stderr_s$SHARD.txt" | tail -8 || true

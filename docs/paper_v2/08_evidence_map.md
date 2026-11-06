@@ -789,3 +789,18 @@ samplers `vm_sampler_*.log` and `sampler_summary.txt`.
 | Overrun of the losing move | 39, 52, 58, 99 and 217 ms (recorded moves); 2 losing moves not received within the 100 ms fastchess waits beyond the clock | `forfeit_timing.txt` |
 | The runners during these blocks | no swap in 179, 176 and 182 minute samples; `kernel_task` above 25% of a core in 41, 50 and 55 samples (maxima 108.5%, 87.1%, 102.4%); Spotlight (`mds`, `mds_stores`) above 25% in 4, 4 and 3 (maxima 102.7%, 80.5%, 52.8%) | `sampler_summary.txt`, `vm_sampler_*.log` |
 | Pilot runs without a complete block | 42244056141 (RQ6d-R block 1), 42244063141 (RQ1a-R block 2), 42244070395 (RQ6d-R block 2): force-cancelled 17.7, 14.5 and 1.3 min after they started, so no artifact; 42244077383, 42244086261, 42271789034, 42272280081: cancelled before they started | `results/paper_v2/runner_campaign_log.txt` |
+
+**The oracle's Lc0 judge on the runners' CPU** (run 42237442021, task `judge-probe`, 2026-11-06 14:50–20:19
+UTC; amendment 15 (k)). Lc0 0.32.1 `--backend=blas` (Homebrew build, Apple Accelerate), BT4, smart
+pruning off, defaults otherwise. The probe printed timings, node counts, crashes and GPU error lines,
+never a score, move or verdict. The positions came from outside the oracle's sample
+(`judge_probe.py`, seeds 101 and 102). Record in `results/paper_v2/runner_probe/judge_cpu_run_42237442021/`:
+`job_vm0.log`, `job_vm1.log` and the extract `timings.txt`.
+
+| Quantity | Value (VM 0 / VM 1) | Artifact |
+| --- | --- | --- |
+| Runners | VirtualMac2,1; images macos26 20261026.0455.2 / 20261102.0473.1 | `timings.txt` |
+| `backendbench` (positions/s) | batch 1: 5.89 / 8.86; batch 16: 14.89 / 15.69; batch 64: 12.28 / 13.11 | `timings.txt` |
+| One 30,000-node search, the two positions of amendment 15 (a) | 1,810.4 and 986.4 s / 1,668.5 and 959.6 s (16 and 30 / 18 and 31 nodes/s) | `timings.txt` |
+| The oracle's procedure per position (three 30,000-node searches) | 73.0, 64.6, 64.6, 75.8 min / 71.3, 51.0, 26.3, 78.1 min; eight positions: mean 63.1, median 67.9, maximum 78.1 min | `timings.txt` |
+| Crashes; GPU error lines | 0; 0 (both runners) | `timings.txt`, job logs |
