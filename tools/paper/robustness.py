@@ -8,6 +8,9 @@ records; tools/paper/make_figures.py writes the tables. No games are run.
 - load_regression: ordinary least squares of the pair score on the fraction of the pair's logged
   minutes above the load threshold; the intercept is the estimate at zero outside load
 - forfeit_variants: pairs containing a time forfeit removed; forfeits scored as draws
+- first_overruns / strict_referee: the moves that overran their clock, and the cell scored by the
+  registered referee rule (no time margin) for games played with fastchess's timemargin
+  (runner cells, amendment 15 (j))
 - without_first_openings: a cell without the pairs of its first k openings (RQ1a: 92)
 - cochran_q: heterogeneity of the block estimates; chunk_bootstrap: resamples the runner's chunks
 - linear_combination: a sum of cells' Elo estimates whose variance includes the covariance of
@@ -370,6 +373,7 @@ COMMENT_RE = re.compile(
 # seldepth=true: "tl=..., n=..., sd=..., nps=..."), so each is looked up by name
 NODES_RE = re.compile(r",\s*n=(?P<nodes>\d+)")
 NPS_RE = re.compile(r",\s*nps=(?P<nps>\d+)")
+TL_RE = re.compile(r",\s*tl=(?P<tl>-?\d+(?:\.\d+)?)s")
 
 
 def parse_move_comment(comment: str) -> Optional[Dict]:
@@ -377,12 +381,80 @@ def parse_move_comment(comment: str) -> Optional[Dict]:
     if not m:
         return None
     rest = comment[m.end() :]
-    n, nps = NODES_RE.search(rest), NPS_RE.search(rest)
+    n, nps, tl = NODES_RE.search(rest), NPS_RE.search(rest), TL_RE.search(rest)
     return {
         "depth": int(m.group("depth")),
         "time": float(m.group("time")),
         "nodes": int(n.group("nodes")) if n else None,
         "nps": int(nps.group("nps")) if nps else None,
+        "timeleft": float(tl.group("tl")) if tl else None,
+    }
+
+
+def parse_tc(tc: str) -> Tuple[int, int]:
+    """Base time and increment in ms of a fastchess `tc=` value such as "30+0.3"."""
+    base, _, inc = tc.partition("+")
+    return round(float(base) * 1000), round(float(inc or 0) * 1000)
+
+
+def first_overruns(pgn_path: str, tc: str) -> Dict[int, Tuple[str, int]]:
+    """For each game (its index in the PGN) in which a move took longer than the clock its side
+    had: the engine that made the first such move, and that move's index among the engine's own
+    moves. fastchess 1.8.2 starts each clock at the base time plus one increment and records,
+    after each move, the time it measured and the clock left (in whole ms); a move overruns when
+    its time exceeds the clock left after its side's previous move. With no time margin fastchess
+    ends the game there, lost by that engine; with a margin (amendment 15 (j)) the overrun is
+    forgiven, the clock set to 0 plus the increment, and play goes on, the engines having been
+    sent the same clocks up to that move either way.
+    """
+    base, inc = parse_tc(tc)
+    clock: Dict[Tuple[int, str], int] = {}
+    out: Dict[int, Tuple[str, int]] = {}
+    for m in iter_engine_moves(pgn_path):
+        key = (m["game"], m["engine"])
+        have = clock.get(key, base + inc)
+        used = round(m["time"] * 1000)
+        if used > have and m["game"] not in out:
+            out[m["game"]] = (m["engine"], m["index"])
+        if m.get("timeleft") is not None:
+            clock[key] = round(m["timeleft"] * 1000)
+        else:
+            clock[key] = max(0, have - used) + inc
+    return out
+
+
+def strict_referee(
+    games: List[Dict], pgn_path: str, tc: str, engine: str
+) -> Dict[str, object]:
+    """The cell under the registered referee rule (no time margin) for games played with a
+    margin: a game with an overrun is lost by the engine whose move overran first (as fastchess
+    with timemargin 0 would have ended it); `games` are penta_stats.read_games of `pgn_path`.
+    """
+    over = first_overruns(pgn_path, tc)
+    rescored = []
+    for k, g in enumerate(games):
+        if k in over:
+            loser = over[k][0]
+            rescored.append(
+                dict(
+                    g,
+                    result="0-1" if g["white"] == loser else "1-0",
+                    termination="time forfeit",
+                    comment_tail="",
+                )
+            )
+        else:
+            rescored.append(g)
+    by: Dict[str, int] = {}
+    for loser, _ in over.values():
+        by[loser] = by.get(loser, 0) + 1
+    return {
+        "games_with_overrun": len(over),
+        "overruns_by": by,
+        "results_changed": sum(
+            1 for k in over if rescored[k]["result"] != games[k]["result"]
+        ),
+        "stats": penta_stats.compute(rescored, engine),
     }
 
 

@@ -774,3 +774,18 @@ read. Record in `results/paper_v2/runner_probe/oracle_gpu_failure/`: `health.txt
 | Lc0 judgments without an error | 6 (4 in shard 12, 1 each in shards 1 and 7); each attempt's Lc0 stderr holds GPU errors (97,743, 51 and 888 lines) | `health.txt`, `stderr/` |
 | GPU errors in the last attempt that ran Lc0, per shard | all 29 attempts. First error: a hang (`kIOGPUCommandBufferCallbackErrorHang`) in 5, ignored submissions (`…SubmissionsIgnored`) in 24. A failed MPS assertion (`MTLComputePipelineStateCache unable to load function NDArrayVectorMatrixMultiply…`, then abort) in 28 | `health.txt`, `stderr/` |
 | Why it was missed | a resumed attempt found 4 rows, judged nothing and succeeded in 1–2 min; the health line printed the error count but did not fail the job | job logs of the resumed runs (e.g. 42175062903: "4 positions judged, 4 judge errors") |
+
+**Time forfeits in the runner pilot** (2026-11-06, the blocks played without a time margin; amendment
+15 (j)). Health only. Neither block's score was read, and the games enter no estimate. The forfeits' timing
+comes from two scripts that print no result, side, engine, evaluation, game index or game length.
+Record in `results/paper_v2/runner_probe/forfeit_pilot/`: `health.txt` (the blocks' health lines),
+`forfeit_timing.py`, `overrun_sizes.py` and their output `forfeit_timing.txt`, the blocks' minute
+samplers `vm_sampler_*.log` and `sampler_summary.txt`.
+
+| Quantity | Value | Artifact |
+| --- | --- | --- |
+| Time forfeits | 7 of 300 games: RQ1a-R block 0 2 of 100 (run 42244031757), RQ6d-R block 0 1 of 100 (42244039818), RQ1a-R block 1 4 of 100 (42244048237); 0 GPU error lines in all three | `health.txt` |
+| Clock of the side that lost on time | 0.43–1.62 s | `forfeit_timing.txt` |
+| Overrun of the losing move | 39, 52, 58, 99 and 217 ms (recorded moves); 2 losing moves not received within the 100 ms fastchess waits beyond the clock | `forfeit_timing.txt` |
+| The runners during these blocks | no swap in 179, 176 and 182 minute samples; `kernel_task` above 25% of a core in 41, 50 and 55 samples (maxima 108.5%, 87.1%, 102.4%); Spotlight (`mds`, `mds_stores`) above 25% in 4, 4 and 3 (maxima 102.7%, 80.5%, 52.8%) | `sampler_summary.txt`, `vm_sampler_*.log` |
+| Pilot runs without a complete block | 42244056141 (RQ6d-R block 1), 42244063141 (RQ1a-R block 2), 42244070395 (RQ6d-R block 2): force-cancelled 17.7, 14.5 and 1.3 min after they started, so no artifact; 42244077383, 42244086261, 42271789034, 42272280081: cancelled before they started | `results/paper_v2/runner_campaign_log.txt` |

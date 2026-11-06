@@ -689,3 +689,51 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
        follows a runner probe of Lc0 0.32.1's CPU (BLAS) backend (task `judge-probe`), which times the
        oracle's procedure on positions outside the sample and records only timings, crashes and GPU
        errors.
+    (j) **Addendum (2026-11-06, time forfeits on the runners; written before any runner cell has
+    been read).** The first three runner blocks to finish lost 7 of their 300 games on time:
+    RQ1a-R block 0 lost two, RQ6d-R block 0 one and RQ1a-R block 1 four (the health lines of runs
+    42244031757, 42244039818 and 42244048237). At the 0.5% limit of §10 and (e), 1.5 would be
+    expected. To size a remedy without reading a result, two scripts read those blocks' PGNs and
+    printed only the end time and the clocks and move times around each forfeit. They printed no
+    result, side, engine, evaluation, game index or game length (08 §F). Every forfeit came with
+    0.43–1.62 s on the clock of the side that lost. Five losing moves arrived 39, 52, 58, 99 and
+    217 ms after that clock ran out. Two did not arrive within the 100 ms that fastchess 1.8.2-alpha
+    waits beyond the clock (`TimeControl::getTimeoutThreshold`). The 217 ms overrun is longer than
+    that wait, so fastchess's own timing was delayed too. None of the three runners used swap in
+    their 176–182 minute samples. `kernel_task` used more than a quarter of a core in 41–55 samples
+    (at most 108%), and Spotlight did in 3–4 (at most 103%). With both arms filling three virtual
+    cores, the losses come from the virtual machine's timing jitter.
+    §10's remedy, a larger Move Overhead for both arms, cannot absorb such overruns. MetalFish's
+    time manager subtracts the overhead 52 times from the 44.7 s budget of a 30+0.3 game
+    (`moveOverhead * (2 + mtg)` with mtg = 50 in `src/search/timeman.cpp`). The largest measured
+    overrun came on top of the present 50 ms, so it would need about 270 ms. That would remove 14 s
+    from the budget of every move and change the time control for both arms. Decisions:
+    1. In every runner game cell, fastchess forgives a move that overruns the clock by up to
+       1,000 ms (`-each … timemargin=1000`; `timemargin_ms` in `experiments.json`). The engines are
+       not told: their clocks, options and time management are unchanged, and only fastchess's
+       rule differs. After a forgiven overrun, fastchess sets the side's clock to 0 and adds the
+       increment (`TimeControl::updateTime`). A longer overrun still loses on time, and the
+       forfeit limit of (e) applies to the forfeits that remain.
+    2. RQ1a-R and RQ6d-R start again from block 0. The blocks played without a margin are the
+       runner's pilot: the three complete blocks above, three blocks force-cancelled 1–18 minutes
+       after they started (runs 42244056141, 42244063141 and 42244070395; force-cancelling skips
+       the artifact, so their games are lost unread), and four that never started. The complete
+       blocks stay as artifacts; none is read, and none enters an estimate. Only their health
+       counts are recorded (08 §F). The joiner takes a block's attempt only if every invocation in
+       it recorded the cell's margin (`timemargin_ms` in the manifest's history). It lists the
+       other attempts in the joined manifest (`excluded_attempts`).
+    3. Primary estimates use the games as played. Each runner cell also reports, next to the
+       forfeit variants of 12(b)(iii), the games in which a move overran its clock, by the arm that
+       overran first. It also reports the cell under the registered rule: each such game scored as
+       lost by that arm. This is exactly the result fastchess would have recorded without a margin.
+       Both engines are sent the same clocks up to that move, and the PGN records each move's time
+       and the clock left to the millisecond (`robustness.strict_referee`). If the two estimates
+       differ by more than the primary standard error, both are reported and the result is called
+       time-sensitive. Each block's health line also counts the games with an overrun, without a
+       side.
+    4. Cancelling a run now stops its jobs. The game, oracle and micro jobs ran under
+       `if: always()`, which GitHub honours even in a cancelled run. That is why five of the eight
+       runs in (i) had to be force-cancelled. It is also why none of the five queued pilot runs
+       cancelled on 2026-11-06 at 18:45 UTC stopped, and one of them started three minutes later.
+       The jobs now use `!cancelled()`, and their `always()` steps still record the health line and
+       upload the artifact.

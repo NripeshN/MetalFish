@@ -18,7 +18,9 @@ games are treated.
 
 A block tried more than once (GitHub cancels a job no runner takes; a failed attempt is resumed
 by the next) contributes its one complete attempt, which holds every game of the attempts before
-it; `--use BLOCK=RUN` names the attempt when that is ambiguous.
+it; `--use BLOCK=RUN` names the attempt when that is ambiguous. Only attempts played with the
+cell's fastchess time margin (`timemargin_ms`, amendment 15 (j)) are considered; the others (the
+pilot blocks played without one) are listed in the manifest's `excluded_attempts` and never joined.
 """
 
 from __future__ import annotations
@@ -92,6 +94,17 @@ def pick_attempt(dirs: List[pathlib.Path], complete, use: str | None = None):
     return done[0] if len(done) == 1 else (dirs[0] if len(dirs) == 1 else None)
 
 
+def margins(d: pathlib.Path) -> set:
+    """The fastchess time margins (ms) of a block attempt's invocations, from its manifest's
+    history; an invocation that records none was played without one (before amendment 15 (j)).
+    """
+    try:
+        history = json.load(open(d / "manifest.json")).get("history") or []
+    except (OSError, ValueError):
+        return set()
+    return {int(h.get("timemargin_ms", 0)) for h in history}
+
+
 def find_blocks(root: pathlib.Path, cell_id: str) -> Dict[int, List[pathlib.Path]]:
     found: Dict[int, List[pathlib.Path]] = {}
     for d in sorted(root.rglob("games-*")):
@@ -107,10 +120,13 @@ def join_cell(
     blocks: Dict[int, pathlib.Path],
     out: pathlib.Path,
     allow_gpu_errors: str | None = None,
+    excluded: List[str] | None = None,
 ) -> Dict:
     """Write the joined cell directory from one complete directory per block; returns the
-    summary (raises SystemExit on a missing, incomplete or inconsistent block, and on GPU errors
-    in the engines' stderr unless `allow_gpu_errors` names the amendment that treats them).
+    summary (raises SystemExit on a missing, incomplete or inconsistent block, on a block played
+    with another time margin than the cell's, and on GPU errors in the engines' stderr unless
+    `allow_gpu_errors` names the amendment that treats them). `excluded` lists the attempts left
+    out for their time margin, recorded in the manifest.
     """
     nblocks = int(cell["blocks"])
     per_block = -(-int(cell["pairs"]) // nblocks)
@@ -129,6 +145,13 @@ def join_cell(
         raise SystemExit(
             f"{cell_id}: blocks were played by different binaries: {builds}"
         )
+    margin = int(cell.get("timemargin_ms", 0))
+    for b in range(nblocks):
+        if margins(blocks[b]) != {margin}:
+            raise SystemExit(
+                f"{cell_id} block {b}: played with time margins {sorted(margins(blocks[b]))} ms, "
+                f"the cell's is {margin} ms (amendment 15 (j))"
+            )
     gpu = {
         b: gpu_errors.count_in(blocks[b] / "engines.log.zst") for b in range(nblocks)
     }
@@ -202,6 +225,8 @@ def join_cell(
             "block": None,
             "gpu_error_lines_by_block": gpu,
             "gpu_errors_treated_by": allow_gpu_errors,
+            "timemargin_ms": margin,
+            "excluded_attempts": excluded or [],
         }
     )
     with open(out / "manifest.json", "w") as fh:
@@ -269,13 +294,21 @@ def main(argv: List[str] | None = None) -> int:
             )
         found = find_blocks(root, args.cell_id)
         use = dict(u.split("=", 1) for u in args.use)
-        blocks = {}
+        margin = int(cell.get("timemargin_ms", 0))
+        blocks, excluded = {}, []
         for b, dirs in found.items():
-            pick = pick_attempt(dirs, complete, use.get(str(b)))
+            # attempts played with another time margin (the runner's pilot blocks before
+            # amendment 15 (j)) are never joined
+            same = [d for d in dirs if margins(d) == {margin}]
+            excluded += [str(d.relative_to(root)) for d in dirs if d not in same]
+            if not same:
+                continue
+            pick = pick_attempt(same, complete, use.get(str(b)))
             if pick is None:
                 raise SystemExit(
-                    f"block {b}: {len(dirs)} attempts and no single complete one "
-                    f"({[str(d) for d in dirs]}); name the run with --use {b}=RUN"
+                    f"block {b}: {len(same)} attempts with the cell's time margin and no "
+                    f"single complete one ({[str(d) for d in same]}); name the run with "
+                    f"--use {b}=RUN"
                 )
             blocks[b] = pick
         summary = join_cell(
@@ -284,6 +317,7 @@ def main(argv: List[str] | None = None) -> int:
             blocks,
             run_cell.RESULTS_ROOT / args.cell_id,
             args.allow_gpu_errors,
+            sorted(excluded),
         )
     print(
         f"{args.cell_id}: {summary['stats'].get('games', '?')} games joined from "
