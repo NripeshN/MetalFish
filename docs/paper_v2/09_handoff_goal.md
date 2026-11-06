@@ -110,6 +110,12 @@ runner (one measurement per runner VM, no load gate needed, health from `vm_samp
   block must not mix referee rules. The joiner skips pilot attempts by their manifest history. The
   health line now ends "games with a clock overrun N". If time forfeits stay above 0.5% with the
   margin, stop and write an amendment.
+- **Amendment 15 (k) (2026-11-06).** The oracle's Lc0 judge runs on the CPU (`--backend=blas`,
+  `--judge-timeout 9000`). Restart the driver without `--hold oracle` and with `--last oracle`:
+  `nohup python3 results/ars_pipeline/tools/runner_driver.py --in-flight 8 --resume --last oracle &`.
+  It then dispatches a shard only when no game block is waiting for a slot. Each shard's health line
+  must show "0 judge errors, 0 rows lacking a judge, 0 Lc0 judgments of an earlier configuration" when
+  it succeeds. A shard resumed from a GPU-era artifact keeps its Stockfish rows and judges Lc0 again.
 
 ## Phase B — the arXiv preprint (the author decided: do it)
 

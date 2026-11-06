@@ -92,3 +92,8 @@ designed so the paper is publishable whichever way the measurements come out.
   block 0, and the blocks played without a margin are an unread pilot. Every runner cell also reports
   the registered referee rule, rebuilt exactly from the PGN's clocks. Cancelling a run now stops its
   jobs (`!cancelled()`).
+- **2026-11-06 (night)** — Amendment 15 (k): the oracle's Lc0 judge runs on the runners' CPU (BLAS
+  backend, Lc0's CPU defaults: one search thread, minibatches of 7). In the probe a position took
+  26–78 min (63 on average), with no crash and no GPU error (08 §F). A shard of 4 positions takes about
+  4.5 h, and the oracle about 675 runner-hours. Its shards use only the runners that the game cells
+  leave free.

@@ -737,3 +737,35 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
        cancelled on 2026-11-06 at 18:45 UTC stopped, and one of them started three minutes later.
        The jobs now use `!cancelled()`, and their `always()` steps still record the health line and
        upload the artifact.
+    (k) **Addendum (2026-11-06, the oracle's Lc0 judge on the runners' CPU; written before any oracle
+    shard has been read).** The CPU probe that (i) 4 called for ran on two runners (run
+    42237442021, task `judge-probe`). It used Lc0 0.32.1's BLAS backend from the Homebrew build,
+    which computes with Apple's Accelerate library, and the oracle's settings: the BT4 network,
+    30,000 nodes, smart pruning off and Lc0's defaults otherwise. It printed only timings, node
+    counts, crashes and GPU error lines (08 §F). Lc0 evaluated 5.9–8.9 positions per second at
+    batch 1, 14.9–15.7 at batch 16 and 12.3–13.1 at batch 64, against 24–31 at batch 1 and 62–64 at
+    batch 32 on the GPU. One 30,000-node search of each of the two positions of (a) took 27.8–30.2
+    and 16.0–16.4 minutes. The oracle's procedure (the position, then the position after each
+    candidate) took 26.3–78.1 minutes per position on eight positions outside the sample, 63.1 on
+    average. There was no crash and no GPU error line. Decisions:
+    1. The Lc0 judge runs on the CPU (`--backend=blas` instead of `--backend=metal`); its version,
+       network, node limit, fresh tree per candidate and smart pruning are unchanged. Lc0's
+       defaults depend on the backend. In 0.32.1 a CPU backend gets one search thread and other
+       backends two (`Search::StartThreads`). The search's minibatch defaults to the backend's
+       `GetMiniBatchSize()`: 7 for BLAS, 256 for Metal. So the judge's search changes shape as well
+       as arithmetic (Accelerate on the CPU instead of Metal Performance Shaders on the GPU). The
+       registered "defaults otherwise" are kept rather than forcing the Metal values onto the CPU:
+       they are the values Lc0 chooses for a CPU backend, and they are what the probe timed. The
+       judge-stability check of (a) on the 74 workstation positions therefore measures the
+       backend, the search's shape and the machine together.
+    2. A judge that takes more than 9,000 s on one position (`--judge-timeout 9000`, about twice
+       the slowest probe position) is restarted and the position judged again, as in (i) 2. Every
+       Lc0 judgment made on a runner's GPU stays discarded: a resumed shard judges again with Lc0
+       every position whose Lc0 judgment records another configuration, or none.
+    3. The shards stay 150 of 4 positions, because the resume and the join depend on them. A shard
+       takes about 4.5 h: four positions at about an hour each, almost all of it Lc0, plus two
+       60 s Stockfish searches per position and the setup. That is inside the 340-minute job limit.
+       A shard that overruns the limit fails and is resumed from its artifact (15 (h)), losing at
+       most the position in progress. The oracle needs about 675 runner-hours (150 × 4.5 h). The
+       game cells keep the priority of (i) 3: the driver dispatches a shard only into a slot that no
+       game block can take (`--last oracle`).
