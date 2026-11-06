@@ -16,6 +16,8 @@
 #   oracle - RQ6b on the runners: Stockfish 19 built once, then one job per contiguous shard of
 #            the 600-position sample (`oracle_probe.py --shard i/K`); each shard leaves an
 #            artifact oracle-shard-<i>; the shards are joined in order and summarised once.
+#   judge-probe - the Lc0 judge on the runner's CPU (Accelerate BLAS backend): the oracle's
+#            procedure timed on positions outside the sample, crashes and GPU errors counted.
 #   micro  - the microbenchmarks M1 (NN latency, MetalFish and Lc0) and M2 (alpha-beta thread
 #            scaling) on a runner with the campaign's engine build (`engine_run`).
 # Job logs are public while a cell runs, so the jobs print health only (games, forfeits, pace,
@@ -28,11 +30,11 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "probe | games | oracle | micro"
+        description: "probe | judge-probe | games | oracle | micro"
         required: true
         default: probe
         type: choice
-        options: [probe, games, oracle, micro]
+        options: [probe, judge-probe, games, oracle, micro]
       cells:
         description: "games: runner cells whose blocks run interleaved, e.g. RQ1a-R,RQ6d-R"
         default: ""
@@ -273,6 +275,64 @@ jobs:
           eng.quit()
           EOF
 
+  probe-judge-cpu:
+    name: Lc0 judge on the CPU (VM ${{ matrix.vm }})
+    if: inputs.task == 'judge-probe'
+    runs-on: macos-26
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        vm: [0, 1]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Python tools and Lc0
+        run: |
+          python3 -m pip install -r tests/requirements.txt
+          brew install lc0
+          v=$(brew list --versions lc0); echo "$v"
+          [ "$v" = "lc0 0.32.1" ] || { echo "::error::the protocol's Lc0 judge is 0.32.1"; exit 1; }
+          tools/paper/runner_setup.sh runner "$RUNNER_TEMP/runner.json" && cat "$RUNNER_TEMP/runner.json"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-t1-v3
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-bt4-nnue-
+            ${{ runner.os }}-engine-networks-
+
+      - name: Network and positions
+        run: |
+          python3 tools/download_engine_networks.py --bt4-only --dest networks --cache-dir "$METALFISH_NETWORK_CACHE_DIR"
+          echo "$BT4_SHA256  networks/$BT4" | shasum -a 256 -c
+          gunzip -c docs/paper_v2/data/rq6b_disagreements.jsonl.gz > "$RUNNER_TEMP/disagreements.jsonl"
+
+      - name: CPU backend throughput (backendbench)
+        run: |
+          LC0="$(brew --prefix)/bin/lc0"
+          for b in 1 16 64; do
+            "$LC0" backendbench --backend=blas --weights="networks/$BT4" --start-batch-size=$b --max-batch-size=$b --batches=10 2>&1 | grep -E "Benchmark|rror" | tail -2 || true
+          done
+
+      - name: One 30,000-node search of the two positions the GPU probe timed
+        run: |
+          python3 tools/paper/judge_probe.py "$RUNNER_TEMP/disagreements.jsonl" --engine "$(brew --prefix)/bin/lc0" \
+            --arg=--backend=blas --arg=--weights="networks/$BT4" --option SmartPruningFactor=0 --nodes 30000 \
+            --fen "r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N2N2/PP2BPPP/R2QKB1R w KQ - 0 9" \
+            --fen "2r2rk1/pp1q1ppp/2n1pn2/3p4/3P4/P1NBPN2/1P3PPP/2RQ1RK1 b - - 2 14"
+
+      - name: The oracle's procedure on four positions outside the sample (timings only)
+        run: |
+          python3 tools/paper/judge_probe.py "$RUNNER_TEMP/disagreements.jsonl" --engine "$(brew --prefix)/bin/lc0" \
+            --arg=--backend=blas --arg=--weights="networks/$BT4" --option SmartPruningFactor=0 --nodes 30000 \
+            --positions 4 --seed $((101 + ${{ matrix.vm }}))
+
   plan:
     name: Plan
     if: inputs.task == 'games' || inputs.task == 'oracle'
@@ -431,7 +491,9 @@ jobs:
         if: always()
         run: |
           python3 - <<'EOF'
-          import json, os, pathlib, re
+          import json, os, pathlib, re, sys
+          sys.path.insert(0, "tools/paper")
+          import gpu_errors
           out = pathlib.Path(os.environ["OUT_DIR"])
           pgn = (out / "games.pgn").read_text(errors="replace") if (out / "games.pgn").exists() else ""
           games = pgn.count("[Result ")
@@ -442,8 +504,11 @@ jobs:
           tel = summ.get("telemetry", {})
           if "stats" in summ:  # the block's own tally; the PGN count above is for an interrupted block
               forfeits = sum(summ["stats"].get("time_forfeits_by", {}).values())
+          gpu = gpu_errors.count_in(out / "engines.log") if (out / "engines.log").exists() else None
           print(f"games {games}, time forfeits {forfeits}, block hours/exit {head}, "
-                f"GPU-active fraction {tel.get('gpu_active_fraction')}, median MCTS evals {tel.get('mcts_evals_median')}")
+                f"GPU-active fraction {tel.get('gpu_active_fraction')}, median MCTS evals {tel.get('mcts_evals_median')}, "
+                f"GPU error lines {gpu}")
+          json.dump({"gpu_error_lines": gpu}, open(out / "gpu_health.json", "w"))
           EOF
           zstd -q -19 -T0 --rm "$OUT_DIR/engines.log" || true
           zstd -q -19 -T0 --rm "$OUT_DIR/moves.jsonl" || true
@@ -623,20 +688,32 @@ jobs:
             --judge-option sf19:Hash=2048 --judge-option sf19:SyzygyPath=syzygy --movetime 60000 \
             --judge lc0="$LC0" --judge-arg lc0:--backend=metal \
             --judge-arg lc0:--weights="networks/$BT4" --nodes lc0:30000 \
-            --judge-option lc0:SmartPruningFactor=0 \
+            --judge-option lc0:SmartPruningFactor=0 --retries 2 --keep-unrecorded sf19 \
             --sample 600 --seed 1 --shard "$SHARD/$SHARDS" "${resume[@]}" > "$OUT/stdout_s$SHARD.txt" 2> "$RUNNER_TEMP/stderr.txt" || rc=$?
           grep -vi "mps module" "$RUNNER_TEMP/stderr.txt" > "$OUT/stderr_s$SHARD.txt" || true
-          tail -3 "$OUT/stderr_s$SHARD.txt"
+          grep -E "^position |still lack|^resuming" "$OUT/stderr_s$SHARD.txt" | tail -8 || true
           exit $rc
       - name: Health (no verdicts)
         if: always()
         run: |
           python3 - <<'EOF'
-          import json, os, pathlib
-          p = pathlib.Path("results/paper_v2/RQ6b-R") / f"shard_{os.environ['SHARD']}.jsonl"
+          import json, os, pathlib, sys
+          sys.path.insert(0, "tools/paper")
+          import gpu_errors
+          i, k = int(os.environ["SHARD"]), int(os.environ["SHARDS"])
+          out = pathlib.Path("results/paper_v2/RQ6b-R")
+          p = out / f"shard_{i}.jsonl"
           rows = [json.loads(l) for l in open(p)] if p.exists() else []
+          want = (i + 1) * 600 // k - i * 600 // k
           errs = sum(1 for r in rows for j in r["judges"].values() if "error" in j)
-          print(f"shard {os.environ['SHARD']}/{os.environ['SHARDS']}: {len(rows)} positions judged, {errs} judge errors")
+          lacking = sum(1 for r in rows if set(r["judges"]) != {"sf19", "lc0"})
+          old_lc0 = sum(1 for r in rows if "config" not in r["judges"].get("lc0", {}))
+          again = sum(1 for r in rows for j in r["judges"].values() if j.get("attempts", 1) > 1)
+          gpu = gpu_errors.count_in(out / f"stderr_s{i}.txt")
+          print(f"shard {i}/{k}: {len(rows)} of {want} positions, {errs} judge errors, {lacking} rows lacking a judge, "
+                f"{old_lc0} Lc0 judgments of an earlier configuration, {again} judged again, {gpu} GPU error lines")
+          # a shard is complete only with a usable judgment from both judges on every position (amendment 15 (i))
+          raise SystemExit(0 if len(rows) == want and not (errs or lacking or old_lc0) else 1)
           EOF
       - uses: actions/upload-artifact@v4
         if: always()

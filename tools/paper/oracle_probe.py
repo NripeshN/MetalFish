@@ -52,15 +52,22 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import collections
 import itertools
 import json
+import logging
 import math
+import os
 import random
+import signal
 import sys
-from typing import Dict, List, Optional
+import threading
+import time
+from typing import Callable, Dict, List, Optional
 
 import chess
 import chess.engine
+import gpu_errors
 
 KEEP_FIELDS = (
     "fen",
@@ -150,6 +157,146 @@ def judge_position(
         "depth": best.get("depth"),
         "nodes": best.get("nodes"),
     }
+
+
+def score_candidates(j: Dict, r: Dict, tie_cp: float, cp_scale: float) -> Dict:
+    """A judgment with each candidate's loss against the judge's best, in cp and expected
+    score, and the verdict; an error when the judge did not score both candidates."""
+    ab_cp = j["cand_cp"].get(r["ab_move"])
+    mc_cp = j["cand_cp"].get(r["mcts_move"])
+    if ab_cp is None or mc_cp is None:
+        return {"error": "candidate not scored", **j}
+    best = max(j["best_cp"], ab_cp, mc_cp)
+    j.update(
+        {
+            "ab_cp": ab_cp,
+            "mcts_cp": mc_cp,
+            "delta_cp": ab_cp - mc_cp,
+            "loss_ab_cp": best - ab_cp,
+            "loss_mcts_cp": best - mc_cp,
+            "loss_ab_es": logistic(best, cp_scale) - logistic(ab_cp, cp_scale),
+            "loss_mcts_es": logistic(best, cp_scale) - logistic(mc_cp, cp_scale),
+            "verdict": (
+                "ab"
+                if ab_cp - mc_cp > tie_cp
+                else ("mcts" if mc_cp - ab_cp > tie_cp else "tie")
+            ),
+        }
+    )
+    return j
+
+
+def write_rows(path: str, rows: List[Dict]) -> None:
+    """Replace `path` with `rows` (JSONL) in one step, so it never holds a partial file."""
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as fh:
+        for row in rows:
+            fh.write(json.dumps(row) + "\n")
+    os.replace(tmp, path)
+
+
+STDERR_GRACE_S = 0.5  # after a search, time for the engine's stderr to arrive
+
+
+class StderrWatch(logging.Handler):
+    """Echoes the judges' stderr (python-chess logs it on `chess.engine`) and counts, per engine
+    process, the lines that report a GPU error."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.by_engine: Dict[str, int] = {}
+
+    def emit(self, record: logging.LogRecord) -> None:
+        msg = record.getMessage()
+        print(msg, file=sys.stderr)
+        if gpu_errors.is_gpu_error(msg):
+            args = record.args if isinstance(record.args, tuple) else ()
+            who = str(args[0]) if args else ""
+            self.by_engine[who] = self.by_engine.get(who, 0) + 1
+
+
+def close_engine(eng) -> None:
+    """Quit an engine; one that has died cannot, which is not an error here."""
+    try:
+        eng.quit()
+    except Exception:  # noqa: BLE001
+        try:
+            eng.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def kill_engine(eng) -> None:
+    try:
+        os.kill(eng.transport.get_pid(), signal.SIGKILL)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+class Judge:
+    """A judge engine, started again from scratch after it dies, overruns or reports a GPU error
+    during a search (amendment 15 (i)). `spawn` starts and configures one engine process.
+    """
+
+    def __init__(self, name: str, spawn: Callable, watch: StderrWatch) -> None:
+        self.name, self.spawn, self.watch = name, spawn, watch
+        self.eng = spawn()
+
+    def gpu_errors(self) -> int:
+        return self.watch.by_engine.get(str(getattr(self.eng, "protocol", self.eng)), 0)
+
+    def restart(self) -> None:
+        close_engine(self.eng)
+        self.eng = self.spawn()
+
+    def close(self) -> None:
+        close_engine(self.eng)
+
+
+def judge_with_retries(
+    judge: Judge,
+    board: chess.Board,
+    cands: List[str],
+    limit: chess.engine.Limit,
+    per_candidate: bool,
+    retries: int,
+    timeout: Optional[float] = None,
+) -> Dict:
+    """judge_position with up to `retries` further attempts, each on a fresh engine process, when
+    the engine dies, takes longer than `timeout` seconds, or reports a GPU error on stderr during
+    the search. Returns the judgment, or the last error, with the number of attempts made.
+    """
+    error = None
+    for attempt in range(1, retries + 2):
+        before = judge.gpu_errors()
+        timer = None
+        if timeout:
+            timer = threading.Timer(timeout, kill_engine, (judge.eng,))
+            timer.start()
+        try:
+            j = judge_position(judge.eng, board, cands, limit, per_candidate)
+            judge.eng.ping()
+            time.sleep(STDERR_GRACE_S)
+        except Exception as exc:  # noqa: BLE001
+            error = f"{type(exc).__name__}: {exc}"
+        else:
+            if judge.gpu_errors() == before:
+                j["attempts"] = attempt
+                return j
+            error = "GPU error reported during the search"
+        finally:
+            if timer:
+                timer.cancel()
+        judge.restart()
+    return {"error": error, "attempts": retries + 1}
+
+
+def judge_config(path: str, jargs: List[str], options: List, limit: str) -> str:
+    """The judge as configured: engine, arguments, UCI options and limit. Recorded in every
+    judgment; a resumed run keeps only judgments made with the same configuration."""
+    return " ".join(
+        [os.path.basename(path), *jargs, *(f"{k}={v}" for k, v in options), limit]
+    )
 
 
 def cluster_key(rec: Dict) -> Optional[str]:
@@ -349,6 +496,10 @@ def summarise(
                 {r.get("cluster") or f"position:{i}" for i, r in enumerate(ok)}
             ),
             "errors": sum(1 for r in rows if "error" in r["judges"].get(name, {})),
+            "configs": dict(
+                collections.Counter(j.get("config", "unrecorded") for j in js)
+            ),
+            "judged_again": sum(1 for j in js if j.get("attempts", 1) > 1),
             "selected_neither_candidate": sum(
                 1 for r in ok if r["selected"] not in (r["ab_move"], r["mcts_move"])
             ),
@@ -652,6 +803,27 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="read the judged rows from --out and rewrite the summary; no engine is started",
     )
+    ap.add_argument(
+        "--retries",
+        type=int,
+        default=2,
+        help="further attempts, each on a fresh engine process, when a judge dies, overruns "
+        "--judge-timeout or reports a GPU error during a search (default 2)",
+    )
+    ap.add_argument(
+        "--judge-timeout",
+        type=float,
+        help="seconds one judge may take over a position before its engine is killed and the "
+        "position judged again",
+    )
+    ap.add_argument(
+        "--keep-unrecorded",
+        action="append",
+        default=[],
+        help="NAME: with --resume, keep this judge's judgments that record no configuration "
+        "(made before configurations were recorded); others are kept only when made with "
+        "the same configuration",
+    )
     args = ap.parse_args(argv)
 
     # stream the trace (hundreds of MB): keep only disagreement records and the fields used here
@@ -715,6 +887,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     def row_key(row: Dict) -> tuple:
         return (row["fen"], row["ab_move"], row["mcts_move"], row.get("cluster"))
 
+    def sample_key(r: Dict) -> tuple:
+        return (r["fen"], r["ab_move"], r["mcts_move"], cluster_key(r))
+
     done: List[Dict] = []
     if args.resume or args.summarise_only:
         try:
@@ -724,108 +899,159 @@ def main(argv: Optional[List[str]] = None) -> int:
             done = []
     if args.summarise_only:
         rows = done
+        incomplete = 0
     else:
-        judged = {row_key(r) for r in done}
-        todo = [
-            r
-            for r in sample
-            if (r["fen"], r["ab_move"], r["mcts_move"], cluster_key(r)) not in judged
-        ]
-        if done:
-            print(f"resuming: {len(done)} judged, {len(todo)} to go", file=sys.stderr)
-        judges = {}
-        for spec in args.judge if todo else []:
-            name, path = spec.split("=", 1)
-            jargs = [
+        specs = [spec.split("=", 1) for spec in args.judge]
+        jargs = {
+            name: [
                 a.split(":", 1)[1] for a in args.judge_arg if a.split(":", 1)[0] == name
             ]
-            eng = chess.engine.SimpleEngine.popen_uci([path, *jargs])
-            for o in args.judge_option:
-                jn, kv = o.split(":", 1)
-                if jn == name:
-                    k, v = kv.split("=", 1)
+            for name, _ in specs
+        }
+        jopts = {
+            name: [
+                o.split(":", 1)[1].split("=", 1)
+                for o in args.judge_option
+                if o.split(":", 1)[0] == name
+            ]
+            for name, _ in specs
+        }
+        configs = {
+            name: judge_config(
+                path,
+                jargs[name],
+                jopts[name],
+                (
+                    f"nodes={node_limits[name]}"
+                    if name in node_limits
+                    else f"movetime={args.movetime}"
+                ),
+            )
+            for name, path in specs
+        }
+
+        def usable(name: str, entry: Optional[Dict]) -> bool:
+            """A judgment a resumed run keeps: no error, and made with this configuration (or
+            made before configurations were recorded, for a judge named in --keep-unrecorded).
+            """
+            if not entry or "error" in entry:
+                return False
+            if "config" in entry:
+                return entry["config"] == configs[name]
+            return name in args.keep_unrecorded
+
+        by_key = {row_key(r): r for r in done}
+        in_sample = {sample_key(r) for r in sample}
+
+        def complete(r: Dict) -> bool:
+            row = by_key.get(sample_key(r))
+            return bool(row) and all(
+                usable(n, row["judges"].get(n)) for n in judge_names
+            )
+
+        def ordered() -> List[Dict]:
+            """Rows in sample order, then any rows of --out that are not in the sample."""
+            return [
+                by_key[sample_key(r)] for r in sample if sample_key(r) in by_key
+            ] + [r for r in done if row_key(r) not in in_sample]
+
+        todo = [r for r in sample if not complete(r)]
+        if done:
+            print(
+                f"resuming: {len(done)} rows, {len(todo)} positions to judge",
+                file=sys.stderr,
+            )
+        watch = StderrWatch()
+        engine_log = logging.getLogger("chess.engine")
+        engine_log.addHandler(watch)
+        engine_log.propagate = False
+
+        def spawner(name: str, path: str) -> Callable:
+            def spawn():
+                eng = chess.engine.SimpleEngine.popen_uci([path, *jargs[name]])
+                for k, v in jopts[name]:
                     try:
                         eng.configure({k: v})
                     except Exception as exc:  # noqa: BLE001
                         # a judge without its configured options is not the judge the
                         # protocol names (e.g. Lc0 with smart pruning on): stop here
-                        for e in [*judges.values(), eng]:
-                            e.quit()
-                        sys.exit(f"error: {name} option {k}={v} rejected: {exc}")
-            judges[name] = eng
+                        close_engine(eng)
+                        raise SystemExit(
+                            f"error: {name} option {k}={v} rejected: {exc}"
+                        )
+                return eng
 
-        rows = list(done)
+            return spawn
+
+        judges: Dict[str, Judge] = {}
         try:
-            with open(args.out, "a" if done else "w") as out:
-                for r in todo:
-                    board = chess.Board(r["fen"])
-                    row = {
-                        "fen": r["fen"],
-                        "ab_move": r["ab_move"],
-                        "mcts_move": r["mcts_move"],
-                        "selected": r.get("selected"),
-                        "reason": r.get("reason"),
-                        "mcts_playouts": r.get("mcts_playouts"),
-                        "mcts_root_visits": r.get("mcts_root_visits"),
-                        "stratum": r.get("_stratum"),
-                        "cluster": cluster_key(r),
-                        "opening": r.get("opening"),
-                        "judges": {},
-                    }
-                    for name, eng in judges.items():
-                        limit = (
-                            chess.engine.Limit(nodes=node_limits[name])
-                            if name in node_limits
-                            else chess.engine.Limit(time=args.movetime / 1000.0)
-                        )
-                        try:
-                            j = judge_position(
-                                eng,
-                                board,
-                                [r["ab_move"], r["mcts_move"]],
-                                limit,
-                                per_candidate=name in node_limits,
-                            )
-                        except Exception as exc:  # noqa: BLE001
-                            row["judges"][name] = {"error": str(exc)}
-                            continue
-                        ab_cp = j["cand_cp"].get(r["ab_move"])
-                        mc_cp = j["cand_cp"].get(r["mcts_move"])
-                        if ab_cp is None or mc_cp is None:
-                            row["judges"][name] = {"error": "candidate not scored", **j}
-                            continue
-                        best = max(j["best_cp"], ab_cp, mc_cp)
-                        j.update(
-                            {
-                                "ab_cp": ab_cp,
-                                "mcts_cp": mc_cp,
-                                "delta_cp": ab_cp - mc_cp,
-                                "loss_ab_cp": best - ab_cp,
-                                "loss_mcts_cp": best - mc_cp,
-                                "loss_ab_es": logistic(best, args.cp_scale)
-                                - logistic(ab_cp, args.cp_scale),
-                                "loss_mcts_es": logistic(best, args.cp_scale)
-                                - logistic(mc_cp, args.cp_scale),
-                                "verdict": (
-                                    "ab"
-                                    if ab_cp - mc_cp > args.tie_cp
-                                    else (
-                                        "mcts" if mc_cp - ab_cp > args.tie_cp else "tie"
-                                    )
-                                ),
-                            }
-                        )
-                        row["judges"][name] = j
-                    rows.append(row)
-                    out.write(json.dumps(row) + "\n")
-                    out.flush()
+            for name, path in specs if todo else []:
+                judges[name] = Judge(name, spawner(name, path), watch)
+            for k, r in enumerate(todo, 1):
+                board = chess.Board(r["fen"])
+                row = by_key.get(sample_key(r)) or {
+                    "fen": r["fen"],
+                    "ab_move": r["ab_move"],
+                    "mcts_move": r["mcts_move"],
+                    "selected": r.get("selected"),
+                    "reason": r.get("reason"),
+                    "mcts_playouts": r.get("mcts_playouts"),
+                    "mcts_root_visits": r.get("mcts_root_visits"),
+                    "stratum": r.get("_stratum"),
+                    "cluster": cluster_key(r),
+                    "opening": r.get("opening"),
+                    "judges": {},
+                }
+                for name, judge in judges.items():
+                    prev = row["judges"].get(name)
+                    if usable(name, prev):
+                        continue
+                    limit = (
+                        chess.engine.Limit(nodes=node_limits[name])
+                        if name in node_limits
+                        else chess.engine.Limit(time=args.movetime / 1000.0)
+                    )
+                    j = judge_with_retries(
+                        judge,
+                        board,
+                        [r["ab_move"], r["mcts_move"]],
+                        limit,
+                        name in node_limits,
+                        args.retries,
+                        args.judge_timeout,
+                    )
+                    if prev and "error" in prev and prev.get("config") == configs[name]:
+                        j["attempts"] += prev.get("attempts", 1)
+                    j["config"] = configs[name]
+                    if "error" not in j:
+                        j = score_candidates(j, r, args.tie_cp, args.cp_scale)
+                    row["judges"][name] = j
+                by_key[sample_key(r)] = row
+                write_rows(args.out, ordered())
+                print(
+                    f"position {k}/{len(todo)}: "
+                    + ", ".join(
+                        f"{n} {'error' if 'error' in row['judges'][n] else 'judged'}"
+                        f" after {row['judges'][n].get('attempts', 1)} attempt(s)"
+                        for n in judges
+                    ),
+                    file=sys.stderr,
+                    flush=True,
+                )
         finally:
-            for eng in judges.values():
-                eng.quit()
+            for judge in judges.values():
+                judge.close()
+        rows = ordered()
+        incomplete = sum(1 for r in sample if not complete(r))
+        if incomplete:
+            print(
+                f"{incomplete} positions still lack a judgment from every judge; resume to judge them",
+                file=sys.stderr,
+            )
 
     if args.shard:
         print(f"shard {args.shard}: {len(rows)} rows in {args.out}", file=sys.stderr)
-        return 0
+        return 3 if incomplete else 0
     summary = summarise(rows, judge_names, sampling, args.bootstrap, args.seed)
     summary["judging"] = judging
     summary["method"].update(
@@ -837,7 +1063,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     with open(args.out + ".summary.json", "w") as fh:
         json.dump(summary, fh, indent=2)
     print(json.dumps(summary, indent=2))
-    return 0
+    return 3 if incomplete else 0
 
 
 if __name__ == "__main__":

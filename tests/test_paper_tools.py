@@ -845,6 +845,44 @@ class RunnerCampaignTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 self.fetch.join_cell("T-R", cell, mixed, pathlib.Path(d) / "o2")
 
+    def test_gpu_errors_hold_the_cell(self):
+        import shutil
+        import subprocess
+
+        import gpu_errors
+
+        if not shutil.which("zstd"):
+            self.skipTest("zstd unavailable")
+        cell = {
+            "id": "T-R",
+            "machine": "runner",
+            "pairs": 4,
+            "blocks": 2,
+            "a": {"engine": "AB", "threads": 1},
+            "b": {"engine": "AB", "threads": 3},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            blocks = {
+                0: self._block(d, 0, [("1-0", "0-1"), ("1/2-1/2", "1/2-1/2")]),
+                1: self._block(d, 1, [("0-1", "1-0"), ("1-0", "1-0")]),
+            }
+            log = blocks[1] / "engines.log"
+            log.write_text(
+                "[Engine] <stderr> AB-T3 ---> Error: command buffer exited with error status.\n"
+                "[Engine] <stderr> AB-T3 ---> info string ok\n"
+            )
+            self.assertEqual(gpu_errors.count_in(log), 1)
+            subprocess.run(["zstd", "-q", "--rm", str(log)], check=True)
+            self.assertEqual(gpu_errors.count_in(blocks[1] / "engines.log.zst"), 1)
+            with self.assertRaises(SystemExit):
+                self.fetch.join_cell("T-R", cell, blocks, pathlib.Path(d) / "o1")
+            self.assertFalse((pathlib.Path(d) / "o1").exists())  # nothing was written
+            out = pathlib.Path(d) / "o2"
+            self.fetch.join_cell("T-R", cell, blocks, out, "15 (j)")
+            m = json.load(open(out / "manifest.json"))
+            self.assertEqual(m["gpu_error_lines_by_block"], {"0": 0, "1": 1})
+            self.assertEqual(m["gpu_errors_treated_by"], "15 (j)")
+
 
 class RunnerCellDefinitionsTest(unittest.TestCase):
     """Dry-runs every runner cell of docs/paper_v2/experiments.json (protocol amendment 15): one
@@ -1342,6 +1380,200 @@ class OracleJudgingTest(unittest.TestCase):
             )
             self.assertEqual(summ["sampling"]["method"], "stratified")
             self.assertEqual(sum(summ["sampling"]["strata_population"].values()), 6)
+
+
+class ScriptedEngine(FakeJudge):
+    """FakeJudge as a judge process: mode 'ok' searches, 'die' fails as a dead engine does, 'gpu'
+    reports a Metal command-buffer error on stderr during each search."""
+
+    def __init__(self, mode="ok"):
+        super().__init__()
+        self.mode = mode
+        self.protocol = f"<ScriptedProtocol {id(self)}>"
+
+    def configure(self, options):
+        pass
+
+    def analyse(self, board, limit, multipv=None, root_moves=None, game=None):
+        import logging
+
+        import chess.engine
+
+        if self.mode == "die":
+            raise chess.engine.EngineTerminatedError("engine event loop dead")
+        if self.mode == "gpu":
+            logging.getLogger("chess.engine").warning(
+                "%s: stderr >> %s",
+                self.protocol,
+                "Error: command buffer exited with error status.",
+            )
+        return super().analyse(board, limit, multipv, root_moves, game)
+
+    def ping(self):
+        pass
+
+    def quit(self):
+        pass
+
+
+class OracleJudgeFailureTest(unittest.TestCase):
+    """Pins how tools/paper/oracle_probe.py handles a judge that dies or reports a GPU error, and
+    what a resumed run keeps (amendment 15 (i))."""
+
+    def setUp(self):
+        try:
+            import chess  # noqa: F401
+            import oracle_probe  # noqa: F401
+        except ImportError as exc:  # python-chess missing
+            self.skipTest(f"oracle_probe unavailable: {exc}")
+        import logging
+
+        self.op = sys.modules["oracle_probe"]
+        self.chess = sys.modules["chess"]
+        self.op.STDERR_GRACE_S = 0.0
+        self.log = logging.getLogger("chess.engine")
+        self.handlers, self.propagate = list(self.log.handlers), self.log.propagate
+
+    def tearDown(self):
+        self.log.handlers[:] = self.handlers
+        self.log.propagate = self.propagate
+
+    def _judge(self, modes):
+        seq = iter(modes)
+        watch = self.op.StderrWatch()
+        self.log.addHandler(watch)
+        self.log.propagate = False
+        return self.op.Judge("lc0", lambda: ScriptedEngine(next(seq)), watch)
+
+    def _judge_once(self, judge, retries=2):
+        import chess.engine
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            return self.op.judge_with_retries(
+                judge,
+                self.chess.Board(),
+                ["e2e4", "d2d4"],
+                chess.engine.Limit(nodes=100),
+                True,
+                retries,
+            )
+
+    def test_a_dead_engine_is_restarted_and_the_position_judged_again(self):
+        j = self._judge_once(self._judge(["die", "ok"]))
+        self.assertNotIn("error", j)
+        self.assertEqual(j["attempts"], 2)
+
+    def test_a_search_with_a_gpu_error_is_not_used(self):
+        j = self._judge_once(self._judge(["gpu", "ok"]))
+        self.assertNotIn("error", j)
+        self.assertEqual(j["attempts"], 2)
+        j = self._judge_once(self._judge(["gpu", "gpu", "gpu", "ok"]))
+        self.assertEqual(j["error"], "GPU error reported during the search")
+        self.assertEqual(j["attempts"], 3)
+
+    def _main(self, d, modes, *extra):
+        """oracle_probe.main over three disagreements with judges sf19 and lc0, whose processes
+        take their modes in turn from `modes[name]` (then 'ok')."""
+        from unittest import mock
+
+        import chess.engine
+
+        moves = pathlib.Path(d) / "moves.jsonl"
+        recs = [
+            {
+                "fen": self.chess.STARTING_FEN,
+                "ab_move": a,
+                "mcts_move": m,
+                "selected": a,
+                "game": g,
+                "source": "s",
+                "engine": "e",
+            }
+            for g, (a, m) in enumerate(
+                [("e2e4", "d2d4"), ("g1f3", "c2c4"), ("e2e3", "b1c3")]
+            )
+        ]
+        moves.write_text("".join(json.dumps(r) + "\n" for r in recs))
+        queues = {k: list(v) for k, v in modes.items()}
+
+        def popen(cmd):
+            q = queues.get(cmd[0], [])
+            return ScriptedEngine(q.pop(0) if q else "ok")
+
+        out = pathlib.Path(d) / "out.jsonl"
+        with mock.patch.object(
+            chess.engine.SimpleEngine, "popen_uci", side_effect=popen
+        ):
+            with contextlib.redirect_stderr(io.StringIO()):
+                rc = self.op.main(
+                    [
+                        str(moves),
+                        "--out",
+                        str(out),
+                        "--judge",
+                        "sf19=sf",
+                        "--judge",
+                        "lc0=lc0",
+                        "--judge-arg",
+                        "lc0:--backend=blas",
+                        "--nodes",
+                        "lc0:100",
+                        "--movetime",
+                        "10",
+                        "--sample",
+                        "3",
+                        "--no-stratify",
+                        "--shard",
+                        "0/1",
+                        *extra,
+                    ]
+                )
+        return rc, [json.loads(l) for l in out.read_text().splitlines()]
+
+    def test_errors_remain_until_judged_again(self):
+        with tempfile.TemporaryDirectory() as d:
+            rc, rows = self._main(d, {"lc0": ["die"] * 3})
+            self.assertEqual(rc, 3)  # the first position used up its retries
+            self.assertEqual(rows[0]["judges"]["lc0"]["attempts"], 3)
+            self.assertIn("error", rows[0]["judges"]["lc0"])
+            self.assertNotIn("error", rows[1]["judges"]["lc0"])
+            self.assertTrue(all("verdict" in r["judges"]["sf19"] for r in rows))
+            order = [r["fen"] + r["ab_move"] for r in rows]
+            rc, rows = self._main(d, {}, "--resume")
+            self.assertEqual(rc, 0)
+            self.assertEqual([r["fen"] + r["ab_move"] for r in rows], order)
+            self.assertEqual(rows[0]["judges"]["lc0"]["attempts"], 4)  # 3 failed + 1
+            self.assertTrue(all("verdict" in r["judges"]["lc0"] for r in rows))
+
+    def test_resume_keeps_only_judgments_of_this_configuration(self):
+        with tempfile.TemporaryDirectory() as d:
+            rc, rows = self._main(d, {})
+            self.assertEqual(rc, 0)
+            self.assertEqual(
+                rows[0]["judges"]["lc0"]["config"], "lc0 --backend=blas nodes=100"
+            )
+            self.assertEqual(rows[0]["judges"]["sf19"]["config"], "sf movetime=10")
+            # judgments made before configurations were recorded, and one of another backend
+            for name in ("sf19", "lc0"):
+                del rows[0]["judges"][name]["config"]
+                rows[0]["judges"][name]["nodes"] = "kept?"
+            rows[1]["judges"]["lc0"]["config"] = "lc0 --backend=metal nodes=100"
+            rows[1]["judges"]["sf19"]["nodes"] = "kept?"
+            out = pathlib.Path(d) / "out.jsonl"
+            out.write_text("".join(json.dumps(r) + "\n" for r in rows[:2]))
+            rc, again = self._main(d, {}, "--resume", "--keep-unrecorded", "sf19")
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(again), 3)
+            self.assertEqual(
+                again[0]["judges"]["sf19"]["nodes"], "kept?"
+            )  # unrecorded, kept
+            self.assertEqual(
+                again[1]["judges"]["sf19"]["nodes"], "kept?"
+            )  # same config
+            self.assertNotEqual(again[0]["judges"]["lc0"].get("nodes"), "kept?")
+            self.assertEqual(
+                again[1]["judges"]["lc0"]["config"], "lc0 --backend=blas nodes=100"
+            )
 
 
 if __name__ == "__main__":

@@ -8,7 +8,9 @@ downloads them (`gh run download`), checks that every block of the cell is prese
 complete, and played by one engine build, and writes the cell directory the workstation tools
 read: games.pgn and engines.log joined in block order, manifest.json with one history entry per
 block (games_before counted over the joined PGN) and each block's runner in `runner_blocks`, and
-summary.json from run_cell.write_summary.
+summary.json from run_cell.write_summary. A cell whose engines reported a GPU error on stderr is
+not joined (amendment 15 (i)) unless --allow-gpu-errors names an amendment that says how those
+games are treated.
 
     python3 tools/paper/fetch_runner_cell.py RQ6d-R          # finds the blocks' artifacts in any run
     python3 tools/paper/fetch_runner_cell.py RQ6d-R --run 12345 [--run 12399 ...]
@@ -33,6 +35,7 @@ from typing import Dict, List
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tools" / "paper"))
 
+import gpu_errors  # noqa: E402
 import run_cell  # noqa: E402
 
 BLOCK_DIR = re.compile(r"^games-(?P<cell>.+)-b(?P<block>\d+)$")
@@ -99,10 +102,16 @@ def find_blocks(root: pathlib.Path, cell_id: str) -> Dict[int, List[pathlib.Path
 
 
 def join_cell(
-    cell_id: str, cell: Dict, blocks: Dict[int, pathlib.Path], out: pathlib.Path
+    cell_id: str,
+    cell: Dict,
+    blocks: Dict[int, pathlib.Path],
+    out: pathlib.Path,
+    allow_gpu_errors: str | None = None,
 ) -> Dict:
     """Write the joined cell directory from one complete directory per block; returns the
-    summary (raises SystemExit on a missing, incomplete or inconsistent block)."""
+    summary (raises SystemExit on a missing, incomplete or inconsistent block, and on GPU errors
+    in the engines' stderr unless `allow_gpu_errors` names the amendment that treats them).
+    """
     nblocks = int(cell["blocks"])
     per_block = -(-int(cell["pairs"]) // nblocks)
     missing = [b for b in range(nblocks) if b not in blocks]
@@ -119,6 +128,15 @@ def join_cell(
     if len(builds) != 1:
         raise SystemExit(
             f"{cell_id}: blocks were played by different binaries: {builds}"
+        )
+    gpu = {
+        b: gpu_errors.count_in(blocks[b] / "engines.log.zst") for b in range(nblocks)
+    }
+    if any(gpu.values()) and not allow_gpu_errors:
+        raise SystemExit(
+            f"{cell_id}: the engines reported GPU errors on stderr (lines by block: {gpu}); "
+            "the cell is read only after an amendment says how those games are treated "
+            "(amendment 15 (i)), then with --allow-gpu-errors AMENDMENT"
         )
 
     out.mkdir(parents=True, exist_ok=True)
@@ -177,7 +195,15 @@ def join_cell(
             games_before += count_games(d / "games.pgn")
     if not (out / "engines.log").stat().st_size:
         (out / "engines.log").unlink()
-    manifest.update({"history": history, "runner_blocks": runners, "block": None})
+    manifest.update(
+        {
+            "history": history,
+            "runner_blocks": runners,
+            "block": None,
+            "gpu_error_lines_by_block": gpu,
+            "gpu_errors_treated_by": allow_gpu_errors,
+        }
+    )
     with open(out / "manifest.json", "w") as fh:
         json.dump(manifest, fh, indent=2)
     return run_cell.write_summary(cell_id, cell, out, reports)
@@ -202,6 +228,11 @@ def main(argv: List[str] | None = None) -> int:
         help="BLOCK=RUN: the run whose artifact to take for a block played more than once",
     )
     ap.add_argument("--manifest", default=str(run_cell.MANIFEST_PATH))
+    ap.add_argument(
+        "--allow-gpu-errors",
+        metavar="AMENDMENT",
+        help="join a cell whose engines reported GPU errors, as the named amendment says",
+    )
     args = ap.parse_args(argv)
 
     spec = json.load(open(args.manifest))
@@ -248,7 +279,11 @@ def main(argv: List[str] | None = None) -> int:
                 )
             blocks[b] = pick
         summary = join_cell(
-            args.cell_id, cell, blocks, run_cell.RESULTS_ROOT / args.cell_id
+            args.cell_id,
+            cell,
+            blocks,
+            run_cell.RESULTS_ROOT / args.cell_id,
+            args.allow_gpu_errors,
         )
     print(
         f"{args.cell_id}: {summary['stats'].get('games', '?')} games joined from "

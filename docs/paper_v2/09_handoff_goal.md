@@ -96,6 +96,13 @@ runner (one measurement per runner VM, no load gate needed, health from `vm_samp
   joins the oracle's shards in shard order into `results/paper_v2/RQ6b-R/` (and runs the judge-stability
   check), and `oracle_probe.py --summarise-only` on the same input and sample arguments summarises it.
 - Runner cells are compared only with runner cells (amendment 15); the workstation results stand.
+- **Amendment 15 (i) (2026-11-06).** The Lc0 judge failed on the runners' GPU (08 §F), so the game
+  cells run first and the oracle waits for its Lc0 backend (CPU probe: `task=judge-probe`, run
+  42237442021). Start the driver with the oracle held. Before the oracle restarts, its items in the
+  state file must be returned to `todo`, each resuming from its latest artifact: shards marked done hold
+  Lc0 error rows. A shard's job now fails until every position has a usable judgment from both judges.
+  Each game block's health line shows "GPU error lines N". If any block of a cell shows one, stop and
+  write an amendment before joining that cell: the joiner refuses it without `--allow-gpu-errors`.
 
 ## Phase B — the arXiv preprint (the author decided: do it)
 
