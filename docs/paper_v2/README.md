@@ -97,3 +97,9 @@ designed so the paper is publishable whichever way the measurements come out.
   26–78 min (63 on average), with no crash and no GPU error (08 §F). A shard of 4 positions takes about
   4.5 h, and the oracle about 675 runner-hours. Its shards use only the runners that the game cells
   leave free.
+- **2026-11-07** — RQ1a-R and RQ6d-R, the first runner cells, were read once, after their last blocks
+  (08 §F, 07). On a three-core runner, the shipped hybrid lost to plain alpha-beta with the same
+  threads: −35.9 Elo, 95% CI [−46.2, −25.6]. With the hints and the verification sub-search off, it
+  lost by −26.1 [−36.0, −16.3]. Switching that channel off made no detectable difference
+  (+9.8 ± 14.8). With the 1 s margin there were no time forfeits, and the result does not depend on
+  the referee rule. In each cell the MCTS move was played on 4 of about 10,000 disagreements.
