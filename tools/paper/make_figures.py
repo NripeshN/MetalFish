@@ -24,6 +24,7 @@ import math
 import pathlib
 import re
 import sys
+import textwrap
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
@@ -858,7 +859,7 @@ def plot_forest(cells, out: pathlib.Path):
     rows = [c for c in cells if c["elo"] is not None and c["elo_pm"] is not None]
     if not rows:
         return
-    fig, ax = plt.subplots(figsize=(7, 0.5 * len(rows) + 1.5))
+    fig, ax = plt.subplots(figsize=(7, 0.6 * len(rows) + 1.5))
     y = list(range(len(rows)))[::-1]
     ax.errorbar(
         [c["elo"] for c in rows],
@@ -869,12 +870,19 @@ def plot_forest(cells, out: pathlib.Path):
     )
     ax.axvline(0, color="grey", lw=0.8)
     ax.set_yticks(y)
-    ax.set_yticklabels([f"{c['cell']}: {arms_text(c)} (n={c['games']})" for c in rows])
-    ax.set_xlabel("Elo difference (arm A − arm B)\nwith its 95% CI (pentanomial)")
+    # wrapped tick labels: one long label (the pilot's) otherwise squeezes the axes into a strip
+    # at the right edge and pushes the centred axis label out of the saved area
+    ax.set_yticklabels(
+        [
+            textwrap.fill(f"{c['cell']}: {arms_text(c)} (n={c['games']})", 36)
+            for c in rows
+        ],
+        fontsize=9,
+    )
+    ax.set_xlabel("Elo difference (first arm − second arm), 95% CI")
     fig.tight_layout()
     (out / "figures").mkdir(parents=True, exist_ok=True)
     for ext in ("pdf", "png"):
-        # the long y labels leave the axes narrow: keep the centred x label inside the saved area
         fig.savefig(
             out / "figures" / f"cells_forest.{ext}", dpi=150, bbox_inches="tight"
         )
