@@ -103,3 +103,11 @@ designed so the paper is publishable whichever way the measurements come out.
   lost by −26.1 [−36.0, −16.3]. Switching that channel off made no detectable difference
   (+9.8 ± 14.8). With the 1 s margin there were no time forfeits, and the result does not depend on
   the referee rule. In each cell the MCTS move was played on 4 of about 10,000 disagreements.
+- **2026-11-08** — RQ2a-R, RQ2b-R and RQ2c-R were read once, after their last blocks (08 §F, 07).
+  On a three-core runner, alpha-beta with one thread lost to alpha-beta with three by −100.3 Elo,
+  95% CI [−109.3, −91.4] (RQ2a-R). The split hybrid (one alpha-beta thread and the MCTS worker) was
+  level with alpha-beta on one thread: −0.7 [−10.9, +9.5] (RQ2b-R). Against alpha-beta on three
+  threads it lost by −111.8 [−120.9, −102.6] (RQ2c-R). The registered check holds: RQ2b-R + RQ2a-R
+  = −101.0 ± 13.5, within +10.7 ± 15.9 of the direct cell. So the split costs what alpha-beta's lost
+  threads cost, and the MCTS side adds nothing detectable. The MCTS move was played on 2 of 10,081
+  and 5 of 9,166 disagreements. There were no time forfeits, and no result depends on the referee rule.
