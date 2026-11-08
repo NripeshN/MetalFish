@@ -1334,6 +1334,109 @@ class RunnerTablesTest(unittest.TestCase):
             self.assertNotIn("±", sens + con)
             self.assertNotIn("macos26", sens)
 
+    def test_runner_micro(self):
+        import make_figures as mf
+
+        nn = {
+            "metalfish": [
+                {
+                    "precision": "fp16",
+                    "batch": 1,
+                    "median_ms": 20.5,
+                    "median_positions_per_second": 48.8,
+                },
+                {
+                    "precision": "fp16",
+                    "batch": 2,
+                    "median_ms": 30.0,
+                    "median_positions_per_second": 66.7,
+                    "gpu_error_lines": 2,
+                },
+                {"precision": "fp32", "batch": 1, "timed_out": True, "error": "x"},
+                {"precision": "fp32", "batch": 2, "error": "no latency"},
+            ],
+            "lc0": [
+                {"minibatch": 1, "nps_steady_median": 41},
+                {"minibatch": 2, "nps_steady_median": None},
+            ],
+            "lc0_backendbench": [
+                {"batch": 1, "median_eps": 1234.4},
+                {"batch": 2, "error": "x"},
+            ],
+            "hardware": "Apple M1 (Virtual)",
+            "complete": True,
+        }
+        ab = {
+            "depth": 16,
+            "hash_mb": 1024,
+            "rows": [
+                {"threads": 1, "repeat": 0, "nps": 1_000_000},
+                {"threads": 1, "repeat": 1, "nps": 1_200_000},
+                {"threads": 2, "repeat": 0, "nps": 2_000_000},
+                {"threads": 2, "repeat": 1, "nps": 9_000_000, "timed_out": True},
+                {"threads": 3, "repeat": 0, "nps": None},
+            ],
+            "complete": False,
+        }
+        with tempfile.TemporaryDirectory() as d:
+            results, out = pathlib.Path(d) / "results", pathlib.Path(d) / "out"
+            mf.write_runner_micro(results, out)  # nothing downloaded yet: no table
+            self.assertFalse((out / "tables").exists())
+            (results / "runner_micro").mkdir(parents=True)
+            (results / "runner_micro" / "nn_latency.json").write_text(json.dumps(nn))
+            (results / "runner_micro" / "ab_scaling.json").write_text(json.dumps(ab))
+            mf.write_runner_micro(results, out)
+            md = (out / "tables" / "runner_micro.md").read_text()
+            m1 = (out / "tables" / "runner_micro_m1.tex").read_text()
+            m2 = (out / "tables" / "runner_micro_m2.tex").read_text()
+        self.assertIn("| 1 | 20.50 ms; 49/s | not used (time limit) | 1,234 | 41 |", md)
+        self.assertIn("| 2 | not used (GPU error) | failed | failed | failed |", md)
+        self.assertIn(
+            "1 & 20.50 ms; 49/s & not used (time limit) & 1,234 & 41 \\\\", m1
+        )
+        # medians over the usable repeats only; the speed-up is over the first thread count
+        self.assertIn("| 1 | 1.10 million (1.00–1.20) | 1.00 | 2 of 2 |", md)
+        self.assertIn("| 2 | 2.00 million (2.00–2.00) | 1.82 | 1 of 2 |", md)
+        self.assertIn("| 3 | — | — | 0 of 1 |", md)
+        self.assertIn("M2 did not complete", md)
+        self.assertNotIn("M1 sweep did not complete", md)
+        self.assertNotIn("backendbench gave no rate", md)
+        self.assertTrue(m2.rstrip().endswith("\\end{tabular}"))
+
+    def test_runner_micro_without_backendbench(self):
+        """A sweep in which Lc0's backendbench gave no rate at any batch size drops its column."""
+        import make_figures as mf
+
+        nn = {
+            "metalfish": [
+                {
+                    "precision": p,
+                    "batch": 1,
+                    "median_ms": 19.0,
+                    "median_positions_per_second": 52.6,
+                }
+                for p in ("fp16", "fp32")
+            ],
+            "lc0": [{"minibatch": 1, "nps_steady_median": 43}],
+            "lc0_backendbench": [{"batch": 1, "error": "no table"}],
+        }
+        with tempfile.TemporaryDirectory() as d:
+            results, out = pathlib.Path(d) / "results", pathlib.Path(d) / "out"
+            (results / "runner_micro").mkdir(parents=True)
+            (results / "runner_micro" / "nn_latency.json").write_text(json.dumps(nn))
+            mf.write_runner_micro(results, out)
+            md = (out / "tables" / "runner_micro.md").read_text()
+            m1 = (out / "tables" / "runner_micro_m1.tex").read_text()
+        self.assertIn(
+            "| --- | --- | --- | --- |\n| 1 | 19.00 ms; 53/s | 19.00 ms; 53/s | 43 |",
+            md,
+        )
+        self.assertIn("backendbench gave no rate at any batch size", md)
+        self.assertNotIn("Lc0 Metal backend", md)
+        self.assertTrue(m1.startswith("\\begin{tabular}{rlll}"))
+        self.assertIn("MetalFish FP32 & Lc0 search (nodes/s) \\\\", m1)
+        self.assertIn("1 & 19.00 ms; 53/s & 19.00 ms; 53/s & 43 \\\\", m1)
+
 
 class FakeJudge:
     """Stands in for a UCI judge: scores every position +50 cp for the side to move and
