@@ -548,8 +548,11 @@ def write_hostload_summary(cells, results: pathlib.Path, out: pathlib.Path):
     (tdir / "hostload_macros.tex").write_text("\n".join(macros) + "\n")
 
 
-def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
-    """T6 compute per cell, the telemetry table (M3-M5, RQ6a) and per-block consistency."""
+def write_extra_tables(
+    cells, results: pathlib.Path, out: pathlib.Path, runner_cells=()
+):
+    """T6 compute per cell (the runner cells, if any, below the workstation's), the telemetry table
+    (M3-M5, RQ6a) and per-block consistency."""
     tdir = out / "tables"
     tdir.mkdir(parents=True, exist_ok=True)
     esc = lambda t: str(t).replace("_", "\\_").replace("%", "\\%")  # noqa: E731
@@ -564,7 +567,8 @@ def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
         "Cell & Games & Blocks & Hours & min/game \\\\",
         "\\midrule",
     ]
-    for c in cells:
+
+    def compute_row(c):
         d = results / c["dir"]
         secs, timed = pgn_game_durations(d / "games.pgn")
         hours = secs / 3600
@@ -583,6 +587,17 @@ def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
         tex.append(
             f"{esc(c['cell'])} & {c['games']} & {nb} & {hours:.1f} & {mpg:.2f} \\\\"
         )
+
+    for c in cells:
+        compute_row(c)
+    if runner_cells:
+        md.append("| Runner cells (one runner per block) | | | | |")
+        tex += [
+            "\\midrule",
+            "\\multicolumn{5}{l}{Runner cells (one runner per block)} \\\\",
+        ]
+        for c in runner_cells:
+            compute_row(c)
     tex += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "compute.md").write_text("\n".join(md) + "\n")
     (tdir / "compute.tex").write_text("\n".join(tex) + "\n")
@@ -2025,7 +2040,7 @@ def main(argv=None):
     write_tables(cells, gates, out)
     write_runner_tables(runner_cells, results, out)
     write_runner_micro(results, out)
-    write_extra_tables(cells, results, out)
+    write_extra_tables(cells, results, out, runner_cells)
     write_therm_table(cells, results, out)
     write_sensitivity_table(cells, results, out)
     write_health_table(cells, results, out)

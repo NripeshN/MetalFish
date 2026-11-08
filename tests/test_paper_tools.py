@@ -1457,6 +1457,46 @@ class RunnerTablesTest(unittest.TestCase):
         self.assertIn("MetalFish FP32 & Lc0 search (nodes/s) \\\\", m1)
         self.assertIn("1 & 19.00 ms; 53/s & 19.00 ms; 53/s & 43 \\\\", m1)
 
+    def test_runner_compute(self):
+        """The compute table (T6) lists the runner cells under their own heading: hours of play
+        from the PGN's game durations, blocks from the manifest's history."""
+        import make_figures as mf
+
+        with tempfile.TemporaryDirectory() as d:
+            results, out = pathlib.Path(d) / "results", pathlib.Path(d) / "out"
+            cells = []
+            for name, duration, blocks in (
+                ("RQ1a", "00:01:30", [0, 1]),
+                ("RQ1a-R", "00:03:00", [0]),
+            ):
+                (results / name).mkdir(parents=True)
+                (results / name / "games.pgn").write_text(
+                    f'[Event "t"]\n[GameDuration "{duration}"]\n\n1. e4 1-0\n\n' * 4
+                )
+                (results / name / "manifest.json").write_text(
+                    json.dumps({"history": [{"block": b} for b in blocks]})
+                )
+                cells.append(
+                    {"cell": name, "dir": name, "games": 4, "blocks": 0}
+                    | {"arm_a": "", "telemetry": {}}
+                )
+            mf.write_extra_tables(cells[:1], results, out, cells[1:])
+            md = (out / "tables" / "compute.md").read_text().splitlines()
+            tex = (out / "tables" / "compute.tex").read_text()
+        self.assertEqual(
+            md[2:],
+            [
+                "| RQ1a | 4 | 2 | 0.1 | 1.50 |",
+                "| Runner cells (one runner per block) | | | | |",
+                "| RQ1a-R | 4 | 1 | 0.2 | 3.00 |",
+            ],
+        )
+        self.assertIn(
+            "\\midrule\n\\multicolumn{5}{l}{Runner cells (one runner per block)} \\\\\n"
+            "RQ1a-R & 4 & 1 & 0.2 & 3.00 \\\\\n\\bottomrule",
+            tex,
+        )
+
 
 class FakeJudge:
     """Stands in for a UCI judge: scores every position +50 cp for the side to move and
