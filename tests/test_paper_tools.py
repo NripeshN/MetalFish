@@ -1400,7 +1400,42 @@ class RunnerTablesTest(unittest.TestCase):
         self.assertIn("| 3 | — | — | 0 of 1 |", md)
         self.assertIn("M2 did not complete", md)
         self.assertNotIn("M1 sweep did not complete", md)
+        self.assertNotIn("backendbench gave no rate", md)
         self.assertTrue(m2.rstrip().endswith("\\end{tabular}"))
+
+    def test_runner_micro_without_backendbench(self):
+        """A sweep in which Lc0's backendbench gave no rate at any batch size drops its column."""
+        import make_figures as mf
+
+        nn = {
+            "metalfish": [
+                {
+                    "precision": p,
+                    "batch": 1,
+                    "median_ms": 19.0,
+                    "median_positions_per_second": 52.6,
+                }
+                for p in ("fp16", "fp32")
+            ],
+            "lc0": [{"minibatch": 1, "nps_steady_median": 43}],
+            "lc0_backendbench": [{"batch": 1, "error": "no table"}],
+        }
+        with tempfile.TemporaryDirectory() as d:
+            results, out = pathlib.Path(d) / "results", pathlib.Path(d) / "out"
+            (results / "runner_micro").mkdir(parents=True)
+            (results / "runner_micro" / "nn_latency.json").write_text(json.dumps(nn))
+            mf.write_runner_micro(results, out)
+            md = (out / "tables" / "runner_micro.md").read_text()
+            m1 = (out / "tables" / "runner_micro_m1.tex").read_text()
+        self.assertIn(
+            "| --- | --- | --- | --- |\n| 1 | 19.00 ms; 53/s | 19.00 ms; 53/s | 43 |",
+            md,
+        )
+        self.assertIn("backendbench gave no rate at any batch size", md)
+        self.assertNotIn("Lc0 Metal backend", md)
+        self.assertTrue(m1.startswith("\\begin{tabular}{rlll}"))
+        self.assertIn("MetalFish FP32 & Lc0 search (nodes/s) \\\\", m1)
+        self.assertIn("1 & 19.00 ms; 53/s & 19.00 ms; 53/s & 43 \\\\", m1)
 
 
 class FakeJudge:

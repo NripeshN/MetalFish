@@ -1763,33 +1763,41 @@ def write_runner_micro(results: pathlib.Path, out: pathlib.Path):
             v = None if r is None else r.get(key)
             return micro_cell(r, None if v is None else f"{v:,.0f}")
 
+        # Lc0's backendbench adds to the protocol's M1; when it gave no rate at any batch size, its
+        # column is dropped and the Markdown table says so
+        has_bb = any(r.get("median_eps") is not None for r in bb.values())
         rows = [
-            [
-                str(b),
-                mf_txt(mf.get(("fp16", b))),
-                mf_txt(mf.get(("fp32", b))),
-                rate_txt(bb.get(b), "median_eps"),
-                rate_txt(lc.get(b), "nps_steady_median"),
-            ]
+            [str(b), mf_txt(mf.get(("fp16", b))), mf_txt(mf.get(("fp32", b)))]
+            + ([rate_txt(bb.get(b), "median_eps")] if has_bb else [])
+            + [rate_txt(lc.get(b), "nps_steady_median")]
             for b in sorted({b for _, b in mf} | set(bb) | set(lc))
         ]
         md += [
             f"M1 on the runner ({nn.get('hardware', '?')}): BT4 by batch size",
             "",
             "| Batch | MetalFish FP16: median latency; evaluations/s | MetalFish FP32 | "
-            "Lc0 Metal backend: evaluations/s | Lc0 search: nodes/s (steady) |",
-            "| --- | --- | --- | --- | --- |",
+            + ("Lc0 Metal backend: evaluations/s | " if has_bb else "")
+            + "Lc0 search: nodes/s (median of the last five samples) |",
+            "|" + " --- |" * (5 if has_bb else 4),
         ]
         md += ["| " + " | ".join(r) + " |" for r in rows]
+        if bb and not has_bb:
+            md += [
+                "",
+                "Lc0's backendbench gave no rate at any batch size (the end of its output is in "
+                "nn_latency.json, `lc0_backendbench`), so its column is omitted.",
+            ]
         if not nn.get("complete", True):
             md += [
                 "",
                 "The M1 sweep did not complete; the rows are the measurements it recorded.",
             ]
         tex = [
-            "\\begin{tabular}{rllll}",
+            "\\begin{tabular}{rll" + ("l" if has_bb else "") + "l}",
             "\\toprule",
-            "Batch & MetalFish FP16 & MetalFish FP32 & Lc0 backend (evals/s) & Lc0 search (nodes/s) \\\\",
+            "Batch & MetalFish FP16 & MetalFish FP32 & "
+            + ("Lc0 backend (evals/s) & " if has_bb else "")
+            + "Lc0 search (nodes/s) \\\\",
             "\\midrule",
         ]
         tex += [" & ".join(r) + " \\\\" for r in rows]
