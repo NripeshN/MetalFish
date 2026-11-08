@@ -1300,3 +1300,43 @@ Time per move (`timing.txt`; PGN move comments; mean time per move by the arm's 
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | RQ1c-R, AB(3) | 123,978 | 0.246 s (1.493 s) | 15 | 1.27 million | 0.47 | 0.34 | 0.27 | 0.19 | 0.12 | 0.10 |
 | RQ1c-R, hybrid | 124,021 | 0.248 s (1.580 s) | 15 | 1.24 million | 0.53 | 0.33 | 0.26 | 0.18 | 0.12 | 0.10 |
+
+**Runner microbenchmarks M1 and M2** (2026-11-08; run 42469489470 of `.github/workflows/paper-runner-cells.yml`,
+task `micro`, dispatched by the driver at 09:59 UTC after the last game block; job 128696712870 ran
+13:18:58–13:38:26 UTC on one fresh runner; amendment 15 (f), (g)). Artifact `micro` downloaded into
+`results/paper_v2/runner_micro/` (`runner.json`, `ENGINE.txt`, `nn_latency.json`, `ab_scaling.json`), with
+the job log as `job_micro.log`; notes in `results/paper_v2/runner_readings/micro/reading_log.txt`, with the
+tables. M1 and M2 have no decision rule; they are reported with the runner cells. Once its job had
+started, the micro task was held in the driver's control file, so that a failed attempt would not be
+dispatched again unseen; the run succeeded, and the hold was released after the driver marked it done.
+
+| Quantity | Value | Artifact |
+| --- | --- | --- |
+| Runner | Apple M1 (Virtual), `VirtualMac2,1`, 3 cores, 7 GB (7,516,192,768 bytes); image macos26 20261102.0473.1, macOS 26.7.2 (25G332), Xcode 26.6 | `runner_micro/runner.json` |
+| Engine | the campaign's build: tag `paper-v2-freeze-rc2`, commit 8c0661d8, built 2026-11-04 in run 41853109012 (image macos26 20261026.0455.2), bench 2,497,913 | `runner_micro/ENGINE.txt` |
+| **M1, MetalFish MPSGraph** (`microbench.py nn`; `metalfish_nn_probe`, Metal backend, 5 warm-up and 40 timed iterations per batch size; no GPU error line, no time limit reached) | median latency (evaluations/s): FP16 b1 19.03 ms (52.6), b2 27.84 ms (71.8), b4 47.68 ms (83.9), b8 85.87 ms (93.2), b16 155.69 ms (102.8), b32 304.35 ms (105.1), b64 606.90 ms (105.5); FP32 b1 26.37 ms (37.9), b2 36.00 ms (55.6), b4 56.73 ms (70.5), b8 93.61 ms (85.5), b16 191.29 ms (83.6), b32 346.08 ms (92.5), b64 695.26 ms (92.1) | `runner_micro/nn_latency.json` (`metalfish`) |
+| **M1, Lc0 0.32.1 search** (`lc0 benchmark`, Metal backend, 2 threads, 3 positions of 15 s; median of the last five node-rate samples; at six of the seven minibatch sizes the samples were still rising at the end of the run, mb8 having levelled off at 56–57, so these are not steady-state rates) | mb1 43, mb2 31, mb4 32, mb8 57, mb16 31, mb32 75, mb64 97 nodes/s | `nn_latency.json` (`lc0`: `nps_steady_median`, `nps_per_position`) |
+| **M1, Lc0 `backendbench`** (Metal backend, 100 batches per size) | no rate at any batch size: this Lc0 build prints one sentence per batch size ("Benchmark batch size N with inference average time X ms - throughput Y nps."), the sweep's parser reads a table, and the recorded error keeps only the end of the output (Lc0's banner and "Initialized metal backend on device Apple Paravirtual device"). For reference, the probe's runs (two other runners, Runner probe above): 31.2 and 24.0 evaluations/s at batch 1, 63.8 and 62.1 at batch 32 | `nn_latency.json` (`lc0_backendbench`); `runner_probe/run_41837556525/job_probe_judges_cancelled.log`, `run_41846444311/job_probe_judges.log` |
+| **M2, alpha-beta** (`microbench.py ab --threads 1,2,3`; `bench` at depth 16, Hash 1024 MB, 5 repeats; all 15 repeats usable) | median (range): 1 thread 0.83 M nodes/s (0.80–0.84), 2 threads 1.19 M (1.12–1.69), 3 threads 1.55 M (1.28–1.69); speed-up over one thread 1.43 and 1.86. The two-thread repeats fell into two groups: 1.69 and 1.58 M (repeats 0 and 1), then 1.12–1.19 M (repeats 2–4). Node counts: 11,245,383 at one thread in every repeat; 19.5–23.4 M at two and 31.7–48.0 M at three (multi-threaded search is not deterministic) | `runner_micro/ab_scaling.json` (`rows`, `aggregate`) |
+
+Reading:
+
+- **The runner's GPU.** A BT4 evaluation at batch 1 took 19.03 ms in FP16, 2.6 times the M2 Max's
+  7.21 ms (M1, frozen build, §B), and 26.37 ms in FP32 (M2 Max 8.56 ms). FP16 throughput levelled off
+  at about 105 evaluations/s from batch 32, against 538 on the M2 Max at batch 64. The probe had
+  measured 21.35 and 19.65 ms at batch 1 in FP16 on two other runners.
+- **MetalFish's backend against Lc0's.** Lc0's own backend rate was not recorded in this run. The
+  probe's backendbench rates, 24.0 and 31.2 evaluations/s at batch 1 on other runners, are roughly
+  half to three-fifths of MetalFish's 52.6 here (and of its 47 and 51 in the probe). In RQ5a-R the
+  engines reported 41 and 16 nodes per second, a difference in the same direction; the cell does not
+  separate the searches from their backends' speed, and M1 says the backends differ.
+- **Lc0's search benchmark** had not reached a steady rate in its 15-second searches on the runner,
+  so its node rates are not compared with MetalFish's evaluation rates.
+- **Alpha-beta.** 0.83 million nodes/s on one thread is 57% of the M2 Max's 1.47 million (M2, frozen
+  build, §B); three threads give 1.55 million, a speed-up of 1.86. The job does not show why the
+  two-thread repeats fell into two groups. The probe's medians of three repeats on two runners were
+  0.59 and 0.47 million at one thread and 1.44 and 1.27 million at three, so single-thread speed
+  varies between runners by more than the spread within this run.
+- **Tables**: `make_figures.py` (PR #153, which reads `results/paper_v2/runner_micro/`) writes
+  `runner_micro.md`, `runner_micro_m1.tex` and `runner_micro_m2.tex`; a backendbench column with no
+  rate in any row is omitted (added to #153 after this run, and disclosed there).

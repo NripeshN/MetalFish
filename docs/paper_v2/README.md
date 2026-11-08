@@ -127,3 +127,11 @@ designed so the paper is publishable whichever way the measurements come out.
   was played on none of 661 disagreements. So the hybrid lost while playing alpha-beta's move every
   time. The cell does not show which part of the hybrid costs those Elo. There were no time forfeits,
   the result does not depend on the referee rule, and the runner did not swap.
+- **2026-11-08 (afternoon)** — The runner microbenchmarks M1 and M2 ran on one runner with the campaign's
+  build (08 §F). On the runner's GPU a BT4 evaluation took 19.0 ms at batch size 1 in FP16, 2.6 times as
+  long as on the M2 Max, and throughput levelled off at about 105 evaluations per second, about a fifth
+  of the M2 Max's. Alpha-beta searched 0.83 million nodes per second on one thread and 1.55 million on
+  three.
+  Lc0's backend benchmark recorded no rate, because the sweep's parser does not read this Lc0 build's
+  output; in the probe Lc0's backend ran at roughly half to three-fifths of MetalFish's rate. The oracle
+  study RQ6b-R is the one runner measurement still running.
