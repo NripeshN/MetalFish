@@ -70,18 +70,22 @@ Monte Carlo tree search (Lc0's BT4 network at batch size~1) on the GPU of an App
 with Stockfish~19's alpha-beta search on its CPU, and arbitrates between their moves. Under a protocol
 published before the first game, the shipped hybrid played 2{,}002 games against the same binary's
 alpha-beta search at the same thread setting (30~s plus 0.3~s per move, unbalanced openings in
-colour-swapped pairs). It scored $-4.3$~Elo (95\% CI $-10.7$ to $+2.0$), inconclusive at this sample size: no effect was
-detected, and gains above 2.0~Elo and losses beyond 10.7~Elo are excluded. The transformer was enabled on 53\% of the hybrid's moves, but the
-arbiter played the MCTS move on only 7 of 25{,}138 disagreements, so whatever the GPU search contributed
-reached the board through the alpha-beta search it accompanies; with alpha-beta on all eight threads it ran at a median of 58
-evaluations per second, under half its batch-1 ceiling. At 60~s plus 0.6~s per move (1{,}000 games,
-exploratory), where the transformer was enabled on 83\% of the hybrid's moves and the MCTS move was played
-on 1 of 17{,}338 disagreements, the hybrid scored $-40.5$~Elo (95\% CI $-49.6$ to $-31.4$). In isolation cells for an earlier configuration
-that ran alpha-beta on six of the eight threads while the transformer was enabled, two of eight threads
-were worth 19.8~Elo to plain alpha-beta (24.7 at zero outside load), and that split hybrid lost a further 17.0~Elo to six-thread
-alpha-beta. Against Stockfish~19 the alpha-beta core scored $+1.4$~Elo (95\% CI $-7.3$ to $+10.1$), no
-difference detected. The ratings reported in an earlier conference chapter on the system do not hold and are
-withdrawn; all games, traces, logs and scripts are released with this paper.
+colour-swapped pairs). It scored $-4.3$~Elo (95\% CI $-10.7$ to $+2.0$), inconclusive at this sample
+size: gains above 2.0~Elo and losses beyond 10.7~Elo are excluded. The transformer was enabled on 53\% of
+the hybrid's moves, but the arbiter played the MCTS move on only 7 of 25{,}138 disagreements, so whatever
+the GPU search contributed reached the board through the alpha-beta search. At 60~s plus 0.6~s per move
+(1{,}000 games, exploratory), with the transformer enabled on 83\% of the moves, the hybrid scored
+$-40.5$~Elo (95\% CI $-49.6$ to $-31.4$). In a split configuration that gives the MCTS worker cores of its
+own, the split hybrid lost 17.0~Elo to alpha-beta on its six remaining threads. Exploratory cells on
+GitHub-hosted virtual M1 machines with three cores, compared only with each other, point the same way.
+There the hybrid lost to alpha-beta at the same thread setting by 35.9~Elo at 30+0.3 and by 16.7~Elo at
+10+0.1, where the transformer ran on 1.7\% of its moves. Switching off the MCTS search's hints to
+alpha-beta and its verification sub-search made no detectable difference, and the split hybrid added
+nothing detectable to one alpha-beta thread ($-0.7$~Elo, 95\% CI $-10.9$ to $+9.5$). At matched settings \MF{}'s MCTS was not behind Lc0's
+($+47.2$~Elo, $+25.8$ to $+68.6$), and against Stockfish~19 the alpha-beta core scored $+1.4$~Elo ($-7.3$
+to $+10.1$), no difference detected. \pending{oracle study RQ6b-R: one sentence with its bound} The ratings
+reported in an earlier conference chapter on the system do not hold and are withdrawn; all games, traces,
+logs and scripts are released with this paper.
 \end{abstract}
 
 \keywords{computer chess \and alpha-beta search \and Monte Carlo tree search \and transformer networks \and hybrid search \and Apple Silicon \and unified memory \and engine evaluation}
@@ -99,7 +103,7 @@ The strongest chess programs follow one of two designs. One is alpha-beta search
 \end{quote}
 
 Equal CPU-thread budget means the same \texttt{Threads} setting for both arms; the hybrid's single MCTS worker runs as one extra thread, which waits on the GPU during each evaluation and otherwise needs a core like any other thread. ``Lc0-class'' refers to the network, Lc0's BT4 transformer, not to Lc0's search configuration, which batches evaluations over several threads (Section~\ref{sec:system}). The estimand is the score of Hybrid(8) against AB(8) from unbalanced human openings at 30~s plus 0.3~s per move, on one Apple M2 Max under the logged host load, with the shipped hybrid (one MCTS worker at batch size~1) as the treatment. In the frozen engine the GPU search can change the outcome through four channels: the MCTS root hints and the verification sub-search, which can act on any move with the transformer enabled (in RQ1a the hints were present on 84\% of those moves and the verification ran on 18\%); the agreement rule, which can end a move early when the two searches agree; contention for CPU time and memory bandwidth; and the arbiter's override, which never selected the MCTS move in the frozen build's gate L14 (0 of 1{,}344 disagreements) or in the pilot (0 of 1{,}165). RQ1a therefore mostly measures the first three channels, and whether arbitration could be worth anything is the question of the oracle study (RQ6b). %src: results/paper_v2/sprt/L14_hybrid_lean_vs_ab8_30p03/moves.jsonl; results/paper_v2/RQ1a_pilot/moves.jsonl
-The answer is measured as an Elo difference with a confidence interval; for the earlier split configuration, the isolation cells of RQ2 price two alpha-beta threads and measure the split hybrid against alpha-beta on the remaining six; and the oracle study, to be reported in a revised version, is designed to explain it by what the two searches disagree about and who is right when they do. The design was fixed in a protocol merged into the public repository before the first confirmatory game, and every later amendment carries its own merge time (Section~\ref{sec:amend}); the engine was frozen at a tagged commit; every number is traced to a retained artifact, and every table and figure is generated from the artifacts by a script.
+The answer is measured as an Elo difference with a confidence interval; for the earlier split configuration, the isolation cells of RQ2 price two alpha-beta threads and measure the split hybrid against alpha-beta on the remaining six; and the oracle study, played on the runners (RQ6b-R), is designed to explain it by what the two searches disagree about and who is right when they do. The design was fixed in a protocol merged into the public repository before the first confirmatory game, and every later amendment carries its own merge time (Section~\ref{sec:amend}); the engine was frozen at a tagged commit; every number is traced to a retained artifact, and every table and figure is generated from the artifacts by a script.
 
 \paragraph{Headline result.} Over 2{,}002 games at 30+0.3 (999 colour-swapped pairs and four games
 without their partner), the shipped hybrid scored $-4.3$~Elo against AB(8), with a 95\% interval of
@@ -116,16 +120,30 @@ against alpha-beta on six threads. At 60+0.6, the time control with the most GPU
 exploratory, 1{,}000 games), the hybrid scored $-40.5$~Elo against AB(8), with a 95\% interval of
 $[-49.6, -31.4]$: the transformer was enabled on 83\% of its moves, the arbiter played the MCTS move on 1
 of 17{,}338 disagreements, and the agreement rule, which ends a move early when the two searches agree,
-ended 48.6\% of the transformer-enabled moves early (1.0\% at 30+0.3). The oracle study (RQ6b), RQ6d and
-the direct RQ2c cell were queued behind RQ1b when this version was prepared; they will be added in a
-revised version.
+ended 48.6\% of the transformer-enabled moves early (1.0\% at 30+0.3).
+
+\paragraph{The runner cells.} The measurements not yet played when RQ1b finished moved to GitHub-hosted
+virtual M1 machines with three cores (amendment~15; Section~\ref{sec:runners}). Their cells are
+exploratory and are compared only with each other. There the shipped hybrid lost to alpha-beta at the
+same thread setting by 35.9~Elo at 30+0.3 ($[-46.2, -25.6]$; RQ1a-R) and by 16.7~Elo at 10+0.1
+($[-24.4, -9.0]$; RQ1c-R), where the time-safety rule left alpha-beta alone on 98.3\% of its moves and
+the hybrid played alpha-beta's move every time. With the hints and the verification sub-search off it
+lost by 26.1~Elo (RQ6d-R); over the openings the two cells share, switching that channel off changed the
+result by $+9.8 \pm 14.8$~Elo, no detectable effect. In the isolation cells two of the three alpha-beta
+threads were worth 100.3~Elo (RQ2a-R), the split hybrid was level with alpha-beta on its one remaining
+thread ($-0.7$, $[-10.9, +9.5]$; RQ2b-R), and the direct RQ2c-R agrees with their sum. The arbiter played
+the MCTS move on at most 5 of the 9{,}166 to 10{,}081 disagreements of each runner cell at 30+0.3, and on
+none of the 661 at 10+0.1. At matched settings (one thread,
+minibatch~1, the same network), \MF{}'s MCTS scored $+47.2$~Elo against Lc0 ($[+25.8, +68.6]$; RQ5a-R),
+a time-sensitive result that does not separate the searches from their backends' speed.
+\pending{runner microbenchmarks M1 and M2 and the oracle study RQ6b-R: one sentence each}
 
 \paragraph{Contributions.}
 \begin{enumerate}
   \item A controlled methodology, fixed in advance in a time-stamped public protocol, for evaluating hybrid or ensemble chess engines that share one machine: a fair-resource policy, telemetry of when the GPU path is actually enabled, host-load logging with a scheduling gate, component isolation cells and an oracle analysis, combined with the conventions adopted from Fishtest (colour-swapped pairs, unbalanced human openings, pentanomial statistics with normalised Elo), with all artifacts released (Section~\ref{sec:method}).
   \item A corrected as-built description of \MF{}, the system first reported in~\cite{niketan2026chapter}: a concurrent alpha-beta plus MCTS runtime with shared root state, MCTS-to-alpha-beta root-ordering hints and a gated arbiter, with the BT4 transformer on Metal Performance Shaders Graph; the new element is the measurement of its batch-1 latency ceiling (Section~\ref{sec:system}) and of the contention between the two searches inside games (Section~\ref{sec:results}).
-  \item Measurements for the research questions of Section~\ref{sec:rqs}: the marginal value of the GPU search at an equal \texttt{Threads} setting at two time controls and, for the earlier split configuration, the value of two alpha-beta threads and the split hybrid's result against alpha-beta on six (Section~\ref{sec:results}); the parity of the alpha-beta core with Stockfish 19 is checked as a validity condition.
-  \item The design of an oracle analysis that bounds, under two stated judges, what any arbiter choosing between the two root candidates at decision time could gain from this pair of searches, and measures what the implemented arbiter achieves (Section~\ref{sec:oracle}); the arbitration telemetry of every hybrid move is reported here, and the oracle's results will be added in a revised version.
+  \item Measurements for the research questions of Section~\ref{sec:rqs}: the marginal value of the GPU search at an equal \texttt{Threads} setting at two time controls on the M2 Max and at two on three-core runners, the effect of the channel formed by the MCTS hints and the verification sub-search, and, for the split configuration, the value of the alpha-beta threads it gives up and what the MCTS worker returns for them (Section~\ref{sec:results}); the parity of the alpha-beta core with Stockfish 19 and the MCTS search's standing against Lc0 at matched settings are checked as validity conditions.
+  \item The design of an oracle analysis that bounds, under two stated judges, what any arbiter choosing between the two root candidates at decision time could gain from this pair of searches, and measures what the implemented arbiter achieves (Section~\ref{sec:oracle}); the arbitration telemetry of every hybrid move is reported here, with \pending{the oracle study's results on the runners (RQ6b-R)}.
 \end{enumerate}
 
 % =====================================================================================
@@ -698,6 +716,15 @@ clock use, the agreement rule's firing rate and its thread-pool rebuilds differe
 shipped hybrid, which kept all eight threads and stayed within the interval above; which of these
 differences carries the loss is not separated here.
 
+On three-core virtual M1 machines (the exploratory runner cells), the shipped hybrid lost to alpha-beta at
+the same thread setting at both time controls tested: by 35.9~Elo at 30+0.3, and by 16.7~Elo at 10+0.1
+while playing alpha-beta's move on every move. The hint and verification channel made no detectable
+difference, and the split hybrid's MCTS worker, with a core of its own, added nothing detectable to one
+alpha-beta thread. The runners leave no spare core for the MCTS worker, a harder setting than the
+workstation's, and their cells are not compared with the workstation's. The hybrid lost even when every
+move it played was alpha-beta's, so on such a machine the hybrid around the alpha-beta search costs
+strength even when it does not change the move; which of its parts costs it is not separated here.
+
 The GPU search measured here was under-provisioned by design: one worker, batch size~1, a median of 58
 evaluations per second inside games at 30+0.3 and 87 at 60+0.6 against a batch-1 ceiling of 139 and a batched throughput near 540,
 and an arbiter that defers to alpha-beta unless a predicate fires. A concurrent GPU search is worth
@@ -705,7 +732,7 @@ reconsidering when the GPU side is driven harder (batched evaluations, several w
 does not wait on one evaluation at a time), when it does not take cores the alpha-beta search would
 otherwise use, and when an arbiter has evidence that the MCTS move is right often enough to override; the
 oracle study, which gives a judge-based bound on what any arbiter between the two root candidates could gain, is the test of
-the last condition and will be added in a revised version. The 60+0.6 result adds the coordination rules
+the last condition: \pending{the oracle study's result on the runners (RQ6b-R)}. The 60+0.6 result adds the coordination rules
 to these conditions: there the agreement rule ended nearly half of the transformer-enabled moves early,
 and no cell of this study switched it off. The engine's CUDA build shares the search and
 network contracts, so the same protocol can be run on a discrete GPU, where memory is not shared and the
