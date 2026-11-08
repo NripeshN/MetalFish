@@ -1316,6 +1316,23 @@ class RunnerTablesTest(unittest.TestCase):
             )
             row = next(r for r in ana.splitlines() if r.startswith("| RQ6d-R |"))
             self.assertIn("| — | — |", row)  # no margin: not applicable
+            # the same analyses for the paper
+            con = (root / "out" / "tables" / "runner_contrasts.tex").read_text()
+            self.assertRegex(
+                con,
+                r"RQ6d-R minus RQ1a-R \(hints and verification off\) & \$[+-][0-9.]+ \\pm [0-9.]+\$ & 12 \\\\",
+            )
+            sens = (root / "out" / "tables" / "runner_sensitivity.tex").read_text()
+            self.assertTrue(sens.startswith("\\begin{tabular}"))
+            self.assertTrue(sens.rstrip().endswith("\\end{tabular}"))
+            row = next(r for r in sens.splitlines() if r.startswith("RQ1a-R &"))
+            self.assertRegex(
+                row,
+                r"^RQ1a-R & [0-9.]+ \(1\) & [0-9.]+ & \$\[[+-][0-9.]+, [+-][0-9.]+\]\$ & 0 & 1 \(1 / 0\) & "
+                r"\$[+-][0-9.]+ \\pm [0-9.]+\$( \(time-sensitive\))? & A: — \(6\); B: — \(6\) \\\\$",
+            )
+            self.assertNotIn("±", sens + con)
+            self.assertNotIn("macos26", sens)
 
 
 class FakeJudge:

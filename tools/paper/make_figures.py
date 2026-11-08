@@ -21,6 +21,7 @@ import argparse
 import json
 import math
 import pathlib
+import re
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -1513,8 +1514,10 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
     block estimates with Cochran's Q over its blocks and a block bootstrap, the forfeit variants,
     the games with a clock overrun and the cell under the registered referee rule (cells played
     with a time margin, amendment 15 (j)), the adjudications and the estimate by runner image
-    (images with at least 100 pairs). None of the workstation's host-load analyses applies to a
-    runner (amendment 15 (e))."""
+    (images with at least 100 pairs). runner_contrasts.tex and runner_sensitivity.tex hold the
+    same for the paper (the sensitivity table without the block estimates and the adjudications).
+    None of the workstation's host-load analyses applies to a runner (amendment 15 (e)).
+    """
     sys.path.insert(0, str(REPO / "tools" / "paper"))
     import penta_stats  # noqa: E402
     import robustness  # noqa: E402
@@ -1557,6 +1560,12 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
     blk = [
         "| Cell | Block estimates | Cochran's Q (df) | p | Block-bootstrap 95% interval | Forfeits | Forfeit pairs removed | Forfeits as draws | Games with a clock overrun (first / second arm) | Registered referee, no time margin | Adjudicated draws / wins (first / second arm) | By runner image (pairs) |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    sens = [
+        "\\begin{tabular}{lrrrrrll}",
+        "\\toprule",
+        "Cell & $Q$ (df) & $p$ & Block bootstrap & Forfeits & Overruns & No margin & By image (pairs) \\\\",
+        "\\midrule",
     ]
     for c in cells:
         d = results / c["dir"]
@@ -1638,6 +1647,14 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
             f"| {c['cell']} | {est_txt} | {q_txt} | {p_txt} | {boot_txt} | {ff['forfeit_games']} | "
             f"{removed} | {drawn} | {over_txt} | {strict_txt} | {adj_txt} | {'; '.join(by_image) or '—'} |"
         )
+        sens.append(
+            " & ".join(
+                [c["cell"], q_txt, p_txt, f"${boot_txt}$" if boot else boot_txt]
+                + [str(ff["forfeit_games"]), over_txt]
+                + [tex_pm(strict_txt), tex_pm("; ".join(by_image) or "—")]
+            ).replace("macos26 ", "")
+            + " \\\\"
+        )
     con = [
         "| Contrast (runner cells, shared openings) | Elo | Shared openings |",
         "| --- | --- | --- |",
@@ -1671,6 +1688,26 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
                     f"| derived minus direct RQ2c-R | {fmt_pm(diff['elo'], diff['elo_pm'])} | {', '.join(map(str, diff['shared_openings']))} |"
                 )
     (tdir / "runner_analyses.md").write_text("\n".join(con + [""] + blk) + "\n")
+    ctex = [
+        "\\begin{tabular}{lrl}",
+        "\\toprule",
+        "Contrast (shared openings) & Elo & Openings \\\\",
+        "\\midrule",
+    ]
+    for row in con[2:]:
+        name, elo, n = [x.strip() for x in row.strip("|").split("|")]
+        ctex.append(f"{name} & {tex_pm(elo)} & {n} \\\\")
+    ctex += ["\\bottomrule", "\\end{tabular}"]
+    sens += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "runner_contrasts.tex").write_text("\n".join(ctex) + "\n")
+    (tdir / "runner_sensitivity.tex").write_text(
+        "\n".join(sens).replace("_", "\\_") + "\n"
+    )
+
+
+def tex_pm(s: str) -> str:
+    """A table cell of the Markdown tables for LaTeX: x ± y in math mode, the other text as is."""
+    return re.sub(r"([+-]?[0-9.]+) ± ([0-9.]+)", r"$\1 \\pm \2$", s)
 
 
 def write_rq6d_contrast(pairs_by_cell: dict, tdir: pathlib.Path):
