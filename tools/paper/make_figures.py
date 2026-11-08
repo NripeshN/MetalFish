@@ -7,6 +7,7 @@ Reads:
   results/paper_v2/sprt/<gate>/partial_stats.json gates stopped by an author rule (penta_stats --json)
   results/paper_v2/micro/nn_latency[_frozen].json M1 (tools/paper/microbench.py nn; the frozen-build re-run wins)
   results/paper_v2/micro/ab_scaling[_frozen].json M2 (tools/paper/microbench.py ab; the frozen-build re-run wins)
+  results/paper_v2/runner_micro/*.json            M1 and M2 on a runner (the campaign workflow's micro task)
 
 Writes docs/paper_v2/figures/*.pdf|png and docs/paper_v2/tables/*.md|tex, and exports the schematics in
 docs/paper_v2/diagrams/*.html to docs/paper_v2/figures/*.pdf with tools/paper/diagram_pdf.py.
@@ -1710,6 +1711,136 @@ def tex_pm(s: str) -> str:
     return re.sub(r"([+-]?[0-9.]+) ± ([0-9.]+)", r"$\1 \\pm \2$", s)
 
 
+def micro_usable(row: dict) -> bool:
+    """A microbenchmark measurement that logged no GPU error and finished within its time limit
+    (amendment 15 (i); tools/paper/microbench.py)."""
+    return not row.get("gpu_error_lines") and not row.get("timed_out")
+
+
+def micro_cell(row, value) -> str:
+    """A microbenchmark measurement for a table: its value, or why there is none."""
+    if row is None:
+        return "—"
+    if row.get("gpu_error_lines"):
+        return "not used (GPU error)"
+    if row.get("timed_out"):
+        return "not used (time limit)"
+    return "failed" if value is None else value
+
+
+def write_runner_micro(results: pathlib.Path, out: pathlib.Path):
+    """M1 and M2 measured on a runner with the campaign's build (protocol amendment 15 (f), (g)): the
+    workflow's micro task, whose artifact is downloaded into results/paper_v2/runner_micro/. Writes
+    runner_micro.md with both, runner_micro_m1.tex (per batch size: the median latency and evaluations
+    per second of MetalFish's MPSGraph backend in FP16 and FP32, the evaluations per second of Lc0's
+    Metal backend from backendbench, and Lc0's steady-state search nodes per second at that
+    minibatch) and runner_micro_m2.tex (per alpha-beta thread count: the median nodes per second over
+    the usable repeats, its range and the speed-up over the first thread count). A measurement that
+    logged a GPU error or reached its time limit is shown as not used.
+    """
+    import statistics
+
+    d = results / "runner_micro"
+    nn_p, ab_p = d / "nn_latency.json", d / "ab_scaling.json"
+    if not nn_p.exists() and not ab_p.exists():
+        return
+    tdir = out / "tables"
+    tdir.mkdir(parents=True, exist_ok=True)
+    md = []
+    if nn_p.exists():
+        nn = load(nn_p)
+        mf = {(r.get("precision"), r.get("batch")): r for r in nn.get("metalfish", [])}
+        bb = {r.get("batch"): r for r in nn.get("lc0_backendbench", [])}
+        lc = {r.get("minibatch"): r for r in nn.get("lc0", [])}
+
+        def mf_txt(r):
+            if r is None or r.get("median_ms") is None:
+                return micro_cell(r, None)
+            ms, eps = r["median_ms"], r.get("median_positions_per_second")
+            return micro_cell(r, f"{ms:.2f} ms; {eps:.0f}/s")
+
+        def rate_txt(r, key):
+            v = None if r is None else r.get(key)
+            return micro_cell(r, None if v is None else f"{v:,.0f}")
+
+        rows = [
+            [
+                str(b),
+                mf_txt(mf.get(("fp16", b))),
+                mf_txt(mf.get(("fp32", b))),
+                rate_txt(bb.get(b), "median_eps"),
+                rate_txt(lc.get(b), "nps_steady_median"),
+            ]
+            for b in sorted({b for _, b in mf} | set(bb) | set(lc))
+        ]
+        md += [
+            f"M1 on the runner ({nn.get('hardware', '?')}): BT4 by batch size",
+            "",
+            "| Batch | MetalFish FP16: median latency; evaluations/s | MetalFish FP32 | "
+            "Lc0 Metal backend: evaluations/s | Lc0 search: nodes/s (steady) |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        md += ["| " + " | ".join(r) + " |" for r in rows]
+        if not nn.get("complete", True):
+            md += [
+                "",
+                "The M1 sweep did not complete; the rows are the measurements it recorded.",
+            ]
+        tex = [
+            "\\begin{tabular}{rllll}",
+            "\\toprule",
+            "Batch & MetalFish FP16 & MetalFish FP32 & Lc0 backend (evals/s) & Lc0 search (nodes/s) \\\\",
+            "\\midrule",
+        ]
+        tex += [" & ".join(r) + " \\\\" for r in rows]
+        tex += ["\\bottomrule", "\\end{tabular}"]
+        (tdir / "runner_micro_m1.tex").write_text("\n".join(tex) + "\n")
+    if ab_p.exists():
+        ab = load(ab_p)
+        runs = ab.get("rows", [])
+        threads = sorted({r["threads"] for r in runs})
+        med = {}
+        rows = []
+        for t in threads:
+            rs = [r for r in runs if r["threads"] == t]
+            ok = [r["nps"] for r in rs if r.get("nps") and micro_usable(r)]
+            med[t] = statistics.median(ok) if ok else None
+            base = med[threads[0]]
+            rows.append(
+                [
+                    str(t),
+                    (
+                        f"{med[t] / 1e6:.2f} million ({min(ok) / 1e6:.2f}–{max(ok) / 1e6:.2f})"
+                        if ok
+                        else "—"
+                    ),
+                    f"{med[t] / base:.2f}" if ok and base else "—",
+                    f"{len(ok)} of {len(rs)}",
+                ]
+            )
+        if md:
+            md.append("")
+        md += [
+            f"M2 on the runner: alpha-beta (`bench`, depth {ab.get('depth')}, hash {ab.get('hash_mb')} MB)",
+            "",
+            "| Threads | Nodes/s, median (range) | Speed-up | Repeats used |",
+            "| --- | --- | --- | --- |",
+        ]
+        md += ["| " + " | ".join(r) + " |" for r in rows]
+        if not ab.get("complete", True):
+            md += ["", "M2 did not complete; the rows are the repeats it recorded."]
+        tex = [
+            "\\begin{tabular}{rlrl}",
+            "\\toprule",
+            "Threads & Nodes/s, median (range) & Speed-up & Repeats used \\\\",
+            "\\midrule",
+        ]
+        tex += [" & ".join(r) + " \\\\" for r in rows]
+        tex += ["\\bottomrule", "\\end{tabular}"]
+        (tdir / "runner_micro_m2.tex").write_text("\n".join(tex) + "\n")
+    (tdir / "runner_micro.md").write_text("\n".join(md) + "\n")
+
+
 def write_rq6d_contrast(pairs_by_cell: dict, tdir: pathlib.Path):
     """rq6d.md: RQ6d minus RQ1a (amendment 12(e)), the hints and the verification sub-search
     switched off together, as an across-match contrast whose variance includes the covariance of
@@ -1873,6 +2004,7 @@ def main(argv=None):
     gates = collect_gates(results)
     write_tables(cells, gates, out)
     write_runner_tables(runner_cells, results, out)
+    write_runner_micro(results, out)
     write_extra_tables(cells, results, out)
     write_therm_table(cells, results, out)
     write_sensitivity_table(cells, results, out)
