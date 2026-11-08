@@ -1562,12 +1562,8 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
         "| Cell | Block estimates | Cochran's Q (df) | p | Block-bootstrap 95% interval | Forfeits | Forfeit pairs removed | Forfeits as draws | Games with a clock overrun (first / second arm) | Registered referee, no time margin | Adjudicated draws / wins (first / second arm) | By runner image (pairs) |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
-    sens = [
-        "\\begin{tabular}{lrrrrrll}",
-        "\\toprule",
-        "Cell & $Q$ (df) & $p$ & Block bootstrap & Forfeits & Overruns & No margin & By image (pairs) \\\\",
-        "\\midrule",
-    ]
+    # per cell: its columns and its estimate by runner image (the tabular is composed below)
+    sens = []
     for c in cells:
         d = results / c["dir"]
         if not (d / "games.pgn").exists() or not c["arm_a"] or c["cell"] not in defs:
@@ -1629,14 +1625,14 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
             if b is None or b >= len(ranges):
                 continue
             images.setdefault(rb.get("image") or "unknown", []).append(ranges[b])
-        by_image = []
+        by_image, image_est = [], {}
         for image, rs in sorted(images.items()):
             sel = [g for _, first, end in rs for g in games[first:end]]
             st = penta_stats.compute(sel, c["arm_a"])
             n = st.get("pairs") or 0
-            by_image.append(
-                f"{image}: {fmt_pm(st.get('elo'), st.get('elo_pm')) if n >= 100 else '—'} ({n})"
-            )
+            est = fmt_pm(st.get("elo"), st.get("elo_pm")) if n >= 100 else "—"
+            by_image.append(f"{image}: {est} ({n})")
+            image_est[image] = f"{tex_pm(est)} ({n})"
         q_txt = f"{q['q']:.2f} ({q['df']})" if q else "—"
         p_txt = f"{q['p']:.3f}" if q else "—"
         boot_txt = f"[{boot['ci95'][0]:+.1f}, {boot['ci95'][1]:+.1f}]" if boot else "—"
@@ -1649,12 +1645,11 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
             f"{removed} | {drawn} | {over_txt} | {strict_txt} | {adj_txt} | {'; '.join(by_image) or '—'} |"
         )
         sens.append(
-            " & ".join(
+            (
                 [c["cell"], q_txt, p_txt, f"${boot_txt}$" if boot else boot_txt]
-                + [str(ff["forfeit_games"]), over_txt]
-                + [tex_pm(strict_txt), tex_pm("; ".join(by_image) or "—")]
-            ).replace("macos26 ", "")
-            + " \\\\"
+                + [str(ff["forfeit_games"]), over_txt, tex_pm(strict_txt)],
+                image_est,
+            )
         )
     con = [
         "| Contrast (runner cells, shared openings) | Elo | Shared openings |",
@@ -1699,10 +1694,27 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
         name, elo, n = [x.strip() for x in row.strip("|").split("|")]
         ctex.append(f"{name} & {tex_pm(elo)} & {n} \\\\")
     ctex += ["\\bottomrule", "\\end{tabular}"]
-    sens += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "runner_contrasts.tex").write_text("\n".join(ctex) + "\n")
+    # one column per runner image, headed by its version, so that no row repeats the images' names;
+    # a dash alone: the cell played no block on that image
+    imgs = sorted({i for _, est in sens for i in est})
+    stex = ["\\begin{tabular}{lrrrrrl" + "l" * len(imgs) + "}", "\\toprule"]
+    if imgs:
+        stex += [
+            "& " * 7
+            + f"\\multicolumn{{{len(imgs)}}}{{c}}{{By runner image (pairs)}} \\\\",
+            f"\\cmidrule(l){{8-{7 + len(imgs)}}}",
+        ]
+    head = ["Cell", "$Q$ (df)", "$p$", "Block bootstrap", "Forfeits", "Overruns"]
+    head += ["No margin"] + [i.replace("macos26 ", "") for i in imgs]
+    stex += [" & ".join(head) + " \\\\", "\\midrule"]
+    stex += [
+        " & ".join(cols + [est.get(i, "—") for i in imgs]) + " \\\\"
+        for cols, est in sens
+    ]
+    stex += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "runner_sensitivity.tex").write_text(
-        "\n".join(sens).replace("_", "\\_") + "\n"
+        "\n".join(stex).replace("_", "\\_") + "\n"
     )
 
 
