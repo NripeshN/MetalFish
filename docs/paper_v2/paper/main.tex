@@ -509,9 +509,10 @@ search ran half as many evaluations per enabled move: a median of 36 against 70,
 histories, when it switched to time-safety moves, which the shipped hybrid never does. The split hybrid
 divided its clock differently from AB(6): in its first ten moves it spent 0.96~s per move against
 1.27~s, and more than AB(6) in moves 21 to 40 (Table~\ref{tab:timeprofile}), whereas the shipped hybrid and
-AB(8) used their clocks alike in RQ1a. RQ6d, which switches the hints and the verification off, is still
-queued, and no cell switches the agreement rule off; which of these channels carries the deficit is
-therefore not established here.
+AB(8) used their clocks alike in RQ1a. RQ6d, which switches the hints and the verification off, was played
+only on the runners, and with the shipped hybrid rather than the split (Section~\ref{sec:runner-results});
+no cell switches the agreement rule off, so which of these channels carries the deficit is not
+established here.
 
 Derived as RQ2b plus RQ2a, with the covariance of the shared openings, RQ2c puts the split hybrid at
 $-36.9$~Elo against AB(8) (95\% interval $[-49.6, -24.2]$). The registered interpretation singled out one
@@ -519,7 +520,8 @@ pattern, a positive RQ2b with a negative RQ2c, which would have meant that the G
 CPU threads are free; RQ2b is negative, so that pattern did not occur. The shipped configuration of RQ1a,
 which keeps all eight alpha-beta threads and runs the MCTS worker as an extra thread, stayed within
 $[-10.7, +2.0]$~Elo of AB(8), an interval that does not overlap the split's (an across-match
-comparison), and no configuration measured here showed a gain.
+comparison), and no configuration measured here showed a gain. On the runners, at $T = 3$, the direct cell
+was played and agreed with the derived estimate (Section~\ref{sec:runner-results}).
 %src: 08 §E RQ2a, RQ2b final readings; Final analyses (timing, agreement stop, hints, verification, thread pool)
 
 \subsection{RQ5: component parity}
@@ -537,8 +539,8 @@ over 125, 250 and 125 pairs, and no difference between them exceeds its standard
 \MF{} arm uses the 50~ms move overhead of every \MF{} arm and Stockfish keeps its 10~ms default
 (Section~\ref{sec:match}), which leaves the alpha-beta arm slightly less time per move, and Stockfish's
 PGO build searched about 5\% more nodes per second (a median of 11.5 against 11.0 million;
-Table~\ref{tab:timing}). RQ5a, the MCTS search against Lc0 at matched settings, was not played for
-this version.
+Table~\ref{tab:timing}). RQ5a, the MCTS search against Lc0 at matched settings, was played on the runners
+(Section~\ref{sec:runner-results}).
 %src: 08 §E RQ5c final reading; Final analyses (timing)
 
 \subsection{The runner cells}
@@ -625,10 +627,10 @@ the MCTS move 13{,}362 times, the arbiter defaulted to alpha-beta's move 3{,}975
 move once, through \texttt{mcts\_ultra\_low\_node\_root\_confidence}; the other moves were agreements
 (35{,}682) and time-safety moves (10{,}815). The root hints were present on 47{,}585 of the
 transformer-enabled moves (90\%), the verification ran on 37{,}020 (70\%), and the agreement rule ended
-25{,}774 of them early (48.6\%). The oracle study (RQ6b), which judges the disagreement positions of RQ1a
-and RQ1b, and RQ6d, which switches the hints and the verification off, were queued behind RQ1b when this
-version was prepared; their results, and with them the judge-based bound on what an arbiter between the
-two root candidates could gain, will be added in a revised version.
+25{,}774 of them early (48.6\%). On the runners, switching the hints and the verification off (RQ6d-R)
+made no detectable difference to the shipped hybrid's result ($+9.8 \pm 14.8$~Elo against RQ1a-R;
+Section~\ref{sec:runner-results}).
+\pending{oracle study RQ6b-R on the runners: judge stability against the 74 workstation positions, per-judge and cross-judge results, the bound}
 %src: tables/telemetry.md, flags.md (08 §E RQ1a, RQ2b, RQ1b final readings and Final analyses)
 
 % =====================================================================================
