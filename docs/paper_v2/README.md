@@ -120,3 +120,10 @@ designed so the paper is publishable whichever way the measurements come out.
   the cell does not separate the searches from their backends' speed. Lc0 at minibatch 1 is not Lc0 at
   its defaults. And with both engines holding the network, the 7 GB runner swapped in every block.
   There were no time forfeits and no GPU errors.
+- **2026-11-08 (late morning)** — RQ1c-R, the last runner cell, was read once, after its last block
+  (08 §F, 07). At 10+0.1 on a runner, the shipped hybrid lost to plain alpha-beta with the same three
+  threads: −16.7 Elo, 95% CI [−24.4, −9.0] (2,000 games). The time-safety rule left alpha-beta alone on
+  98.3% of the hybrid's moves; the transformer ran on 1.7%, with a median of 3 evaluations, and its move
+  was played on none of 661 disagreements. So the hybrid lost while playing alpha-beta's move every
+  time. The cell does not show which part of the hybrid costs those Elo. There were no time forfeits,
+  the result does not depend on the referee rule, and the runner did not swap.
