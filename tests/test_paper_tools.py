@@ -1353,6 +1353,25 @@ class RunnerTablesTest(unittest.TestCase):
             self.assertTrue(row.endswith(" & — & — (12) \\\\"), row)
             self.assertNotIn("±", sens + con)
             self.assertNotIn("macos26", sens)
+            # every block's estimate and the adjudications (protocol section 7.1)
+            bmd = (
+                (root / "out" / "tables" / "runner_blocks.md").read_text().splitlines()
+            )
+            btex = (root / "out" / "tables" / "runner_blocks.tex").read_text()
+            self.assertEqual(
+                bmd[0],
+                "| Cell | Block 0 | Block 1 | Adjudicated draws / wins (first / second arm) |",
+            )
+            self.assertRegex(
+                bmd[2],
+                r"^\| RQ1a-R \| [+-][0-9.]+ ± [0-9.]+ \| [+-][0-9.]+ ± [0-9.]+ \| [0-9]+ / [0-9]+ / [0-9]+ \|$",
+            )
+            self.assertTrue(btex.startswith("\\begin{tabular}{lrrl}"))
+            self.assertRegex(
+                btex,
+                r"RQ1a-R & \$[+-][0-9.]+ \\pm [0-9.]+\$ & \$[+-][0-9.]+ \\pm [0-9.]+\$ & [0-9]+ / [0-9]+ / [0-9]+ \\\\",
+            )
+            self.assertNotIn("±", btex)
 
     def test_runner_micro(self):
         import make_figures as mf
@@ -1496,6 +1515,126 @@ class RunnerTablesTest(unittest.TestCase):
             "RQ1a-R & 4 & 1 & 0.2 & 3.00 \\\\\n\\bottomrule",
             tex,
         )
+
+    def test_runner_telemetry_and_therm(self):
+        """The telemetry (M5, RQ6a) and thermal (M6) tables list the runner cells under their own
+        heading; a fraction below 10% keeps one decimal; a runner cell without a hybrid arm has no
+        telemetry row."""
+        import make_figures as mf
+
+        self.assertEqual(mf.pct(0.016811), "1.7%")
+        self.assertEqual(mf.pct(0.5309), "53%")
+        self.assertEqual(mf.pct(0.0999), "10%")
+        tel = {
+            "moves_total": 100,
+            "gpu_active_fraction": 0.53,
+            "mcts_evals_median": 36,
+            "mcts_playouts_median": 38,
+            "disagreement_rate": 0.367,
+            "disagreements": 20,
+            "mcts_move_selected_on_disagreement": 1,
+            "reasons": {"engines_agree": 30},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            results, out = pathlib.Path(d) / "results", pathlib.Path(d) / "out"
+            cells = []
+            for name, t in (
+                ("RQ1a", tel),
+                ("RQ1c-R", tel | {"gpu_active_fraction": 0.016811}),
+                ("RQ2a-R", None),
+            ):
+                (results / name).mkdir(parents=True)
+                (results / name / "games.pgn").write_text(
+                    '[Event "t"]\n[GameDuration "00:01:00"]\n\n1. e4 1-0\n\n'
+                )
+                (results / name / "therm.log").write_text(
+                    "# block 0\n"
+                    + "t Note: No thermal warning level has been recorded\n" * 3
+                )
+                cells.append(
+                    {"cell": name, "dir": name, "games": 1, "blocks": 0}
+                    | {"arm_a": "", "telemetry": t}
+                )
+            mf.write_extra_tables(cells[:1], results, out, cells[1:])
+            mf.write_therm_table(cells[:1], results, out, cells[1:])
+            tmd = (out / "tables" / "telemetry.md").read_text().splitlines()
+            ttex = (out / "tables" / "telemetry.tex").read_text()
+            hmd = (out / "tables" / "therm.md").read_text().splitlines()
+            htex = (out / "tables" / "therm.tex").read_text()
+        self.assertEqual(len(tmd), 5)
+        self.assertEqual(tmd[3], "| Runner cells | | | | | | | |")
+        self.assertEqual(
+            [tmd[2].split(" | ")[:3], tmd[4].split(" | ")[:3]],
+            [["| RQ1a", "100", "53%"], ["| RQ1c-R", "100", "1.7%"]],
+        )
+        self.assertIn(
+            "\\midrule\n\\multicolumn{7}{l}{Runner cells} \\\\\n"
+            "RQ1c-R & 100 & 1.7\\% & 36 & 38 & 36.7\\% & 1/20 \\\\\n\\bottomrule",
+            ttex,
+        )
+        self.assertEqual(
+            hmd[2:],
+            [
+                "| RQ1a | 3 | 0 | — |",
+                "| Runner cells | | | |",
+                "| RQ1c-R | 3 | 0 | — |",
+                "| RQ2a-R | 3 | 0 | — |",
+            ],
+        )
+        self.assertIn(
+            "\\multicolumn{4}{l}{Runner cells} \\\\\nRQ1c-R & 3 & 0 & — \\\\", htex
+        )
+
+    def test_runner_rates(self):
+        """M3 on the runners: evaluations per second of move time over the hybrid's
+        transformer-enabled moves, each trace record matched to its PGN move by position; a
+        time-safety move and a position traced twice are not used."""
+        import chess
+        import make_figures as mf
+
+        board = chess.Board()
+        fens = []
+        for mv in ("e4", "e5", "Nf3", "Nc6"):
+            fens.append(board.fen())
+            board.push_san(mv)
+        pgn = (
+            '[Event "t"]\n[White "Hybrid-T3"]\n[Black "AB-T3"]\n[Result "1-0"]\n\n'
+            "1. e4 {+0.30/20 0.500s} e5 {-0.20/18 0.500s} "
+            "2. Nf3 {+0.31/21 2.000s} Nc6 {-0.10/18 0.400s} 1-0\n"
+        )
+        recs = [
+            {"fen": fens[0], "reason": "engines_agree", "mcts_evals": 50},
+            {"fen": fens[2], "reason": "engines_agree", "mcts_evals": 10},
+            # a time-safety record carries no evaluations to rate
+            {"fen": fens[1], "reason": "ab_fallback_time_safety", "mcts_evals": 0},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            results, out = pathlib.Path(d) / "results", pathlib.Path(d) / "out"
+            (results / "RQ1a-R").mkdir(parents=True)
+            (results / "RQ1a-R" / "games.pgn").write_text(pgn)
+            (results / "RQ1a-R" / "moves.jsonl").write_text(
+                "".join(json.dumps(r) + "\n" for r in recs)
+            )
+            (results / "RQ2a-R").mkdir(parents=True)
+            cells = [
+                {"cell": "RQ1a-R", "dir": "RQ1a-R", "arm_a": "Hybrid-T3"}
+                | {"telemetry": {"moves_total": 2}},
+                {
+                    "cell": "RQ2a-R",
+                    "dir": "RQ2a-R",
+                    "arm_a": "AB-T1",
+                    "telemetry": None,
+                },
+            ]
+            mf.write_runner_rates(cells, results, out)
+            md = (out / "tables" / "runner_rates.md").read_text().splitlines()
+        # 50 evaluations in 0.5 s and 10 in 2.0 s: rates 100 and 5, total 60 / 2.5 s = 24
+        self.assertEqual(md[2], "| RQ1a-R | 2 | 52 (14) | 24 |")
+        self.assertIn(
+            "RQ1a-R: 2 of 2 transformer-enabled trace records with a unique position matched a PGN move.",
+            md,
+        )
+        self.assertFalse(any(r.startswith("| RQ2a-R") for r in md))
 
 
 class FakeJudge:
