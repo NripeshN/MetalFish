@@ -154,7 +154,14 @@ class RobustnessTest(unittest.TestCase):
     def test_move_comments_stats_and_adjudications(self):
         self.assertEqual(
             robustness.parse_move_comment("+1.06/25 1.180s, n=8681914, nps=7357554"),
-            {"depth": 25, "time": 1.18, "nodes": 8681914, "nps": 7357554},
+            # no clock in the comment (fastchess without timeleft=true)
+            {
+                "depth": 25,
+                "time": 1.18,
+                "nodes": 8681914,
+                "nps": 7357554,
+                "timeleft": None,
+            },
         )
         self.assertEqual(
             robustness.parse_move_comment(
@@ -167,7 +174,13 @@ class RobustnessTest(unittest.TestCase):
             robustness.parse_move_comment(
                 "-0.87/26 5.090s, tl=16.014s, n=46082718, sd=65, nps=9053579"
             ),
-            {"depth": 26, "time": 5.09, "nodes": 46082718, "nps": 9053579},
+            {
+                "depth": 26,
+                "time": 5.09,
+                "nodes": 46082718,
+                "nps": 9053579,
+                "timeleft": 16.014,
+            },
         )
         self.assertEqual(
             robustness.parse_move_comment(
