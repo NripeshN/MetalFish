@@ -1204,7 +1204,14 @@ class RunnerTablesTest(unittest.TestCase):
     from the workstation cells, the RQ6d-R contrast over shared openings, Q over the blocks.
     """
 
-    def _games(self, results, cell, outcomes, overrun_pair=None):
+    def _games(
+        self,
+        results,
+        cell,
+        outcomes,
+        overrun_pair=None,
+        images=("macos26 A", "macos26 B"),
+    ):
         d = results / cell
         d.mkdir(parents=True)
         text = ""
@@ -1233,10 +1240,7 @@ class RunnerTablesTest(unittest.TestCase):
                 {"cell": cell, "arm_a": "Hybrid-T3", "arm_b": "AB-T3", "stats": st}
             )
         )
-        blocks = [
-            {"block": 0, "image": "macos26 A"},
-            {"block": 1, "image": "macos26 B"},
-        ]
+        blocks = [{"block": b, "image": image} for b, image in enumerate(images)]
         (d / "manifest.json").write_text(json.dumps({"runner_blocks": blocks}))
 
     def test_runner_tables(self):
@@ -1277,7 +1281,13 @@ class RunnerTablesTest(unittest.TestCase):
                 ("1-0", "1-0"),
             ]
             self._games(results, "RQ1a-R", mix + mix[::-1], overrun_pair=0)
-            self._games(results, "RQ6d-R", mix[1:] + mix[:1] + mix)
+            # both of RQ6d-R's blocks ran on image B
+            self._games(
+                results,
+                "RQ6d-R",
+                mix[1:] + mix[:1] + mix,
+                images=("macos26 B", "macos26 B"),
+            )
             self._games(results, "RQ1a", mix * 2)
             saved = mf.REPO
             mf.REPO = root
@@ -1307,6 +1317,7 @@ class RunnerTablesTest(unittest.TestCase):
                 ana, r"\| RQ1a-R \| [+-][0-9.]+, [+-][0-9.]+ \| [0-9.]+ \(1\) \|"
             )
             self.assertIn("macos26 A: — (6); macos26 B: — (6)", ana)
+            self.assertIn("| macos26 B: — (12) |", ana)
             # the cell with a time margin: one overrun, by the first arm, and the
             # registered-referee estimate (the Hybrid's 1-0 in pair 0 becomes a loss)
             row = next(r for r in ana.splitlines() if r.startswith("| RQ1a-R |"))
@@ -1323,14 +1334,23 @@ class RunnerTablesTest(unittest.TestCase):
                 r"RQ6d-R minus RQ1a-R \(hints and verification off\) & \$[+-][0-9.]+ \\pm [0-9.]+\$ & 12 \\\\",
             )
             sens = (root / "out" / "tables" / "runner_sensitivity.tex").read_text()
-            self.assertTrue(sens.startswith("\\begin{tabular}"))
+            # one column per runner image, headed by its version
+            self.assertTrue(sens.startswith("\\begin{tabular}{lrrrrrlll}"))
             self.assertTrue(sens.rstrip().endswith("\\end{tabular}"))
+            self.assertIn(
+                "& & & & & & & \\multicolumn{2}{c}{By runner image (pairs)} \\\\\n"
+                "\\cmidrule(l){8-9}\n",
+                sens,
+            )
+            self.assertIn("& No margin & A & B \\\\", sens)
             row = next(r for r in sens.splitlines() if r.startswith("RQ1a-R &"))
             self.assertRegex(
                 row,
                 r"^RQ1a-R & [0-9.]+ \(1\) & [0-9.]+ & \$\[[+-][0-9.]+, [+-][0-9.]+\]\$ & 0 & 1 \(1 / 0\) & "
-                r"\$[+-][0-9.]+ \\pm [0-9.]+\$( \(time-sensitive\))? & A: — \(6\); B: — \(6\) \\\\$",
+                r"\$[+-][0-9.]+ \\pm [0-9.]+\$( \(time-sensitive\))? & — \(6\) & — \(6\) \\\\$",
             )
+            row = next(r for r in sens.splitlines() if r.startswith("RQ6d-R &"))
+            self.assertTrue(row.endswith(" & — & — (12) \\\\"), row)
             self.assertNotIn("±", sens + con)
             self.assertNotIn("macos26", sens)
 
@@ -1436,6 +1456,46 @@ class RunnerTablesTest(unittest.TestCase):
         self.assertTrue(m1.startswith("\\begin{tabular}{rlll}"))
         self.assertIn("MetalFish FP32 & Lc0 search (nodes/s) \\\\", m1)
         self.assertIn("1 & 19.00 ms; 53/s & 19.00 ms; 53/s & 43 \\\\", m1)
+
+    def test_runner_compute(self):
+        """The compute table (T6) lists the runner cells under their own heading: hours of play
+        from the PGN's game durations, blocks from the manifest's history."""
+        import make_figures as mf
+
+        with tempfile.TemporaryDirectory() as d:
+            results, out = pathlib.Path(d) / "results", pathlib.Path(d) / "out"
+            cells = []
+            for name, duration, blocks in (
+                ("RQ1a", "00:01:30", [0, 1]),
+                ("RQ1a-R", "00:03:00", [0]),
+            ):
+                (results / name).mkdir(parents=True)
+                (results / name / "games.pgn").write_text(
+                    f'[Event "t"]\n[GameDuration "{duration}"]\n\n1. e4 1-0\n\n' * 4
+                )
+                (results / name / "manifest.json").write_text(
+                    json.dumps({"history": [{"block": b} for b in blocks]})
+                )
+                cells.append(
+                    {"cell": name, "dir": name, "games": 4, "blocks": 0}
+                    | {"arm_a": "", "telemetry": {}}
+                )
+            mf.write_extra_tables(cells[:1], results, out, cells[1:])
+            md = (out / "tables" / "compute.md").read_text().splitlines()
+            tex = (out / "tables" / "compute.tex").read_text()
+        self.assertEqual(
+            md[2:],
+            [
+                "| RQ1a | 4 | 2 | 0.1 | 1.50 |",
+                "| Runner cells (one runner per block) | | | | |",
+                "| RQ1a-R | 4 | 1 | 0.2 | 3.00 |",
+            ],
+        )
+        self.assertIn(
+            "\\midrule\n\\multicolumn{5}{l}{Runner cells (one runner per block)} \\\\\n"
+            "RQ1a-R & 4 & 1 & 0.2 & 3.00 \\\\\n\\bottomrule",
+            tex,
+        )
 
 
 class FakeJudge:
