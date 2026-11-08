@@ -875,11 +875,11 @@ Health (`summary.json`, `manifest.json`, `runner_analyses.md`):
 | --- | --- | --- |
 | Adjudicated | 841 of 1,000 (358 draws; wins: hybrid 190, AB(3) 293) | 831 (343 draws; wins: hybrid 206, AB(3) 282) |
 | Ended normally | 159 (all draws) | 169 (168 draws, 1 hybrid win) |
-| Hours of play | 29.15 | 29.23 |
+| Block hours (fastchess wall time, summed from the health lines) | 29.15 | 29.23 |
 
 - **Terminations:** no time forfeits and no other terminations.
-- **Pace:** 1.75 min per game in both cells, in blocks of 2.85–3.00 h, from 2026-11-06 19:27 to
-  2026-11-07 08:00 UTC, with five runners at a time.
+- **Pace:** 1.75 min of block time per game in both cells, in blocks of 2.85–3.00 h, from
+  2026-11-06 19:27 to 2026-11-07 08:00 UTC, with five runners at a time.
 - **Engine:** every block, in both arms, ran the campaign build (SHA-256 `7e44220f…`). The build log
   of run 41853109012 prints the same hash after bench 2,497,913.
 - **Time margin:** every block played with the 1 s margin. The pilot attempts played without it (RQ1a-R
@@ -945,23 +945,27 @@ as RQ1a-R and RQ6d-R, and their blocks were dispatched interleaved, block b of e
 
 | Cell | Comparison | Games | Elo (95% CI) | nElo | LOS | Ptnml [0..2] | W / D / L | Time forfeits | Artifact |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| RQ2a-R | AB(1) vs AB(3) (T − 2 vs T at T = 3), 30+0.3, `Hash` 1024 MB each, move overhead 50 ms each, fastchess time margin 1 s; GitHub-hosted M1 runners (3 cores, 7 GB) | 1,000 (500 pairs) | **−100.3 [−109.3, −91.4]** (± 9.0) | −254.6 ± 21.5 | 0.0% | [1, 290, 198, 11, 0] | 112 / 495 / 393 | 0 | `RQ2a-R/games.pgn`, `RQ2a-R/summary.json` |
-| RQ2b-R | Hybrid-split(3) (`HybridOversubscribe=false`, `HybridABThreads=1`: one alpha-beta thread and the MCTS worker, `Threads` 3) vs AB(1), settings as RQ2a-R | 1,000 (500 pairs) | **−0.7 [−10.9, +9.5]** (± 10.2) | −1.5 ± 21.5 | 44.7% | [0, 112, 279, 108, 1] | 251 / 496 / 253 | 0 | `RQ2b-R/games.pgn`, `RQ2b-R/summary.json` |
-| RQ2c-R | Hybrid-split(3) (as RQ2b-R) vs AB(3), settings as RQ2a-R | 1,000 (500 pairs) | **−111.8 [−120.9, −102.6]** (± 9.2) | −281.3 ± 21.5 | 0.0% | [0, 326, 159, 15, 0] | 85 / 519 / 396 | 0 | `RQ2c-R/games.pgn`, `RQ2c-R/summary.json` |
+| RQ2a-R | AB(1) vs AB(3) (T − 2 vs T at T = 3), 30+0.3, `Hash` 1024 MB each, move overhead 50 ms each, fastchess time margin 1 s; GitHub-hosted M1 runners (3 cores, 7 GB) | 1,000 (500 pairs) | **−100.3 [−109.4, −91.4]** (± 9.0) | −254.6 ± 21.5 | 0.0% | [1, 290, 198, 11, 0] | 112 / 495 / 393 | 0 | `RQ2a-R/games.pgn`, `RQ2a-R/summary.json` |
+| RQ2b-R | Hybrid-split(3) (`HybridOversubscribe=false`, `HybridABThreads=1`: one alpha-beta thread and the MCTS worker on its transformer-enabled moves, all three threads on its time-safety moves, `Threads` 3) vs AB(1), settings as RQ2a-R | 1,000 (500 pairs) | **−0.7 [−10.9, +9.5]** (± 10.2) | −1.5 ± 21.5 | 44.7% | [0, 112, 279, 108, 1] | 251 / 496 / 253 | 0 | `RQ2b-R/games.pgn`, `RQ2b-R/summary.json` |
+| RQ2c-R | Hybrid-split(3) (as RQ2b-R) vs AB(3), settings as RQ2a-R | 1,000 (500 pairs) | **−111.8 [−121.0, −102.7]** (± 9.2) | −281.3 ± 21.5 | 0.0% | [0, 326, 159, 15, 0] | 85 / 519 / 396 | 0 | `RQ2c-R/games.pgn`, `RQ2c-R/summary.json` |
 
 Reading. Runner cells are exploratory and carry no alpha of their own (amendment 15 (f)).
 - **RQ2a-R:** on a runner, the two threads the split takes from alpha-beta are worth about 100 Elo
   (91 to 109 at 95%).
-- **RQ2b-R:** with one alpha-beta thread like its opponent, the split hybrid was level with AB(1). The
-  MCTS worker added no detectable strength. Differences above +9.5 or below −10.9 Elo are excluded.
+- **RQ2b-R:** the split hybrid ran one alpha-beta thread beside the MCTS worker on its
+  transformer-enabled moves (45.9%) and all three threads on its time-safety moves (54.1%), because
+  the time-safety rule restores the full pool (`365f36a`, `src/uci/uci.cpp` `ensure_full_thread_pool`),
+  as on the workstation (§E "Thread pool of the split hybrid (RQ2b)"). It was not detectably different
+  from AB(1): differences above +9.5 or below −10.9 Elo are excluded. Because of the extra threads on
+  its time-safety moves, the cell does not isolate what the MCTS worker adds to one alpha-beta thread
+  (corrected on 2026-11-08; see "Corrections after the pre-review integrity check" below).
 - **RQ2c-R:** the split hybrid lost about 112 Elo to AB(3) (103 to 121).
 - **The registered check** (amendment 15 (f); `runner_analyses.md`, `contrast_and_referee.txt`): the
-  derived RQ2b-R + RQ2a-R is −101.0 ± 13.5 Elo ([−114.5, −87.5]). It lies within **+10.7 ± 15.9** of
-  the direct RQ2c-R ([−5.2, +26.7]), over the 500 openings the three cells share. So the decomposition
-  holds. The split costs what alpha-beta's two lost threads cost, and no detectable part of that comes
-  back from the MCTS side. By the reading registered in 02 §RQ2, a positive RQ2b with a negative RQ2c
-  would have meant that the GPU search helps only when CPU threads are free. RQ2b-R is not positive, so
-  on the runner the GPU search was not shown to help even with a thread of its own.
+  derived RQ2b-R + RQ2a-R is −101.0 ± 13.5 Elo ([−114.5, −87.5]). The direct RQ2c-R differs from it by
+  **+10.7 ± 15.9** ([−5.2, +26.7]), over the 500 openings the three cells share, so no discrepancy
+  between the derived and the direct estimate was detected. By the reading registered in 02 §RQ2, a
+  positive RQ2b with a negative RQ2c would have meant that the GPU search helps only when CPU threads
+  are free; that pattern did not occur.
 - **MCTS moves:** the arbiter played the MCTS move on 2 of 10,081 disagreements (RQ2b-R) and 5 of
   9,166 (RQ2c-R).
 - **Against RQ1a-R** (runner cells, same AB(3) and openings; described, not a registered contrast): the
@@ -989,7 +993,7 @@ Sensitivity and blocks (amendments 12 (g) and 15 (c), (j); `runner_analyses.md`,
 | Block bootstrap, 95% interval | [−106.8, −93.9] | [−9.0, +7.3] | [−123.4, −99.6] |
 | Image 20261102.0473.1 | −100.3 ± 9.0 (all 500 pairs) | −1.9 ± 10.8 (450 pairs) | −113.9 ± 9.6 (450 pairs) |
 | Image 20261026.0455.2 | — | 50 pairs (block 2), below the 100-pair minimum | 50 pairs (block 3), below the 100-pair minimum |
-| Registered referee rule, no margin | −100.3 [−109.3, −91.4] | +0.0 [−10.3, +10.3] | −111.8 [−120.9, −102.6] |
+| Registered referee rule, no margin | −100.3 [−109.4, −91.4] | +0.0 [−10.3, +10.3] | −111.8 [−121.0, −102.7] |
 | Games with a clock overrun | 1, by AB(1); no result changes | 3: 2 by the hybrid, 1 by AB(1); 1 result changes | 2, one by each arm; no result changes |
 
 - **Blocks:** RQ2a-R's and RQ2b-R's blocks are consistent. RQ2c-R's vary more, short of the 5% level,
@@ -1008,8 +1012,8 @@ Health (`summary.json`, `manifest.json`, `health.txt`):
 | --- | --- | --- | --- |
 | Adjudicated | 828 of 1,000 (323 draws; wins: AB(1) 112, AB(3) 393) | 856 (353 draws; wins: hybrid 251, AB(1) 252) | 850 (370 draws; wins: hybrid 85, AB(3) 395) |
 | Ended normally | 172 (all draws) | 144 (143 draws, 1 AB(1) win) | 150 (149 draws, 1 AB(3) win) |
-| Hours of play | 26.59 | 29.28 | 28.50 |
-| Minutes per game | 1.60 | 1.76 | 1.71 |
+| Block hours (fastchess wall time, summed from the health lines) | 26.59 | 29.28 | 28.50 |
+| Minutes of block time per game | 1.60 | 1.76 | 1.71 |
 | Block lengths | 2.60–2.72 h | 2.85–3.00 h | 2.82–2.89 h |
 
 - **Terminations:** no time forfeits and no other terminations.
@@ -1088,16 +1092,16 @@ same order (amendment 15 (g)).
 
 | Cell | Comparison | Games | Elo (95% CI) | nElo | LOS | Ptnml [0..2] | W / D / L | Time forfeits | Artifact |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| RQ5a-R | MetalFish's MCTS, one search thread at minibatch 1 (`UseMCTS=true`, `UseHybridSearch=false`, `MCTSMaxThreads=1`, `MCTSMinibatchSize=1`, `Threads` 1, `Hash` 1024 MB) vs Lc0 0.32.1 (Homebrew build, Metal backend, `Threads` 1, `MinibatchSize` 1), both with the BT4 network (SHA-256 `8accc462…`), 30+0.3, move overhead 50 ms each, fastchess time margin 1 s; GitHub-hosted M1 runners (3 cores, 7 GB) | 600 (300 pairs) | **+47.2 [+25.8, +68.6]** (± 21.4) | +62.2 ± 27.8 | 100.0% | [21, 44, 102, 99, 34] | 242 / 197 / 161 | 0 | `RQ5a-R/games.pgn`, `RQ5a-R/summary.json` |
+| RQ5a-R | MetalFish's MCTS, one search thread at minibatch 1 (`UseMCTS=true`, `UseHybridSearch=false`, `MCTSMaxThreads=1`, `MCTSMinibatchSize=1`, `Threads` 1, `Hash` 1024 MB) vs Lc0 0.32.1 (Homebrew build, Metal backend, `Threads` 1, `MinibatchSize` 1), both with the BT4 network (SHA-256 `8accc462…`), 30+0.3, move overhead 50 ms each, fastchess time margin 1 s; GitHub-hosted M1 runners (3 cores, 7 GB) | 600 (300 pairs) | **+47.2 [+26.0, +68.7]** (± 21.4) | +62.2 ± 27.8 | 100.0% | [21, 44, 102, 99, 34] | 242 / 197 / 161 | 0 | `RQ5a-R/games.pgn`, `RQ5a-R/summary.json` |
 
 Reading. Runner cells are exploratory and carry no alpha of their own (amendment 15 (f)).
 - **RQ5a-R:** on a runner, MetalFish's MCTS scored +47.2 Elo against Lc0 at the same settings (one
-  search thread, minibatch 1, the same network, clocks and move overhead; 25.8 to 68.6 at 95%). The
+  search thread, minibatch 1, the same network, clocks and move overhead; 26.0 to 68.7 at 95%). The
   registered question (02 §RQ5) asks whether the MCTS implementation is on par with Lc0's search at
-  matched settings. On this machine it was not behind: differences below +25.8 are excluded.
+  matched settings. On this machine it was not behind: differences below +26.0 are excluded.
 - **Time-sensitive** (amendment 15 (j) 3; `contrast_and_referee.txt`): in 54 games a move overran its
   clock, each time first by Lc0. Under the registered referee rule without the margin, each of those
-  games is lost by Lc0, which changes 46 results. The cell is then **+76.5 [+53.1, +99.9]** (± 23.4).
+  games is lost by Lc0, which changes 46 results. The cell is then **+76.5 [+53.5, +100.2]** (± 23.4).
   That differs from the primary by 29.3 Elo, more than the primary standard error of 10.9. So both
   estimates are reported and the cell is time-sensitive. The primary estimate is the games as played.
 - **The overruns** (`overrun_profile.txt`; exploratory):
@@ -1131,7 +1135,7 @@ Sensitivity and blocks (amendments 12 (g) and 15 (c), (j); `runner_analyses.md`,
 | Cochran's Q (5 df) | 4.15, p = 0.53 |
 | Block bootstrap, 95% interval | [+29.0, +64.4] |
 | Image 20261102.0473.1 | +47.2 ± 21.4 (all 300 pairs) |
-| Registered referee rule, no margin | +76.5 [+53.1, +99.9]: time-sensitive |
+| Registered referee rule, no margin | +76.5 [+53.5, +100.2]: time-sensitive |
 | Games with a clock overrun | 54, all by Lc0; 46 results change |
 
 - **Blocks:** consistent (6 blocks, so Q has 5 df). The block bootstrap's interval lies above zero.
@@ -1147,8 +1151,8 @@ Health (`summary.json`, `manifest.json`, `health.txt`, `sampler_summary.txt`, `m
 | --- | --- |
 | Adjudicated | 475 of 600 (73 draws; wins: MetalFish 242, Lc0 160) |
 | Ended normally | 125 (124 draws, 1 Lc0 win) |
-| Hours of play | 13.34 |
-| Minutes per game | 1.33 |
+| Block hours (fastchess wall time, summed from the health lines) | 13.34 |
+| Minutes of block time per game | 1.33 |
 | Block lengths | 2.15–2.28 h |
 
 - **Terminations:** no time forfeits and no other terminations.
@@ -1254,8 +1258,8 @@ Health (`summary.json`, `manifest.json`, `health.txt`, `sampler_summary.txt`, `m
 | --- | --- |
 | Adjudicated | 1,649 of 2,000 (681 draws; wins: hybrid 436, AB(3) 532) |
 | Ended normally | 351 (349 draws; one win for each arm) |
-| Hours of play | 22.70 |
-| Minutes per game | 0.68 |
+| Block hours (fastchess wall time, summed from the health lines) | 22.70 |
+| Minutes of block time per game | 0.68 |
 | Block lengths | 2.17–2.35 h |
 
 - **Terminations:** no time forfeits and no other terminations.
@@ -1340,3 +1344,45 @@ Reading:
 - **Tables**: `make_figures.py` (PR #153, which reads `results/paper_v2/runner_micro/`) writes
   `runner_micro.md`, `runner_micro_m1.tex` and `runner_micro_m2.tex`; a backendbench column with no
   rate in any row is omitted (added to #153 after this run, and disclosed there).
+
+**Runner M3: the hybrid's in-game MCTS evaluation rate** (2026-11-08; amendment 15 (f), "M3–M6 come
+from the runner traces as for the workstation"; computed after the runner cells were read, when the
+pre-review integrity check of the v2 manuscript found it missing; `make_figures.py --final-analyses`
+from PR #156 writes `tables/runner_rates.md`). Evaluations per second of move time over the hybrid's
+transformer-enabled moves, each trace record (`moves.jsonl`) matched to its PGN move by position, as
+for the workstation cells (§E "Final analyses"); every transformer-enabled record with a unique
+position matched a move.
+
+| Cell | Matched transformer-enabled moves | Evaluations per second of move time, median (10th percentile) | Total evaluations / total move time |
+| --- | --- | --- | --- |
+| RQ1a-R | 28,490 | 14 (4) | 11 |
+| RQ6d-R | 27,860 | 13 (3) | 10 |
+| RQ2b-R | 29,658 | 24 (7) | 18 |
+| RQ2c-R | 26,331 | 20 (6) | 15 |
+| RQ1c-R | 2,084 | 2 (1) | 3 |
+
+- The runner's batch-1 ceiling is 52.6 evaluations/s (M1 above). Inside games the shipped hybrid's
+  worker reached a median of 14 in RQ1a-R; the split hybrid's, with a core of its own on its
+  transformer-enabled moves, 24 in RQ2b-R. On the workstation the shipped hybrid's median was 58 at
+  30+0.3 against a ceiling of 139 (§E).
+- M6 on the runners (`therm.log`, `make_figures.py` from PR #156, `therm.md`): no runner cell logged a
+  thermal warning in any of its 799 to 1,757 one-minute samples.
+
+**Corrections after the pre-review integrity check** (2026-11-08; the check of the v2 manuscript,
+Stage 2.5, by two independent verifiers):
+
+- **RQ2b-R reading.** The split hybrid has one alpha-beta thread only on its transformer-enabled
+  moves; on its time-safety moves (54.1% in RQ2b-R, 56.1% in RQ2c-R) it plays plain alpha-beta on all
+  three threads, as the workstation's split hybrid did (§E). The reading "with one alpha-beta thread
+  like its opponent … the MCTS worker added no detectable strength" and the registered check's "the
+  split costs what alpha-beta's two lost threads cost" did not hold as worded; they are corrected above
+  and in 07.
+- **Intervals.** The 95% intervals of RQ2a-R, RQ2c-R and RQ5a-R (and RQ5a-R's without the margin) had
+  been copied as Elo ± half-width from `runner_reading_checks.py`. The defined interval is the
+  logistic transform of the score interval (`summary.json` `stats.elo_ci95`): RQ2a-R
+  [−109.4, −91.4] (not [−109.3, −91.4]), RQ2c-R [−121.0, −102.7] (not [−120.9, −102.6]), RQ5a-R
+  [+26.0, +68.7] (not [+25.8, +68.6]) and, without the margin, [+53.5, +100.2] (not [+53.1, +99.9]).
+  The other runner intervals were already the defined ones. No reading changes.
+- **Hours.** The runner health tables' "Hours of play" were the blocks' fastchess wall times summed
+  from the health lines (for example 29.15 h for RQ1a-R); they are now labelled so. The paper's compute
+  table gives the sum of the PGN game durations (26.1 h for RQ1a-R).
