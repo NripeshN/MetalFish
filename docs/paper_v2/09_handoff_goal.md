@@ -116,11 +116,16 @@ runner (one measurement per runner VM, no load gate needed, health from `vm_samp
   It then dispatches a shard only when no game block is waiting for a slot. Each shard's health line
   must show "0 judge errors, 0 rows lacking a judge, 0 Lc0 judgments of an earlier configuration" when
   it succeeds. A shard resumed from a GPU-era artifact keeps its Stockfish rows and judges Lc0 again.
-- **Read so far** (once each, after the last block): RQ1a-R and RQ6d-R on 2026-11-07 (08 §F, 07). For
+- **Read so far** (once each, after the last block): RQ1a-R and RQ6d-R on 2026-11-07; RQ2a-R,
+  RQ2b-R and RQ2c-R on 2026-11-08 (08 §F, 07). For
   each reading, run the joiner and `make_figures.py` with an interpreter that has python-chess
   (`python3.14` here). Homebrew's default `python3` lacks it. A join that fails partway leaves a
   partial cell directory behind. Move that directory aside unread before you try again, because the
-  joiner writes a cell only once. The record goes in `results/paper_v2/runner_readings/<cells>/`.
+  joiner writes a cell only once. The record goes in `results/paper_v2/runner_readings/<cells>/`. The
+  checks of a reading are `runner_reading_checks.py`, kept with each record; reuse it for the next
+  cells. The driver (`results/ars_pipeline/tools/runner_driver.py`, not tracked) now logs a failed
+  `gh` call and retries on its next loop instead of exiting; restart it with `--resume --last oracle`
+  if it stops.
 
 ## Phase B — the arXiv preprint (the author decided: do it)
 
