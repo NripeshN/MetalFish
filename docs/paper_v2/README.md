@@ -111,3 +111,19 @@ designed so the paper is publishable whichever way the measurements come out.
   = −101.0 ± 13.5, within +10.7 ± 15.9 of the direct cell. So the split costs what alpha-beta's lost
   threads cost, and the MCTS side adds nothing detectable. The MCTS move was played on 2 of 10,081
   and 5 of 9,166 disagreements. There were no time forfeits, and no result depends on the referee rule.
+- **2026-11-08 (morning)** — RQ5a-R was read once, after its last block (08 §F, 07). On a runner,
+  MetalFish's MCTS (one thread, minibatch 1) scored +47.2 Elo, 95% CI [+25.8, +68.6], against Lc0
+  0.32.1 at the same settings with the same network (600 games). The cell is time-sensitive. Lc0
+  overran its clock in 54 games, late in long games when it was down to the 0.3 s increment;
+  MetalFish never did. Without the 1 s margin those games are Lc0's losses, and the cell is +76.5
+  [+53.1, +99.9]. Three things limit the reading. The engines reported 41 and 16 nodes per second, so
+  the cell does not separate the searches from their backends' speed. Lc0 at minibatch 1 is not Lc0 at
+  its defaults. And with both engines holding the network, the 7 GB runner swapped in every block.
+  There were no time forfeits and no GPU errors.
+- **2026-11-08 (late morning)** — RQ1c-R, the last runner cell, was read once, after its last block
+  (08 §F, 07). At 10+0.1 on a runner, the shipped hybrid lost to plain alpha-beta with the same three
+  threads: −16.7 Elo, 95% CI [−24.4, −9.0] (2,000 games). The time-safety rule left alpha-beta alone on
+  98.3% of the hybrid's moves; the transformer ran on 1.7%, with a median of 3 evaluations, and its move
+  was played on none of 661 disagreements. So the hybrid lost while playing alpha-beta's move every
+  time. The cell does not show which part of the hybrid costs those Elo. There were no time forfeits,
+  the result does not depend on the referee rule, and the runner did not swap.
