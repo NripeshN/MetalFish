@@ -8,6 +8,16 @@ M1: python3 tools/paper/microbench.py nn --out results/paper_v2/micro/nn_latency
 M2: python3 tools/paper/microbench.py ab --out results/paper_v2/micro/ab_scaling.json
     Runs `metalfish bench <hash> <threads> <depth>` for several thread counts, N repeats each; reports
     nodes/s and wall time. Depth-limited so the node count is fixed per thread count (reported too).
+
+Every measurement records `gpu_error_lines`, the lines of its output that report a failed Metal
+command buffer (tools/paper/gpu_errors.py), and `timed_out`, whether it was killed at its time limit
+(its output so far is kept). Such a measurement is not used, because the work of a failed command
+buffer may not have run (protocol amendment 15 (i)); it fails the run as a missing value does
+(Lc0's backendbench failures are only recorded, as before). The limits (300 s for a probe or
+backendbench run, 240 s for Lc0's 45 s search benchmark) let the sweep and M2 finish inside the
+runner job's 120 minutes even if every Lc0 measurement hangs, and the results file is rewritten
+after every measurement (`complete` false until the sweep ends), so a job killed at its limit keeps
+what was measured.
 """
 
 from __future__ import annotations
@@ -21,23 +31,47 @@ import statistics
 import subprocess
 import sys
 import time
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
+
+import gpu_errors
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 WEIGHTS = REPO / "networks" / "BT4-1024x15x32h-swa-6147500.pb"
+TIMED_OUT = "microbench: killed at its time limit of"
 
 
 def run(
     cmd: List[str], env: Optional[Dict[str, str]] = None, timeout: int = 1800
 ) -> str:
-    p = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env={**os.environ, **(env or {})},
-    )
+    try:
+        p = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env={**os.environ, **(env or {})},
+        )
+    except subprocess.TimeoutExpired as e:  # a hung GPU must not end the sweep
+        part = "".join(
+            x.decode(errors="replace") if isinstance(x, bytes) else (x or "")
+            for x in (e.stdout, e.stderr)
+        )
+        return f"{part}\n{TIMED_OUT} {timeout} s\n"
     return p.stdout + p.stderr
+
+
+def health(txt: str) -> Dict:
+    """GPU error lines in a measurement's output and whether it was killed at its time limit."""
+    return {
+        "gpu_error_lines": sum(
+            1 for line in txt.splitlines() if gpu_errors.is_gpu_error(line)
+        ),
+        "timed_out": TIMED_OUT in txt,
+    }
+
+
+def usable(row: Dict) -> bool:
+    return not row.get("gpu_error_lines") and not row.get("timed_out")
 
 
 def parse_backendbench(txt: str, batch: int) -> Dict:
@@ -62,7 +96,12 @@ def parse_backendbench(txt: str, batch: int) -> Dict:
     return row
 
 
-def nn_sweep(batches: List[int], iterations: int, lc0: Optional[str]) -> Dict:
+def nn_sweep(
+    batches: List[int],
+    iterations: int,
+    lc0: Optional[str],
+    save: Callable[[Dict], None] = lambda res: None,
+) -> Dict:
     out: Dict = {"metalfish": [], "lc0": []}
     probe = REPO / "build" / "metalfish_nn_probe"
     for fp16 in (1, 0):
@@ -82,12 +121,19 @@ def nn_sweep(batches: List[int], iterations: int, lc0: Optional[str]) -> Dict:
                     str(iterations),
                 ],
                 env={"METALFISH_METAL_FP16": str(fp16)},
+                timeout=300,
             )
             m = re.search(r'"latency":(\{[^}]*\})', txt)
             lat = json.loads(m.group(1)) if m else {"error": txt[-300:]}
             out["metalfish"].append(
-                {"precision": "fp16" if fp16 else "fp32", "batch": b, **lat}
+                {
+                    "precision": "fp16" if fp16 else "fp32",
+                    "batch": b,
+                    **lat,
+                    **health(txt),
+                }
             )
+            save(out)
             print(
                 f"metalfish fp16={fp16} batch={b}: {lat.get('median_ms')} ms, {lat.get('median_positions_per_second')} pos/s"
             )
@@ -104,7 +150,7 @@ def nn_sweep(batches: List[int], iterations: int, lc0: Optional[str]) -> Dict:
                     "--movetime=15000",
                     "--num-positions=3",
                 ],
-                timeout=600,
+                timeout=240,
             )
             nps = [int(x) for x in re.findall(r"(\d+) nps", txt)]
             out["lc0"].append(
@@ -117,8 +163,11 @@ def nn_sweep(batches: List[int], iterations: int, lc0: Optional[str]) -> Dict:
                     "nps_median": statistics.median(nps) if nps else None,
                     "nps_steady_median": (statistics.median(nps[-5:]) if nps else None),
                     "nps_max": max(nps) if nps else None,
+                    **health(txt),
+                    **({} if nps else {"error": txt[-300:]}),
                 }
             )
+            save(out)
             print(f"lc0 minibatch={mb}: {nps}")
         # network evaluations per second of Lc0's own Metal backend, the probe's unit; a parse
         # failure is recorded but does not fail the sweep (the search benchmark above is the M1
@@ -135,16 +184,22 @@ def nn_sweep(batches: List[int], iterations: int, lc0: Optional[str]) -> Dict:
                     f"--max-batch-size={b}",
                     "--batches=100",
                 ],
-                timeout=600,
+                timeout=300,
             )
-            row = parse_backendbench(txt, b)
+            row = {**parse_backendbench(txt, b), **health(txt)}
             out["lc0_backendbench"].append(row)
+            save(out)
             print(f"lc0 backendbench batch={b}: {row.get('median_eps')} evals/s")
     return out
 
 
 def ab_scaling(
-    threads: List[int], repeats: int, depth: int, hash_mb: int, engine: str
+    threads: List[int],
+    repeats: int,
+    depth: int,
+    hash_mb: int,
+    engine: str,
+    save: Callable[[Dict], None] = lambda res: None,
 ) -> Dict:
     rows = []
     for t in threads:
@@ -161,8 +216,10 @@ def ab_scaling(
                     "nodes": int(nodes.group(1)) if nodes else None,
                     "nps": int(nps.group(1)) if nps else None,
                     "wall_s": el,
+                    **health(txt),
                 }
             )
+            save({"rows": rows})
             print(rows[-1])
     agg = {}
     for t in threads:
@@ -206,11 +263,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--engine", default=str(REPO / "build" / "metalfish"))
     args = ap.parse_args(argv)
     pathlib.Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+
+    def save(res: Dict) -> None:
+        with open(args.out, "w") as fh:
+            json.dump({**res, "complete": False}, fh, indent=2)
+
     if args.which == "nn":
         res = nn_sweep(
             [int(x) for x in args.batches.split(",")],
             args.iterations,
             args.lc0 if pathlib.Path(args.lc0).exists() else None,
+            save,
         )
     else:
         res = ab_scaling(
@@ -219,17 +282,23 @@ def main(argv: Optional[List[str]] = None) -> int:
             args.depth,
             args.hash,
             args.engine,
+            save,
         )
     res["hardware"] = run(["sysctl", "-n", "machdep.cpu.brand_string"]).strip()
+    res["complete"] = True
     with open(args.out, "w") as fh:
         json.dump(res, fh, indent=2)
     # a measurement the engine or Lc0 failed to produce is written for diagnosis but fails the run,
     # so the queue log records a non-zero exit instead of a sweep full of nulls
     if args.which == "nn":
-        failed = [r for r in res["metalfish"] if r.get("median_ms") is None]
-        failed += [r for r in res["lc0"] if r.get("nps_steady_median") is None]
+        failed = [
+            r for r in res["metalfish"] if r.get("median_ms") is None or not usable(r)
+        ]
+        failed += [
+            r for r in res["lc0"] if r.get("nps_steady_median") is None or not usable(r)
+        ]
     else:
-        failed = [r for r in res["rows"] if r.get("nps") is None]
+        failed = [r for r in res["rows"] if r.get("nps") is None or not usable(r)]
     if failed:
         print(f"{len(failed)} measurement(s) failed; see {args.out}", file=sys.stderr)
         return 1

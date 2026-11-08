@@ -521,6 +521,68 @@ class MicrobenchFailureTest(unittest.TestCase):
         finally:
             microbench.run = saved
 
+    def test_timed_out_command_keeps_its_output(self):
+        import microbench
+
+        txt = microbench.run(
+            [
+                sys.executable,
+                "-c",
+                "import time; print('partial', flush=True); time.sleep(60)",
+            ],
+            timeout=2,
+        )
+        self.assertIn("partial", txt)
+        self.assertEqual(
+            microbench.health(txt), {"gpu_error_lines": 0, "timed_out": True}
+        )
+
+    def test_gpu_error_fails_the_measurement(self):
+        import microbench
+
+        saved = microbench.run
+        microbench.run = lambda *a, **k: (
+            '{"latency":{"median_ms":20.0,"median_positions_per_second":50}}\n'
+            "Execution of the command buffer was aborted due to an error during execution. "
+            "Caused GPU Hang Error (00000003:kIOGPUCommandBufferCallbackErrorHang)\n"
+        )
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                out = pathlib.Path(tmp) / "nn.json"
+                rc = microbench.main(
+                    ["nn", "--out", str(out), "--batches", "1", "--lc0", "/nonexistent"]
+                )
+                self.assertEqual(rc, 1)
+                row = json.loads(out.read_text())["metalfish"][0]
+                self.assertEqual((row["gpu_error_lines"], row["timed_out"]), (1, False))
+        finally:
+            microbench.run = saved
+
+    def test_results_are_saved_after_every_measurement(self):
+        import microbench
+
+        saved, seen = microbench.run, []
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp) / "nn.json"
+
+            def fake(*a, **k):
+                seen.append(json.loads(out.read_text()) if out.exists() else None)
+                return '{"latency":{"median_ms":20.0,"median_positions_per_second":50}}'
+
+            microbench.run = fake
+            try:
+                rc = microbench.main(
+                    ["nn", "--out", str(out), "--batches", "1", "--lc0", "/nonexistent"]
+                )
+            finally:
+                microbench.run = saved
+            self.assertEqual(rc, 0)
+            self.assertIsNone(seen[0])
+            self.assertEqual(
+                (len(seen[1]["metalfish"]), seen[1]["complete"]), (1, False)
+            )
+            self.assertTrue(json.loads(out.read_text())["complete"])
+
 
 class HostLoadSensitivityTest(unittest.TestCase):
     """Pins the host-load sensitivity analysis of protocol amendment 8."""
