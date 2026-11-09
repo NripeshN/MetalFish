@@ -146,3 +146,13 @@ designed so the paper is publishable whichever way the measurements come out.
   times. The runner cells' M3 (in-game MCTS evaluations per second), computed after the readings as
   amendment 15 (f) registers it, is added: medians of 14 (RQ1a-R) and 24 (RQ2b-R) against the runner's
   batch-1 ceiling of 52.6; no runner cell logged a thermal warning (M6).
+- **2026-11-08 (night)** — Protocol amendment 16 (02 §11), written before any oracle shard has been
+  read (16 of 150 finished; health lines only). It fixes how each class of oracle outcome will be
+  read: a consensus bound and two cross-judge bounds, each within or beyond the 0.01 expected-score
+  tie band, decide whether the paper reports little to gain, room under both judges, or a
+  judge-dependent result, and what each changes in the abstract and conclusion. It adds results for
+  each source cell (RQ1a's positions apart from RQ1b's), a rule for an incomplete run, and a pass
+  criterion for the judges' stability on the 74 workstation positions (equal verdicts and
+  correlation, each at least 0.8). It also recomputes the class with the conversion constant halved
+  and doubled, and reads the two judges as related (Stockfish 19's networks are trained on Leela
+  data). The pre-submission review of the v2 manuscript asked for all of these.

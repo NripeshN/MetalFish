@@ -769,3 +769,84 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
        most the position in progress. The oracle needs about 675 runner-hours (150 × 4.5 h). The
        game cells keep the priority of (i) 3: the driver dispatches a shard only into a slot that no
        game block can take (`--last oracle`).
+16. **2026-11-08 — reading rules for the oracle study, results per source cell, and a pass
+    criterion for the judges' stability (written before any oracle shard has been read).** The
+    pre-submission review of the v2 manuscript (2026-11-08) asked that how each class of oracle
+    outcome will be read be fixed before RQ6b-R is read, that the bound be reported for each cell
+    its positions come from, and that the stability check of 15 (a) have a pass criterion. When this
+    was written, 16 of the 150 shards had finished. Only their health lines had been looked at:
+    positions judged, judge errors, rows lacking a judge, judgments of an earlier configuration,
+    positions judged again and GPU error lines (15 (f)). Decisions:
+    (a) **Results per source cell.** The sample of amendment 6 pools the disagreement records of
+    RQ1a (25,138) and RQ1b (17,338); each record names its source log. Their MCTS candidates come
+    from different search budgets: a median of 38 and 101 playouts per transformer-enabled move
+    (`summary.json`). Besides the pooled results, every RQ6b-R statistic of 12 (d) and 14 is also
+    reported separately for the positions from RQ1a's games and from RQ1b's games. Each set is
+    reweighted by its own cell's stratum population counts, with the pooled tercile cut points of
+    amendment 6. Any statement about RQ1a uses the RQ1a positions' results; the pooled results
+    describe the sample as drawn.
+    (b) **Classes of outcome.** Three bounds decide the class, each in expected-score units per
+    disagreement position, with its 95% interval: the consensus bound of 12 (d), and the two
+    cross-judge bounds of 14 (one judge selects the better candidate, the other judge's evaluations
+    score it). A bound is *within the tie band* when the upper limit of its interval is at most
+    0.01. It is *beyond the tie band* when the lower limit of its interval exceeds 0.01. The value
+    0.01 is the expected-score difference of the registered 10 cp tie threshold at an even
+    position, under the logistic conversion with 250 cp per unit of log-odds (10/250 × 1/4). The
+    classes, and what each changes in the paper:
+    1. *Little to gain*: all three bounds are within the tie band. The abstract gives the
+       consensus bound and its interval. It says that, judged by Stockfish 19 and by Lc0 with the
+       BT4 network, an arbiter choosing between the two root candidates at decision time could have
+       gained little on these positions. The contribution on the oracle reports the design and this
+       finding. The conclusion reads its condition on the arbiter (evidence that the MCTS move is
+       right often enough to override) as not met by this pair of searches at the budgets tested.
+    2. *Room under both judges*: all three bounds are beyond the tie band. The abstract gives the
+       consensus bound and its interval as an upper bound on what any arbiter between the two root
+       candidates could gain per disagreement position, not a prediction of game results. The
+       contribution on the oracle reports the design and this finding. The conclusion reads the
+       condition on the arbiter as open, and names an arbiter learned from such positions as the
+       next step.
+    3. *Judge-dependent or unresolved*: any other combination. The abstract and the conclusion give
+       the bounds judge by judge. They say that whether an arbiter could gain depends on the judge,
+       or is not resolved at this sample size, and claim no direction.
+    The class is assigned from the pooled results. For any statement about RQ1a it is assigned from
+    the RQ1a positions' results (a); if the two classes differ, both are reported. The per-judge
+    bounds, in which one judge both selects and scores, are reported but do not decide the class.
+    (c) **An incomplete run.** If fewer than 600 positions have verdicts from both judges at a
+    version's cut-off, the classes of (b) are assigned only when every stratum of amendment 6 has
+    at least one position with both verdicts. The text then states how many positions were judged
+    and that the run is incomplete. Otherwise the results are reported descriptively, with no
+    class.
+    (d) **RQ1a and the bound.** How RQ1a's interval combines with the bound was not registered:
+    amendment 12 reads RQ1a on its own. Any combined reading is exploratory and is labelled so. The
+    projected Elo stays a labelled conversion of the per-position bound (amendment 14).
+    (e) **The judges' changes and the stability check.** On the runners the judges differ from the
+    registered ones in three ways (15 (a), (k)).
+    - Stockfish 19 searches its 60 s with 3 threads of a virtual M1 instead of 8 on the M2 Max, so it
+      reaches fewer nodes.
+    - Lc0 0.32.1 runs on the CPU (BLAS, with Apple's Accelerate) instead of Metal.
+    - Lc0's search therefore takes the CPU backend's defaults: one search thread and minibatch 7,
+      instead of two threads and 256. The network, the 30,000 nodes per candidate, the fresh tree and
+      smart pruning off are unchanged.
+    The check of 15 (a) compares, judge by judge, the 74 workstation positions with the runner's
+    verdicts on the same positions (`fetch_runner_oracle.py --stability`). It gives the share of
+    equal verdicts, and the Pearson correlation of the alpha-beta candidate's score minus the MCTS
+    candidate's. A judge passes when the share of equal verdicts is at least 0.8 and the correlation
+    is at least 0.8. A judge that fails is reported with its two statistics, and its runner
+    verdicts are described as those of the runner configuration. Any class that rests on that
+    judge is stated with this qualification. For Stockfish the same two statistics also show how
+    sensitive its verdicts are to search depth: the same 60 s on 3 threads against 8. The
+    workstation rows enter no estimate.
+    (f) **Tools.** The per-cell results of (a), the classes of (b) and (c) and the sensitivity of
+    (g) come from `oracle_probe.py --summarise-only`, and `make_figures.py` tabulates them. Both
+    changes are merged before the oracle is read.
+    (g) **Sensitivity to the conversion.** The judges report on different scales. Stockfish 19
+    normalises its centipawns to its win-rate model; Lc0's default score type is WDL_mu. Both are
+    converted with one logistic constant (12 (d)), which is a convention. The classes of (b) are
+    therefore also computed with the constant halved and doubled (125 and 500 cp per unit of
+    log-odds), with the tie band scaled to match (0.02 and 0.005). Verdicts are decided in
+    centipawns, so they do not change. A class that changes with the constant is reported as
+    sensitive to the conversion.
+    (h) **Related judges.** Stockfish 19's networks are trained on data from the Leela Chess Zero
+    project, so the two judges' lineages are not independent. Agreement between them is read as
+    agreement of two related judges, not as two independent confirmations. Only the Stockfish judge
+    has the Syzygy tables (15 (a)).
