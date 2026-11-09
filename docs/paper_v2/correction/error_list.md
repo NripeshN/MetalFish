@@ -247,9 +247,12 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
 - **Corrected**: the transformer is disabled (plain AB move) when `movetime` or remaining time
   < 5,000 ms at the chapter's commit; frozen engine: `TransformerLowTimeFallbackMs` 3000 and
   `TransformerMinMoveBudgetMs` 400. GPU active on 51.8% of hybrid moves at 20+0.2 (1,437 moves),
-  ~50% at 30+0.3, ≈0% at 10+0.1.
+  ~50% at 30+0.3, ≈0% at 10+0.1. In the new evaluation's exploratory runner cell RQ1c-R (10+0.1,
+  three-core GitHub-hosted M1 runners), the rule left alpha-beta alone on 98.3% of the hybrid's
+  moves, and the hybrid lost 16.7 Elo [−24.4, −9.0] to plain alpha-beta with the same three threads.
 - **Evidence**: `ec1dee5:src/uci/uci.cpp` lines 59, 821–841; `365f36a:src/uci/engine.cpp`
-  lines 186–187; telemetry rows in `../08_evidence_map.md` §A (L5, RQ1a pilot, L14) and §C.
+  lines 186–187; telemetry rows in `../08_evidence_map.md` §A (L5, RQ1a pilot, L14) and §C;
+  `results/paper_v2/RQ1c-R/summary.json` and the RQ1c-R final reading in `../08_evidence_map.md` §F.
   Audit C12.
 
 ---

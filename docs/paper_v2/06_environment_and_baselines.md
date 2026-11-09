@@ -2,6 +2,7 @@
 
 ## Hardware and OS
 
+- MacBook Pro, model identifier Mac14,6 (`sysctl hw.model`; recorded 2026-11-09).
 - Apple M2 Max: 12 CPU cores (8 performance, 4 efficiency), 38-core GPU (Metal 4), 32 GB
   unified memory; 252 GB free disk.
 - macOS 27.2 (Darwin 27.2.0, build 26B5091g); Xcode-beta toolchain; Apple clang 21.0.0.

@@ -7,7 +7,9 @@ https://doi.org/10.1007/978-3-032-32726-0_39
 > Status: **draft for an author-initiated Correction** (prepared 2026-10-14, revised 2026-10-27
 > after the manuscript's integrity check: items 8–10; the RQ1a result in item 1 filled on
 > 2026-10-31 from `results/paper_v2/RQ1a/summary.json`, the cell's final reading in
-> `08_evidence_map.md` §E). Fields in double braces are filled before filing: `{{PREPRINT}}`
+> `08_evidence_map.md` §E; the RQ1c-R result in item 14 added on 2026-11-09 from
+> `results/paper_v2/RQ1c-R/summary.json`, the cell's final reading in `08_evidence_map.md` §F).
+> Fields in double braces are filled before filing: `{{PREPRINT}}`
 > (arXiv identifier of the follow-up paper) and `{{ZENODO_DOI}}`. Nothing else in this note
 > depends on pending work; every other number cites an existing artifact (see `error_list.md`).
 
@@ -174,7 +176,10 @@ concern how its components and its results were characterised.
     3 s of remaining time or a move budget below 0.4 s in the current release). At 20 s + 0.2 s
     the transformer was active on 52% of the hybrid's moves and at 30 s + 0.3 s on about 50%;
     at 10 s + 0.1 s it is almost never active. Results attributed to the hybrid at short time
-    controls are therefore largely results of the alpha-beta component.
+    controls therefore reflect the alpha-beta component running inside the hybrid, not the
+    transformer; in an exploratory measurement in the new evaluation, at 10 s + 0.1 s on
+    three-core virtual machines, that configuration lost 16.7 Elo to the same alpha-beta search
+    run alone (95% confidence interval 9.0 to 24.4) {{PREPRINT}}.
 
 The parts of the chapter that stand are the existence and architecture of the three modes
 sharing one binary, the use of `os_unfair_lock` for node score updates and of 128-byte-aligned
