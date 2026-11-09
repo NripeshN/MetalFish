@@ -7,12 +7,18 @@ Collects, into <out>/ (default results/paper_v2/deposit/):
                      engines.log(.gz) compressed to .gz
   gates/<gate>/      summary.json or partial_stats.json, manifest.json, games.pgn (gzipped)
   micro/             *.json microbenchmark outputs
-  oracle/            RQ6b outputs (oracle.jsonl, summary, manifest, moves_input)
+  oracle/<RQ6b|RQ6b-R>/  the oracle study: the workstation's stopped run (RQ6b) and the runners'
+                     run (RQ6b-R: oracle.jsonl, its summary, stability.json, shards.json, shards/)
+  micro_runner/      runner microbenchmarks (results/paper_v2/runner_micro)
+  readings/          the runner cells' reading folders (results/paper_v2/runner_readings)
+  runner_probe/      the runner probes the paper cites (results/paper_v2/runner_probe)
+  runner/            the campaign log and state, the runner workflow and the dispatch driver
   plan/              docs/paper_v2 (protocol, audit, blueprint, evidence map, correction package,
                      manuscript source) without build products
   tools/             tools/paper/*.py and README
   bin/MAIN_READY     frozen-binary hash record; FROZEN.md if present; queue log; hostload.log
-  scripts/           the queue, load-gate, oracle and logger scripts (results/paper_v2/*.sh)
+  scripts/           the queue, load-gate, oracle and logger scripts (results/paper_v2/*.sh; the
+                     merge watchers are left out)
   CHECKSUMS.sha256   sha256 of every deposited file
   zenodo.json        deposit metadata (creators, description, license, related identifiers);
                      fill the arXiv identifier when it exists
@@ -22,6 +28,8 @@ upload step) after reviewing the directory. --dry-run only lists what would be c
 Usage:
     python3 tools/paper/make_deposit.py [--out results/paper_v2/deposit] [--cells RQ1a,RQ2a,...]
         [--arxiv 2610.xxxxx] [--version 1.0.0] [--dry-run]
+
+The output directory must not exist yet (or be empty), so two versions never mix.
 """
 
 from __future__ import annotations
@@ -47,7 +55,22 @@ CELL_FILES = [
     "fastchess_cmd.txt",
     "fastchess_report.txt",
     "partial_stats.json",
+    "vm_sampler.log",
 ]
+# the oracle study: the workstation's run (stopped at 74 positions; the stability check) and the
+# runners' run (amendment 15 (a)), with the files fetch_runner_oracle.py and oracle_probe.py write
+ORACLE_DIRS = ("RQ6b", "RQ6b-R")
+ORACLE_FILES = (
+    "oracle.jsonl",
+    "oracle.jsonl.summary.json",
+    "moves_input.jsonl",
+    "manifest.json",
+    "manifest.txt",
+    "stability.json",
+    "shards.json",
+)
+RUNNER_FILES = ("runner_campaign_log.txt", "runner_campaign_state.json")
+SCRIPT_SKIP = ("automerge", "rerun_then_automerge")
 COMPRESS = {"engines.log", "games.pgn", "moves.jsonl"}
 PLAN_SKIP = {".bibcache", "__pycache__"}
 PLAN_SKIP_SUFFIX = {
@@ -84,7 +107,7 @@ def put(src: pathlib.Path, dst: pathlib.Path, plan: list, dry: bool) -> None:
         shutil.copy2(src, dst)
 
 
-def main() -> int:
+def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -98,8 +121,11 @@ def main() -> int:
     )
     ap.add_argument("--version", default="1.0.0")
     ap.add_argument("--dry-run", action="store_true")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     out = pathlib.Path(args.out)
+    if not args.dry_run and out.exists() and any(out.iterdir()):
+        print(f"{out} exists and is not empty; choose a new --out", file=sys.stderr)
+        return 2
     plan: list = []
 
     cells = (
@@ -109,6 +135,8 @@ def main() -> int:
             d
             for d in sorted(RESULTS.iterdir())
             if d.is_dir()
+            and not d.name.startswith(("deposit", "runner_"))
+            and d.name not in ORACLE_DIRS
             and d.name
             not in (
                 "sprt",
@@ -120,27 +148,41 @@ def main() -> int:
                 "suites",
                 "calibration",
                 "x",
+                "venv",
             )
             and ((d / "summary.json").exists() or (d / "games.pgn").exists())
         ]
     )
     for d in cells:
-        for name in CELL_FILES + [
-            "engines.log",
-            "engines.log.gz",
-            "oracle.jsonl",
-            "oracle.jsonl.summary.json",
-            "moves_input.jsonl",
-            "manifest.txt",
-        ]:
+        for name in CELL_FILES + ["engines.log", "engines.log.gz", "manifest.txt"]:
             src = d / name
             if src.exists():
-                put(
-                    src,
-                    out / ("oracle" if d.name == "RQ6b" else "cells") / d.name / name,
-                    plan,
-                    args.dry_run,
-                )
+                put(src, out / "cells" / d.name / name, plan, args.dry_run)
+    for name in ORACLE_DIRS:
+        d = RESULTS / name
+        for f in ORACLE_FILES:
+            if (d / f).exists():
+                put(d / f, out / "oracle" / name / f, plan, args.dry_run)
+        for src in sorted((d / "shards").rglob("*")) if (d / "shards").exists() else []:
+            if src.is_file():
+                put(src, out / "oracle" / name / src.relative_to(d), plan, args.dry_run)
+    # the runners (amendment 15): microbenchmarks, reading folders, the probes the paper cites, the
+    # campaign record, the workflow that ran every job and the driver that dispatched them
+    for sub, dst in (
+        ("runner_micro", "micro_runner"),
+        ("runner_readings", "readings"),
+        ("runner_probe", "runner_probe"),
+    ):
+        base = RESULTS / sub
+        for src in sorted(base.rglob("*")) if base.exists() else []:
+            if src.is_file() and "__pycache__" not in src.parts:
+                put(src, out / dst / src.relative_to(base), plan, args.dry_run)
+    for src in [RESULTS / n for n in RUNNER_FILES] + [
+        REPO / ".github" / "workflows" / "paper-runner-cells.yml",
+        REPO / "results" / "ars_pipeline" / "tools" / "runner_driver.py",
+    ]:
+        if src.exists():
+            put(src, out / "runner" / src.name, plan, args.dry_run)
     sprt = RESULTS / "sprt"
     if sprt.exists():
         for d in sorted(sprt.iterdir()):
@@ -168,7 +210,8 @@ def main() -> int:
             put(src, out / name, plan, args.dry_run)
     # the queue, gate, oracle and logger scripts that scheduled every measurement
     for src in sorted(RESULTS.glob("*.sh")):
-        put(src, out / "scripts" / src.name, plan, args.dry_run)
+        if not src.name.startswith(SCRIPT_SKIP):
+            put(src, out / "scripts" / src.name, plan, args.dry_run)
     for src in sorted((REPO / "docs" / "paper_v2").rglob("*")):
         if (
             src.is_file()
@@ -190,7 +233,7 @@ def main() -> int:
         capture_output=True,
         text=True,
     ).stdout.strip()
-    oracle = (RESULTS / "RQ6b" / "oracle.jsonl").exists()
+    oracle = (RESULTS / "RQ6b-R" / "oracle.jsonl").exists()
     meta = {
         "metadata": {
             "upload_type": "dataset",
@@ -198,9 +241,10 @@ def main() -> int:
             "creators": [{"name": "Niketan, Nripesh", "orcid": "0009-0008-2066-1937"}],
             "description": (
                 "Complete record of the pre-registered evaluation of MetalFish's concurrent alpha-beta + transformer-MCTS "
-                "search on an Apple M2 Max: the evaluation protocol with amendments, the audit of the earlier IntelliSys 2026 "
-                "chapter and the prepared Correction, every game (PGN), engine log and hybrid trace, manifests with binary, "
-                "network and book hashes, thermal logs, microbenchmarks, "
+                "search on an Apple M2 Max and on GitHub-hosted virtual Apple M1 runners: the evaluation protocol with "
+                "amendments, the audit of the earlier IntelliSys 2026 chapter and the prepared Correction, every game (PGN), "
+                "engine log and hybrid trace, manifests with binary, network and book hashes, thermal and runner health logs, "
+                "microbenchmarks, the runner campaign record, workflow and dispatch driver, "
                 + ("the oracle study, " if oracle else "")
                 + "and the scripts that generate every figure and table of the paper. "
                 + (
