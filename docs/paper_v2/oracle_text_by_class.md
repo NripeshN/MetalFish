@@ -118,19 +118,22 @@ reported descriptively (Section~\ref{sec:oracle}).
 
 ## §4.4, status (replaces `\pending{the oracle study RQ6b-R: status at the cut-off}`)
 
-- **Complete:** RQ6b-R is complete, with verdicts from both judges on all 600 positions
+- **Complete:** RQ6b-R is complete, with verdicts from both judges on all 600 positions; it was first read on ⟨date⟩ at ⟨time⟩~UTC, after amendment~16 and its tools had merged (Appendix~\ref{app:amend})
 - **Incomplete, every stratum covered:** RQ6b-R was cut off on ⟨date⟩ with ⟨N⟩ of its 600 positions
   judged by both judges and every stratum covered, so it is reported as an incomplete run
-  (amendment~16 (c))
+  (amendment~16 (c)); it was first read on ⟨date⟩ at ⟨time⟩~UTC, after amendment~16 and its tools had
+  merged (Appendix~\ref{app:amend})
 - **Incomplete, a stratum uncovered (D):** RQ6b-R was cut off on ⟨date⟩ with ⟨N⟩ of its 600 positions
   judged by both judges and not every stratum covered, so its results are descriptive, with no class
-  (amendment~16 (c))
+  (amendment~16 (c)); it was first read on ⟨date⟩ at ⟨time⟩~UTC, after amendment~16 and its tools had
+  merged (Appendix~\ref{app:amend})
 
 ## §6 (replaces `\pending{oracle study RQ6b-R on the runners: …}`)
 
 **Common part (every class).**
 
-RQ6b-R has verdicts from both judges on ⟨N⟩ of the 600 sampled positions, from ⟨G⟩ games.
+RQ6b-R has verdicts from both judges on ⟨N⟩ of the 600 sampled positions (Stockfish~19 on ⟨N_SF⟩, Lc0 on
+⟨N_LC⟩), from ⟨G⟩ games. A position without both verdicts enters only its judge's per-judge results.
 
 On the 74 positions the workstation had judged, the runners' verdicts were compared with the
 workstation's (Table~\ref{tab:oracle-stability}):
@@ -213,3 +216,12 @@ The sentence before the slot reads: "The oracle study is the test of the third:"
 ## The arXiv abstract
 
 It uses the same class wording as the abstract above, with the consensus bound and its interval.
+
+## Revision before reading (2026-11-09, after the re-review's Phase 1 criteria)
+
+Added before any RQ6b-R output was read:
+- §4.4 states when RQ6b-R was first read, so that the timing of the rules fixed before reading can be
+  checked in the manuscript (re-review criteria, FIXED-BEFORE-READING and NS-3). The amendments
+  appendix gives the same time in its Preceded column.
+- §6 gives each judge's count of positions judged, and how a position without both verdicts is handled
+  (re-review NS-2).
