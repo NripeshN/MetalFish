@@ -2020,6 +2020,7 @@ class OracleJudgingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             mf.write_oracle_tables(s, pathlib.Path(d))
             md = (pathlib.Path(d) / "oracle.md").read_text()
+            tex = (pathlib.Path(d) / "oracle_cells.tex").read_text().splitlines()
         self.assertIn("Class of outcome (protocol amendment 16 (b), (c)):", md)
         self.assertIn("- Pooled: **", md)
         self.assertIn("- RQ1a: ", md)
@@ -2027,6 +2028,139 @@ class OracleJudgingTest(unittest.TestCase):
         self.assertIn("| RQ1b | 2 | sf ", md)
         # the synthetic judgments carry no centipawns, so 16 (g) is reported as not computed
         self.assertIn("Sensitivity to the conversion (16 (g)): not computed", md)
+        # oracle_cells.tex: all positions, then each cell; no class columns for 16 (g)
+        self.assertEqual(
+            tex[2],
+            "Positions from & $n$ & Consensus bound (ES) & lc0 selects, sf scores & "
+            "sf selects, lc0 scores & Class \\\\",
+        )
+        body = [l for l in tex[4:] if l.endswith("\\\\")]
+        self.assertEqual(
+            [l.split(" & ")[:2] for l in body],
+            [["all", "4"], ["RQ1a", "2"], ["RQ1b", "2"]],
+        )
+        self.assertTrue(all(l.split(" & ")[-1][0] in "LRJ—" for l in body))
+
+    def test_cells_table_gives_the_class_at_each_constant(self):
+        """oracle_cells.tex adds the class at the halved and doubled constant (16 (g)) when the
+        judgments keep their centipawns."""
+        import make_figures as mf
+
+        op = self.op
+        rows = []
+        for i, (ab, mc) in enumerate(
+            ((0.0, 40.0), (30.0, 0.0), (0.0, 0.0), (10.0, 60.0))
+        ):
+            r = {
+                "ab_move": "a",
+                "mcts_move": "m",
+                "selected": "a",
+                "stratum": "A",
+                "cluster": f"g{i}",
+                "source": "results/paper_v2/RQ1a/engines.log",
+                "judges": {},
+            }
+            for name in ("sf", "lc0"):
+                j = {"cand_cp": {"a": ab, "m": mc}, "best_cp": max(ab, mc)}
+                r["judges"][name] = op.score_candidates(j, r, 10.0, 250.0)
+            rows.append(r)
+        sampling = {
+            "strata_population": {"A": 100},
+            "strata_sample": {"A": 4},
+            "strata_population_by_source": {"RQ1a": {"A": 100}},
+            "strata_sample_by_source": {"RQ1a": {"A": 4}},
+        }
+        s = op.summarise(rows, ["sf", "lc0"], sampling, n_boot=100, seed=1)
+        s = op.with_source_cells(s, rows, rows, ["sf", "lc0"], sampling, 100, 1)
+        s["method"]["expected_score"] = "logistic, 250 cp per unit of log-odds"
+        with tempfile.TemporaryDirectory() as d:
+            mf.write_oracle_tables(s, pathlib.Path(d))
+            tex = (pathlib.Path(d) / "oracle_cells.tex").read_text().splitlines()
+        self.assertTrue(
+            tex[2].endswith("& Class & Class at 125 cp & Class at 500 cp \\\\")
+        )
+        body = [l for l in tex[4:] if l.endswith("\\\\")]
+        self.assertEqual([l.split(" & ")[0] for l in body], ["all", "RQ1a"])
+        short = {
+            "little_to_gain": "L",
+            "room_under_both_judges": "R",
+            "judge_dependent_or_unresolved": "J",
+        }
+        sens = s["conversion_sensitivity"]
+        self.assertEqual(
+            body[0].removesuffix(" \\\\").split(" & ")[-3:],
+            [
+                short[s["outcome"]["class"]],
+                short[sens["125"]["pooled"]["class"]],
+                short[sens["500"]["pooled"]["class"]],
+            ],
+        )
+
+    def test_os_builds_tables(self):
+        """Amendment 13: each cell by macOS build, with a dash below 100 pairs and RQ1a's rows
+        marked as computed after its interpretation."""
+        import make_figures as mf
+
+        rows = [
+            ("RQ1a", "macOS 27.2 beta", 514, 256, "-10.9 ± 12.4", True),
+            ("RQ1a_pilot", "macOS 27.2 beta", 100, 50, None, False),
+            ("RQ2b", "macOS 27.2", 250, 125, "-15.3 ± 18.5", False),
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            mf.write_os_builds(rows, pathlib.Path(d))
+            md = (pathlib.Path(d) / "os_builds.md").read_text().splitlines()
+            tex = (pathlib.Path(d) / "os_builds.tex").read_text().splitlines()
+        self.assertEqual(
+            md[2:],
+            [
+                "| RQ1a | macOS 27.2 beta | 514 | 256 | -10.9 ± 12.4 (added after the interpretation) |",
+                "| RQ1a_pilot | macOS 27.2 beta | 100 | 50 | — |",
+                "| RQ2b | macOS 27.2 | 250 | 125 | -15.3 ± 18.5 |",
+            ],
+        )
+        self.assertEqual(
+            tex[4:7],
+            [
+                "RQ1a & macOS 27.2 beta & 514 & 256 & $-10.9 \\pm 12.4$$^\\dagger$ \\\\",
+                "RQ1a\\_pilot & macOS 27.2 beta & 100 & 50 & — \\\\",
+                "RQ2b & macOS 27.2 & 250 & 125 & $-15.3 \\pm 18.5$ \\\\",
+            ],
+        )
+
+    def test_stability_tables_apply_the_pass_criterion(self):
+        """Amendment 16 (e): a judge passes with at least 0.8 equal verdicts and a correlation of at
+        least 0.8; a judge without the two statistics gets a dash."""
+        import make_figures as mf
+
+        stab = {
+            "sf": {"positions": 74, "same_verdict": 0.8, "delta_cp_correlation": 0.9},
+            "lc0": {
+                "positions": 74,
+                "same_verdict": 0.95,
+                "delta_cp_correlation": 0.79,
+            },
+            "x_y": {"positions": 0},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            mf.write_oracle_stability(stab, pathlib.Path(d))
+            md = (pathlib.Path(d) / "oracle_stability.md").read_text().splitlines()
+            tex = (pathlib.Path(d) / "oracle_stability.tex").read_text().splitlines()
+        self.assertEqual(
+            md[2:],
+            [
+                "| sf | 74 | 80.0% | 0.900 | yes |",
+                "| lc0 | 74 | 95.0% | 0.790 | no |",
+                "| x_y | 0 | — | — | — |",
+            ],
+        )
+        self.assertEqual(
+            tex[4:7],
+            [
+                "sf & 74 & 80.0\\% & 0.900 & yes \\\\",
+                "lc0 & 74 & 95.0\\% & 0.790 & no \\\\",
+                "x\\_y & 0 & — & — & — \\\\",
+            ],
+        )
 
     def test_weights_fall_back_to_row_shares(self):
         rows = self._rows()
