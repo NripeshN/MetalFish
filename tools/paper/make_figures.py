@@ -1554,15 +1554,22 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
         write_oracle_tables(load(osum), tdir)
     stab = results / "RQ6b-R" / "stability.json"
     if stab.exists():
+        # amendment 16 (e): a judge passes with at least 0.8 equal verdicts and a correlation of
+        # at least 0.8
         md = [
-            "| Judge | Positions judged on both machines | Same verdict | Correlation of the candidates' score difference |",
-            "| --- | --- | --- | --- |",
+            "| Judge | Positions judged on both machines | Same verdict | Correlation of the candidates' score difference | Passes (16 (e): both at least 0.8) |",
+            "| --- | --- | --- | --- | --- |",
         ]
         for name, st in load(stab).items():
             sv = st.get("same_verdict")
             r = st.get("delta_cp_correlation")
+            passes = (
+                "—"
+                if sv is None or r is None
+                else ("yes" if sv >= 0.8 and r >= 0.8 else "no")
+            )
             md.append(
-                f"| {name} | {st.get('positions', 0)} | {f'{sv*100:.1f}%' if sv is not None else '—'} | {f'{r:.3f}' if r is not None else '—'} |"
+                f"| {name} | {st.get('positions', 0)} | {f'{sv*100:.1f}%' if sv is not None else '—'} | {f'{r:.3f}' if r is not None else '—'} | {passes} |"
             )
         (tdir / "oracle_stability.md").write_text("\n".join(md) + "\n")
 
@@ -2085,6 +2092,65 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
             "",
             f"Projected Elo: {next(iter(cross.values()))['projected_elo_of_cross_bound']['label']}.",
         ]
+
+    # amendment 16: the class of outcome (pooled and per source cell) and each cell's bounds
+    def outcome_line(label, oc):
+        if not oc:
+            return f"{label}: no class computed."
+        if oc.get("class") is None:
+            return f"{label}: no class ({oc.get('reason')})."
+        bands = ", ".join(f"{k} {v}" for k, v in (oc.get("bands") or {}).items())
+        done = "complete" if oc.get("complete") else "incomplete"
+        return (
+            f"{label}: **{oc['class'].replace('_', ' ')}** ({bands}; tie band "
+            f"{oc['tie_band_es']} ES; {oc.get('positions_with_both_verdicts')} of "
+            f"{oc['sampled']} positions with both verdicts, {done})."
+        )
+
+    md += ["", "Class of outcome (protocol amendment 16 (b), (c)):", ""]
+    md.append("- " + outcome_line("Pooled", o.get("outcome")))
+    cells = o.get("by_source_cell") or {}
+    for cell, c in cells.items():
+        md.append("- " + outcome_line(cell, c.get("outcome")))
+    sens = o.get("conversion_sensitivity") or {}
+    if sens.get("computed") is False:
+        md += [
+            "",
+            f"Sensitivity to the conversion (16 (g)): not computed ({sens.get('reason')}).",
+        ]
+    elif sens:
+        md += [
+            "",
+            "Sensitivity to the conversion (16 (g); the tie band scaled with the constant):",
+            "",
+        ]
+        for scale, entry in sens.items():
+            for name, oc in entry.items():
+                if name != "tie_band_es":
+                    md.append("- " + outcome_line(f"{scale} cp, {name}", oc))
+    if cells:
+        md += [
+            "",
+            "Per source cell (amendment 16 (a); each reweighted by its own stratum population):",
+            "",
+            "| Cell | Positions | Bound per judge (ES) | Consensus bound (ES) | Cross bounds (ES) |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for cell, c in cells.items():
+            per = "; ".join(
+                f"{n} {ci(j['stats']['arbiter_upper_bound_es'])}"
+                for n, j in c["judges"].items()
+            )
+            cag = c.get("agreement")
+            cons = ci(cag["stats"]["consensus_bound_es"]) if cag else "—"
+            crs = (
+                "; ".join(
+                    f"{k} {ci(v['stats']['cross_bound_es'])}"
+                    for k, v in (c.get("cross_judge") or {}).items()
+                )
+                or "—"
+            )
+            md.append(f"| {cell} | {c['positions']} | {per} | {cons} | {crs} |")
     (tdir / "oracle.md").write_text("\n".join(md) + "\n")
     tex = [
         "\\begin{tabular}{lrlllll}",
