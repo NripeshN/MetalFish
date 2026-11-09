@@ -103,11 +103,56 @@ designed so the paper is publishable whichever way the measurements come out.
   lost by −26.1 [−36.0, −16.3]. Switching that channel off made no detectable difference
   (+9.8 ± 14.8). With the 1 s margin there were no time forfeits, and the result does not depend on
   the referee rule. In each cell the MCTS move was played on 4 of about 10,000 disagreements.
-- **2026-11-08** — RQ2a-R, RQ2b-R and RQ2c-R were read once, after their last blocks (08 §F, 07).
-  On a three-core runner, alpha-beta with one thread lost to alpha-beta with three by −100.3 Elo,
-  95% CI [−109.3, −91.4] (RQ2a-R). The split hybrid (one alpha-beta thread and the MCTS worker) was
-  level with alpha-beta on one thread: −0.7 [−10.9, +9.5] (RQ2b-R). Against alpha-beta on three
-  threads it lost by −111.8 [−120.9, −102.6] (RQ2c-R). The registered check holds: RQ2b-R + RQ2a-R
-  = −101.0 ± 13.5, within +10.7 ± 15.9 of the direct cell. So the split costs what alpha-beta's lost
-  threads cost, and the MCTS side adds nothing detectable. The MCTS move was played on 2 of 10,081
-  and 5 of 9,166 disagreements. There were no time forfeits, and no result depends on the referee rule.
+- **2026-11-08** — RQ2a-R, RQ2b-R and RQ2c-R were read once, after their last blocks (08 §F, 07). On
+  a three-core runner, alpha-beta with one thread lost to alpha-beta with three by −100.3 Elo, 95%
+  CI [−109.4, −91.4] (RQ2a-R). The split hybrid (one alpha-beta thread and the MCTS worker on its
+  transformer-enabled moves, all three threads on its time-safety moves) was not detectably
+  different from alpha-beta on one thread: −0.7 [−10.9, +9.5] (RQ2b-R). Against alpha-beta on three
+  threads it lost by −111.8 [−121.0, −102.7] (RQ2c-R). RQ2b-R + RQ2a-R = −101.0 ± 13.5, and the
+  direct cell differs from it by +10.7 ± 15.9: no discrepancy detected. The MCTS move was played on
+  2 of 10,081 and 5 of 9,166 disagreements. There were no time forfeits, and no result depends on
+  the referee rule.
+- **2026-11-08 (morning)** — RQ5a-R was read once, after its last block (08 §F, 07). On a runner,
+  MetalFish's MCTS (one thread, minibatch 1) scored +47.2 Elo, 95% CI [+26.0, +68.7], against Lc0
+  0.32.1 at the same settings with the same network (600 games). The cell is time-sensitive. Lc0
+  overran its clock in 54 games, late in long games when it was down to the 0.3 s increment;
+  MetalFish never did. Without the 1 s margin those games are Lc0's losses, and the cell is +76.5
+  [+53.5, +100.2]. Three things limit the reading. The engines reported 41 and 16 nodes per second,
+  so the cell does not separate the searches from their backends' speed. Lc0 at minibatch 1 is not
+  Lc0 at its defaults. And with both engines holding the network, the 7 GB runner swapped in every
+  block. There were no time forfeits and no GPU errors.
+- **2026-11-08 (late morning)** — RQ1c-R, the last runner cell, was read once, after its last block
+  (08 §F, 07). At 10+0.1 on a runner, the shipped hybrid lost to plain alpha-beta with the same three
+  threads: −16.7 Elo, 95% CI [−24.4, −9.0] (2,000 games). The time-safety rule left alpha-beta alone on
+  98.3% of the hybrid's moves; the transformer ran on 1.7%, with a median of 3 evaluations, and its move
+  was played on none of 661 disagreements. So the hybrid lost while playing alpha-beta's move every
+  time. The cell does not show which part of the hybrid costs those Elo. There were no time forfeits,
+  the result does not depend on the referee rule, and the runner did not swap.
+- **2026-11-08 (afternoon)** — The runner microbenchmarks M1 and M2 ran on one runner with the campaign's
+  build (08 §F). On the runner's GPU a BT4 evaluation took 19.0 ms at batch size 1 in FP16, 2.6 times as
+  long as on the M2 Max, and throughput levelled off at about 105 evaluations per second, about a fifth
+  of the M2 Max's. Alpha-beta searched 0.83 million nodes per second on one thread and 1.55 million on
+  three.
+  Lc0's backend benchmark recorded no rate, because the sweep's parser does not read this Lc0 build's
+  output; in the probe Lc0's backend ran at roughly half to three-fifths of MetalFish's rate. The oracle
+  study RQ6b-R is the one runner measurement still running.
+- **2026-11-08 (evening)** — The pre-review integrity check of the v2 manuscript (Stage 2.5, two
+  independent verifiers) led to three corrections of the records (08 §F "Corrections after the
+  pre-review integrity check", 07). The split hybrid of RQ2b-R and RQ2c-R has one alpha-beta thread only
+  on its transformer-enabled moves and plays its time-safety moves (54.1% in RQ2b-R) on all three
+  threads, so RQ2b-R does not isolate what the MCTS worker adds to one thread. The intervals of RQ2a-R,
+  RQ2c-R and RQ5a-R are now the defined 95% intervals rather than Elo ± half-width (for example RQ5a-R
+  [+26.0, +68.7]); no reading changes. The runner health tables' hours are labelled as summed block wall
+  times. The runner cells' M3 (in-game MCTS evaluations per second), computed after the readings as
+  amendment 15 (f) registers it, is added: medians of 14 (RQ1a-R) and 24 (RQ2b-R) against the runner's
+  batch-1 ceiling of 52.6; no runner cell logged a thermal warning (M6).
+- **2026-11-08 (night)** — Protocol amendment 16 (02 §11), written before any oracle shard has been
+  read (16 of 150 finished; health lines only). It fixes how each class of oracle outcome will be
+  read: a consensus bound and two cross-judge bounds, each within or beyond the 0.01 expected-score
+  tie band, decide whether the paper reports little to gain, room under both judges, or a
+  judge-dependent result, and what each changes in the abstract and conclusion. It adds results for
+  each source cell (RQ1a's positions apart from RQ1b's), a rule for an incomplete run, and a pass
+  criterion for the judges' stability on the 74 workstation positions (equal verdicts and
+  correlation, each at least 0.8). It also recomputes the class with the conversion constant halved
+  and doubled, and reads the two judges as related (Stockfish 19's networks are trained on Leela
+  data). The pre-submission review of the v2 manuscript asked for all of these.

@@ -7,6 +7,7 @@ Reads:
   results/paper_v2/sprt/<gate>/partial_stats.json gates stopped by an author rule (penta_stats --json)
   results/paper_v2/micro/nn_latency[_frozen].json M1 (tools/paper/microbench.py nn; the frozen-build re-run wins)
   results/paper_v2/micro/ab_scaling[_frozen].json M2 (tools/paper/microbench.py ab; the frozen-build re-run wins)
+  results/paper_v2/runner_micro/*.json            M1 and M2 on a runner (the campaign workflow's micro task)
 
 Writes docs/paper_v2/figures/*.pdf|png and docs/paper_v2/tables/*.md|tex, and exports the schematics in
 docs/paper_v2/diagrams/*.html to docs/paper_v2/figures/*.pdf with tools/paper/diagram_pdf.py.
@@ -23,6 +24,7 @@ import math
 import pathlib
 import re
 import sys
+import textwrap
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
@@ -44,6 +46,13 @@ def fmt_pm(x, pm, nd=1):
     if x is None or pm is None:
         return "—"
     return f"{x:+.{nd}f} ± {pm:.{nd}f}"
+
+
+def pct(x) -> str:
+    """A fraction as a percentage, with one decimal below 10% so that a small fraction (RQ1c-R's
+    transformer-enabled 1.7%) does not print as a whole percent the text gives with a decimal.
+    """
+    return f"{x * 100:.1f}%" if round(x * 100, 1) < 10 else f"{x * 100:.0f}%"
 
 
 # Protocol names of the arms (02 §2) for tables and figures; fastchess labels stay in the PGNs.
@@ -172,7 +181,7 @@ def write_tables(cells, gates, out: pathlib.Path):
     for c in cells:
         t = c["telemetry"]
         gpu = (
-            f"{t['gpu_active_fraction']*100:.0f}%"
+            pct(t["gpu_active_fraction"])
             if t.get("gpu_active_fraction") is not None
             else "—"
         )
@@ -547,8 +556,11 @@ def write_hostload_summary(cells, results: pathlib.Path, out: pathlib.Path):
     (tdir / "hostload_macros.tex").write_text("\n".join(macros) + "\n")
 
 
-def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
-    """T6 compute per cell, the telemetry table (M3-M5, RQ6a) and per-block consistency."""
+def write_extra_tables(
+    cells, results: pathlib.Path, out: pathlib.Path, runner_cells=()
+):
+    """T6 compute per cell and the telemetry table (M3-M5, RQ6a), each with the runner cells, if
+    any, below the workstation's, and per-block consistency."""
     tdir = out / "tables"
     tdir.mkdir(parents=True, exist_ok=True)
     esc = lambda t: str(t).replace("_", "\\_").replace("%", "\\%")  # noqa: E731
@@ -563,7 +575,8 @@ def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
         "Cell & Games & Blocks & Hours & min/game \\\\",
         "\\midrule",
     ]
-    for c in cells:
+
+    def compute_row(c):
         d = results / c["dir"]
         secs, timed = pgn_game_durations(d / "games.pgn")
         hours = secs / 3600
@@ -582,10 +595,21 @@ def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
         tex.append(
             f"{esc(c['cell'])} & {c['games']} & {nb} & {hours:.1f} & {mpg:.2f} \\\\"
         )
+
+    for c in cells:
+        compute_row(c)
+    if runner_cells:
+        md.append("| Runner cells (one runner per block) | | | | |")
+        tex += [
+            "\\midrule",
+            "\\multicolumn{5}{l}{Runner cells (one runner per block)} \\\\",
+        ]
+        for c in runner_cells:
+            compute_row(c)
     tex += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "compute.md").write_text("\n".join(md) + "\n")
     (tdir / "compute.tex").write_text("\n".join(tex) + "\n")
-    # --- telemetry (hybrid arms only)
+    # --- telemetry (hybrid arms only; the runner cells below the workstation's)
     md = [
         "| Cell | Hybrid moves | Transformer enabled | MCTS evals/move (median) | Playouts/move (median) | Disagreement rate | MCTS move chosen on disagreement | Reasons |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -596,25 +620,40 @@ def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
         "Cell & Hybrid moves & Transformer enabled & Evals/move & Playouts/move & Disagree & MCTS chosen \\\\",
         "\\midrule",
     ]
-    for c in cells:
+
+    def telemetry_row(c):
         t = c["telemetry"]
-        if not t or t.get("gpu_active_fraction") is None:
-            continue
         reasons = ", ".join(
             f"{k} {v}"
             for k, v in sorted((t.get("reasons") or {}).items(), key=lambda kv: -kv[1])
         )
         dis = t.get("disagreement_rate")
+        enabled = pct(t["gpu_active_fraction"])
         md.append(
-            f"| {c['cell']} | {t.get('moves_total')} | {t['gpu_active_fraction']*100:.0f}% | {t.get('mcts_evals_median')} | "
+            f"| {c['cell']} | {t.get('moves_total')} | {enabled} | {t.get('mcts_evals_median')} | "
             f"{t.get('mcts_playouts_median')} | {dis*100:.1f}% | {t.get('mcts_move_selected_on_disagreement')} / {t.get('disagreements')} | {reasons} |"
             if dis is not None
-            else f"| {c['cell']} | {t.get('moves_total')} | {t['gpu_active_fraction']*100:.0f}% | {t.get('mcts_evals_median')} | {t.get('mcts_playouts_median')} | — | — | {reasons} |"
+            else f"| {c['cell']} | {t.get('moves_total')} | {enabled} | {t.get('mcts_evals_median')} | {t.get('mcts_playouts_median')} | — | — | {reasons} |"
         )
         tex.append(
-            f"{esc(c['cell'])} & {t.get('moves_total')} & {t['gpu_active_fraction']*100:.0f}\\% & {t.get('mcts_evals_median')} & "
+            f"{esc(c['cell'])} & {t.get('moves_total')} & {esc(enabled)} & {t.get('mcts_evals_median')} & "
             f"{t.get('mcts_playouts_median')} & {(dis*100 if dis is not None else 0):.1f}\\% & {t.get('mcts_move_selected_on_disagreement')}/{t.get('disagreements')} \\\\"
         )
+
+    def hybrid(group):
+        return [
+            c
+            for c in group
+            if (c["telemetry"] or {}).get("gpu_active_fraction") is not None
+        ]
+
+    for c in hybrid(cells):
+        telemetry_row(c)
+    if hybrid(runner_cells):
+        md.append("| Runner cells | | | | | | | |")
+        tex += ["\\midrule", "\\multicolumn{7}{l}{Runner cells} \\\\"]
+        for c in hybrid(runner_cells):
+            telemetry_row(c)
     tex += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "telemetry.md").write_text("\n".join(md) + "\n")
     (tdir / "telemetry.tex").write_text("\n".join(tex) + "\n")
@@ -667,8 +706,9 @@ def write_extra_tables(cells, results: pathlib.Path, out: pathlib.Path):
     (tdir / "blocks.tex").write_text("\n".join(tex) + "\n")
 
 
-def write_therm_table(cells, results: pathlib.Path, out: pathlib.Path):
-    """M6: thermal state per cell from therm.log (`pmset -g therm` sampled every minute)."""
+def write_therm_table(cells, results: pathlib.Path, out: pathlib.Path, runner_cells=()):
+    """M6: thermal state per cell from therm.log (`pmset -g therm` sampled every minute), with the
+    runner cells, if any, below the workstation's."""
     tdir = out / "tables"
     tdir.mkdir(parents=True, exist_ok=True)
     esc = lambda t: str(t).replace("_", "\\_")  # noqa: E731
@@ -682,10 +722,9 @@ def write_therm_table(cells, results: pathlib.Path, out: pathlib.Path):
         "Cell & Samples & Warning samples & Min CPU speed limit \\\\",
         "\\midrule",
     ]
-    for c in cells:
+
+    def therm_row(c):
         log = results / c["dir"] / "therm.log"
-        if not log.exists():
-            continue
         samples = warnings = 0
         limits = []
         for line in open(log, errors="replace"):
@@ -704,6 +743,17 @@ def write_therm_table(cells, results: pathlib.Path, out: pathlib.Path):
         tex.append(
             f"{esc(c['cell'])} & {samples} & {warnings} & {lim.replace('%', '\\%')} \\\\"
         )
+
+    def logged(group):
+        return [c for c in group if (results / c["dir"] / "therm.log").exists()]
+
+    for c in logged(cells):
+        therm_row(c)
+    if logged(runner_cells):
+        md.append("| Runner cells | | | |")
+        tex += ["\\midrule", "\\multicolumn{4}{l}{Runner cells} \\\\"]
+        for c in logged(runner_cells):
+            therm_row(c)
     tex += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "therm.md").write_text("\n".join(md) + "\n")
     (tdir / "therm.tex").write_text("\n".join(tex) + "\n")
@@ -809,7 +859,7 @@ def plot_forest(cells, out: pathlib.Path):
     rows = [c for c in cells if c["elo"] is not None and c["elo_pm"] is not None]
     if not rows:
         return
-    fig, ax = plt.subplots(figsize=(7, 0.5 * len(rows) + 1.5))
+    fig, ax = plt.subplots(figsize=(7, 0.6 * len(rows) + 1.5))
     y = list(range(len(rows)))[::-1]
     ax.errorbar(
         [c["elo"] for c in rows],
@@ -820,12 +870,22 @@ def plot_forest(cells, out: pathlib.Path):
     )
     ax.axvline(0, color="grey", lw=0.8)
     ax.set_yticks(y)
-    ax.set_yticklabels([f"{c['cell']}: {arms_text(c)} (n={c['games']})" for c in rows])
-    ax.set_xlabel("Elo difference (arm A − arm B), 95% CI, pentanomial")
+    # wrapped tick labels: one long label (the pilot's) otherwise squeezes the axes into a strip
+    # at the right edge and pushes the centred axis label out of the saved area
+    ax.set_yticklabels(
+        [
+            textwrap.fill(f"{c['cell']}: {arms_text(c)} (n={c['games']})", 36)
+            for c in rows
+        ],
+        fontsize=9,
+    )
+    ax.set_xlabel("Elo difference (first arm − second arm), 95% CI")
     fig.tight_layout()
     (out / "figures").mkdir(parents=True, exist_ok=True)
     for ext in ("pdf", "png"):
-        fig.savefig(out / "figures" / f"cells_forest.{ext}", dpi=150)
+        fig.savefig(
+            out / "figures" / f"cells_forest.{ext}", dpi=150, bbox_inches="tight"
+        )
     plt.close(fig)
 
 
@@ -1056,6 +1116,31 @@ def count_log_lines(path: pathlib.Path, patterns):
     return counts
 
 
+def write_os_builds(rows, tdir: pathlib.Path):
+    """os_builds.md and .tex: each cell by the macOS build its pairs started on (amendment 13).
+    rows: (cell, build, games, pairs, "x ± y" or None below 100 pairs, computed after the cell's
+    interpretation)."""
+    md = [
+        "| Cell | macOS build | Games | Pairs | Elo (95% CI), builds with at least 100 pairs |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    tex = [
+        "\\begin{tabular}{llrrl}",
+        "\\toprule",
+        "Cell & macOS build & Games & Pairs & Elo \\\\",
+        "\\midrule",
+    ]
+    for cell, build, games, pairs, est, late in rows:
+        note = " (added after the interpretation)" if late else ""
+        md.append(f"| {cell} | {build} | {games} | {pairs} | {est or '—'}{note} |")
+        cell_tex = str(cell).replace("_", "\\_")
+        est_tex = (tex_pm(est) + ("$^\\dagger$" if late else "")) if est else "—"
+        tex.append(f"{cell_tex} & {build} & {games} & {pairs} & {est_tex} \\\\")
+    tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "os_builds.md").write_text("\n".join(md) + "\n")
+    (tdir / "os_builds.tex").write_text("\n".join(tex) + "\n")
+
+
 def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
     """Final-reading analyses of amendment 12 and of the review (tools/paper/robustness.py):
     load regression, forfeit and opening variants with the load-sensitivity verdict, block
@@ -1204,10 +1289,7 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
     bpath = REPO / "docs" / "paper_v2" / "os_builds.json"
     if bpath.exists():
         builds = robustness.load_builds(str(bpath))
-        md = [
-            "| Cell | macOS build | Games | Pairs | Elo (95% CI), builds with at least 100 pairs |",
-            "| --- | --- | --- | --- | --- |",
-        ]
+        rows = []
         for c in cells:
             pgn = results / c["dir"] / "games.pgn"
             if not pgn.exists() or not c["arm_a"]:
@@ -1219,16 +1301,20 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
                 est = (
                     fmt_pm(st.get("elo"), st.get("elo_pm"))
                     if st.get("pairs", 0) >= 100
-                    else "—"
+                    else None
                 )
                 # RQ1a was interpreted before amendment 13 added this breakdown
-                note = (
-                    " (added after the interpretation)" if c["cell"] == "RQ1a" else ""
+                rows.append(
+                    (
+                        c["cell"],
+                        build,
+                        st["games"],
+                        st.get("pairs", 0),
+                        est,
+                        c["cell"] == "RQ1a",
+                    )
                 )
-                md.append(
-                    f"| {c['cell']} | {build} | {st['games']} | {st.get('pairs', 0)} | {est}{note} |"
-                )
-        (tdir / "os_builds.md").write_text("\n".join(md) + "\n")
+        write_os_builds(rows, tdir)
     (tdir / "robustness.tex").write_text("\n".join(rob_tex) + "\n")
     (tdir / "blocks_q.md").write_text("\n".join(blk_md) + "\n")
     (tdir / "adjudications.md").write_text("\n".join(adj_md) + "\n")
@@ -1494,17 +1580,7 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
         write_oracle_tables(load(osum), tdir)
     stab = results / "RQ6b-R" / "stability.json"
     if stab.exists():
-        md = [
-            "| Judge | Positions judged on both machines | Same verdict | Correlation of the candidates' score difference |",
-            "| --- | --- | --- | --- |",
-        ]
-        for name, st in load(stab).items():
-            sv = st.get("same_verdict")
-            r = st.get("delta_cp_correlation")
-            md.append(
-                f"| {name} | {st.get('positions', 0)} | {f'{sv*100:.1f}%' if sv is not None else '—'} | {f'{r:.3f}' if r is not None else '—'} |"
-            )
-        (tdir / "oracle_stability.md").write_text("\n".join(md) + "\n")
+        write_oracle_stability(load(stab), tdir)
 
 
 def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
@@ -1539,7 +1615,7 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
     for c in cells:
         t = c["telemetry"]
         gpu = (
-            f"{t['gpu_active_fraction']*100:.0f}%"
+            pct(t["gpu_active_fraction"])
             if t.get("gpu_active_fraction") is not None
             else "—"
         )
@@ -1561,12 +1637,8 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
         "| Cell | Block estimates | Cochran's Q (df) | p | Block-bootstrap 95% interval | Forfeits | Forfeit pairs removed | Forfeits as draws | Games with a clock overrun (first / second arm) | Registered referee, no time margin | Adjudicated draws / wins (first / second arm) | By runner image (pairs) |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
-    sens = [
-        "\\begin{tabular}{lrrrrrll}",
-        "\\toprule",
-        "Cell & $Q$ (df) & $p$ & Block bootstrap & Forfeits & Overruns & No margin & By image (pairs) \\\\",
-        "\\midrule",
-    ]
+    # per cell: its columns and its estimate by runner image (the tabular is composed below)
+    sens, blocks_rows = [], []
     for c in cells:
         d = results / c["dir"]
         if not (d / "games.pgn").exists() or not c["arm_a"] or c["cell"] not in defs:
@@ -1583,9 +1655,10 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
             (b, 2 * b * per, 2 * min((b + 1) * per, int(cell["pairs"])))
             for b in range(nb)
         ]
-        ests, ses, blocks = [], [], []
+        ests, ses, blocks, per_block = [], [], [], []
         for b, first, end in ranges:
             st = penta_stats.compute(games[first:end], c["arm_a"])
+            per_block.append(st)
             if (
                 st.get("elo") is not None
                 and st.get("elo_pm")
@@ -1628,14 +1701,14 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
             if b is None or b >= len(ranges):
                 continue
             images.setdefault(rb.get("image") or "unknown", []).append(ranges[b])
-        by_image = []
+        by_image, image_est = [], {}
         for image, rs in sorted(images.items()):
             sel = [g for _, first, end in rs for g in games[first:end]]
             st = penta_stats.compute(sel, c["arm_a"])
             n = st.get("pairs") or 0
-            by_image.append(
-                f"{image}: {fmt_pm(st.get('elo'), st.get('elo_pm')) if n >= 100 else '—'} ({n})"
-            )
+            est = fmt_pm(st.get("elo"), st.get("elo_pm")) if n >= 100 else "—"
+            by_image.append(f"{image}: {est} ({n})")
+            image_est[image] = f"{tex_pm(est)} ({n})"
         q_txt = f"{q['q']:.2f} ({q['df']})" if q else "—"
         p_txt = f"{q['p']:.3f}" if q else "—"
         boot_txt = f"[{boot['ci95'][0]:+.1f}, {boot['ci95'][1]:+.1f}]" if boot else "—"
@@ -1643,17 +1716,17 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
         removed = fmt_pm(ff["removed"].get("elo"), ff["removed"].get("elo_pm"))
         drawn = fmt_pm(ff["as_draws"].get("elo"), ff["as_draws"].get("elo_pm"))
         adj_txt = f"{adj['draws']} / {adj['wins'].get(c['arm_a'], 0)} / {adj['wins'].get(c['arm_b'], 0)}"
+        blocks_rows.append((c["cell"], per_block, adj_txt))
         blk.append(
             f"| {c['cell']} | {est_txt} | {q_txt} | {p_txt} | {boot_txt} | {ff['forfeit_games']} | "
             f"{removed} | {drawn} | {over_txt} | {strict_txt} | {adj_txt} | {'; '.join(by_image) or '—'} |"
         )
         sens.append(
-            " & ".join(
+            (
                 [c["cell"], q_txt, p_txt, f"${boot_txt}$" if boot else boot_txt]
-                + [str(ff["forfeit_games"]), over_txt]
-                + [tex_pm(strict_txt), tex_pm("; ".join(by_image) or "—")]
-            ).replace("macos26 ", "")
-            + " \\\\"
+                + [str(ff["forfeit_games"]), over_txt, tex_pm(strict_txt)],
+                image_est,
+            )
         )
     con = [
         "| Contrast (runner cells, shared openings) | Elo | Shared openings |",
@@ -1698,16 +1771,246 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
         name, elo, n = [x.strip() for x in row.strip("|").split("|")]
         ctex.append(f"{name} & {tex_pm(elo)} & {n} \\\\")
     ctex += ["\\bottomrule", "\\end{tabular}"]
-    sens += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "runner_contrasts.tex").write_text("\n".join(ctex) + "\n")
+    # one column per runner image, headed by its version, so that no row repeats the images' names;
+    # a dash alone: the cell played no block on that image
+    imgs = sorted({i for _, est in sens for i in est})
+    stex = ["\\begin{tabular}{lrrrrrl" + "l" * len(imgs) + "}", "\\toprule"]
+    if imgs:
+        stex += [
+            "& " * 7
+            + f"\\multicolumn{{{len(imgs)}}}{{c}}{{By runner image (pairs)}} \\\\",
+            f"\\cmidrule(l){{8-{7 + len(imgs)}}}",
+        ]
+    head = ["Cell", "$Q$ (df)", "$p$", "Block bootstrap", "Forfeits", "Overruns"]
+    head += ["No margin"] + [i.replace("macos26 ", "") for i in imgs]
+    stex += [" & ".join(head) + " \\\\", "\\midrule"]
+    stex += [
+        " & ".join(cols + [est.get(i, "—") for i in imgs]) + " \\\\"
+        for cols, est in sens
+    ]
+    stex += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "runner_sensitivity.tex").write_text(
-        "\n".join(sens).replace("_", "\\_") + "\n"
+        "\n".join(stex).replace("_", "\\_") + "\n"
     )
+    # runner_blocks.md/.tex: every block's estimate (Elo ± half-width; blocks in dispatch order,
+    # each on its own runner) and the cell's adjudications
+    nmax = max((len(pb) for _, pb, _ in blocks_rows), default=0)
+    bmd = [
+        "| Cell | "
+        + " | ".join(f"Block {b}" for b in range(nmax))
+        + " | Adjudicated draws / wins (first / second arm) |",
+        "|" + " --- |" * (nmax + 2),
+    ]
+    btex = [
+        "\\begin{tabular}{l" + "r" * nmax + "l}",
+        "\\toprule",
+        "Cell & " + " & ".join(str(b) for b in range(nmax)) + " & Adjudicated \\\\",
+        "\\midrule",
+    ]
+    for name, pb, adj_txt in blocks_rows:
+        vals = [fmt_pm(st.get("elo"), st.get("elo_pm")) for st in pb]
+        vals += ["—"] * (nmax - len(vals))
+        bmd.append(f"| {name} | " + " | ".join(vals) + f" | {adj_txt} |")
+        btex.append(
+            f"{name} & "
+            + " & ".join(
+                "—" if v == "—" else "$" + v.replace("±", "\\pm") + "$" for v in vals
+            )
+            + f" & {adj_txt} \\\\"
+        )
+    btex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "runner_blocks.md").write_text("\n".join(bmd) + "\n")
+    (tdir / "runner_blocks.tex").write_text("\n".join(btex).replace("_", "\\_") + "\n")
+
+
+def write_runner_rates(cells, results: pathlib.Path, out: pathlib.Path):
+    """M3 for the runner cells (amendment 15 (f): "M3-M6 come from the runner traces as for the
+    workstation"): the hybrid's in-game MCTS evaluations per second of move time over its
+    transformer-enabled moves, each trace record matched to its PGN move by position, as for the
+    workstation's cells in write_final_analyses. Replays every game, so it runs only for the final
+    reading (--final-analyses). Writes runner_rates.md."""
+    sys.path.insert(0, str(REPO / "tools" / "paper"))
+    import robustness  # noqa: E402
+
+    tdir = out / "tables"
+    tdir.mkdir(parents=True, exist_ok=True)
+    md = [
+        "| Cell | Matched transformer-enabled moves | MCTS evaluations per second of move time, median (10th percentile) | Total evaluations / total move time |",
+        "| --- | --- | --- | --- |",
+    ]
+    notes = []
+    for c in cells:
+        d = results / c["dir"]
+        mj, pgn = d / "moves.jsonl", d / "games.pgn"
+        if not (c["telemetry"] or {}).get("moves_total") or not mj.exists():
+            continue
+        with open(mj) as fh:
+            slim = [
+                {k: r.get(k) for k in ("fen", "reason", "mcts_evals")}
+                for r in map(json.loads, fh)
+                if r.get("fen")
+            ]
+        ev_of = robustness.evals_by_position(slim)
+        matched = [
+            (m["game"], ev_of[m["fen"]], m["time"])
+            for m in robustness.iter_engine_moves(str(pgn), with_fen=True)
+            if m["engine"] == c["arm_a"] and ev_of.get(m.get("fen"))
+        ]
+        v = robustness.eval_rate_by_block(matched, [("all", 0, 10**9)]).get("all")
+        if not v:
+            continue
+        md.append(
+            f"| {c['cell']} | {v['moves']} | {v['rate_p50']:.0f} ({v['rate_p10']:.0f}) | {v['rate_total']:.0f} |"
+        )
+        enabled = sum(1 for e in ev_of.values() if e)
+        notes.append(
+            f"{c['cell']}: {v['moves']} of {enabled} transformer-enabled trace records with a unique position matched a PGN move."
+        )
+    (tdir / "runner_rates.md").write_text("\n".join(md + [""] + notes) + "\n")
 
 
 def tex_pm(s: str) -> str:
     """A table cell of the Markdown tables for LaTeX: x ± y in math mode, the other text as is."""
     return re.sub(r"([+-]?[0-9.]+) ± ([0-9.]+)", r"$\1 \\pm \2$", s)
+
+
+def micro_usable(row: dict) -> bool:
+    """A microbenchmark measurement that logged no GPU error and finished within its time limit
+    (amendment 15 (i); tools/paper/microbench.py)."""
+    return not row.get("gpu_error_lines") and not row.get("timed_out")
+
+
+def micro_cell(row, value) -> str:
+    """A microbenchmark measurement for a table: its value, or why there is none."""
+    if row is None:
+        return "—"
+    if row.get("gpu_error_lines"):
+        return "not used (GPU error)"
+    if row.get("timed_out"):
+        return "not used (time limit)"
+    return "failed" if value is None else value
+
+
+def write_runner_micro(results: pathlib.Path, out: pathlib.Path):
+    """M1 and M2 measured on a runner with the campaign's build (protocol amendment 15 (f), (g)): the
+    workflow's micro task, whose artifact is downloaded into results/paper_v2/runner_micro/. Writes
+    runner_micro.md with both, runner_micro_m1.tex (per batch size: the median latency and evaluations
+    per second of MetalFish's MPSGraph backend in FP16 and FP32, the evaluations per second of Lc0's
+    Metal backend from backendbench, and Lc0's steady-state search nodes per second at that
+    minibatch) and runner_micro_m2.tex (per alpha-beta thread count: the median nodes per second over
+    the usable repeats, its range and the speed-up over the first thread count). A measurement that
+    logged a GPU error or reached its time limit is shown as not used.
+    """
+    import statistics
+
+    d = results / "runner_micro"
+    nn_p, ab_p = d / "nn_latency.json", d / "ab_scaling.json"
+    if not nn_p.exists() and not ab_p.exists():
+        return
+    tdir = out / "tables"
+    tdir.mkdir(parents=True, exist_ok=True)
+    md = []
+    if nn_p.exists():
+        nn = load(nn_p)
+        mf = {(r.get("precision"), r.get("batch")): r for r in nn.get("metalfish", [])}
+        bb = {r.get("batch"): r for r in nn.get("lc0_backendbench", [])}
+        lc = {r.get("minibatch"): r for r in nn.get("lc0", [])}
+
+        def mf_txt(r):
+            if r is None or r.get("median_ms") is None:
+                return micro_cell(r, None)
+            ms, eps = r["median_ms"], r.get("median_positions_per_second")
+            return micro_cell(r, f"{ms:.2f} ms; {eps:.0f}/s")
+
+        def rate_txt(r, key):
+            v = None if r is None else r.get(key)
+            return micro_cell(r, None if v is None else f"{v:,.0f}")
+
+        # Lc0's backendbench adds to the protocol's M1; when it gave no rate at any batch size, its
+        # column is dropped and the Markdown table says so
+        has_bb = any(r.get("median_eps") is not None for r in bb.values())
+        rows = [
+            [str(b), mf_txt(mf.get(("fp16", b))), mf_txt(mf.get(("fp32", b)))]
+            + ([rate_txt(bb.get(b), "median_eps")] if has_bb else [])
+            + [rate_txt(lc.get(b), "nps_steady_median")]
+            for b in sorted({b for _, b in mf} | set(bb) | set(lc))
+        ]
+        md += [
+            f"M1 on the runner ({nn.get('hardware', '?')}): BT4 by batch size",
+            "",
+            "| Batch | MetalFish FP16: median latency; evaluations/s | MetalFish FP32 | "
+            + ("Lc0 Metal backend: evaluations/s | " if has_bb else "")
+            + "Lc0 search: nodes/s (median of the last five samples) |",
+            "|" + " --- |" * (5 if has_bb else 4),
+        ]
+        md += ["| " + " | ".join(r) + " |" for r in rows]
+        if bb and not has_bb:
+            md += [
+                "",
+                "Lc0's backendbench gave no rate at any batch size (the end of its output is in "
+                "nn_latency.json, `lc0_backendbench`), so its column is omitted.",
+            ]
+        if not nn.get("complete", True):
+            md += [
+                "",
+                "The M1 sweep did not complete; the rows are the measurements it recorded.",
+            ]
+        tex = [
+            "\\begin{tabular}{rll" + ("l" if has_bb else "") + "l}",
+            "\\toprule",
+            "Batch & MetalFish FP16 & MetalFish FP32 & "
+            + ("Lc0 backend (evals/s) & " if has_bb else "")
+            + "Lc0 search (nodes/s) \\\\",
+            "\\midrule",
+        ]
+        tex += [" & ".join(r) + " \\\\" for r in rows]
+        tex += ["\\bottomrule", "\\end{tabular}"]
+        (tdir / "runner_micro_m1.tex").write_text("\n".join(tex) + "\n")
+    if ab_p.exists():
+        ab = load(ab_p)
+        runs = ab.get("rows", [])
+        threads = sorted({r["threads"] for r in runs})
+        med = {}
+        rows = []
+        for t in threads:
+            rs = [r for r in runs if r["threads"] == t]
+            ok = [r["nps"] for r in rs if r.get("nps") and micro_usable(r)]
+            med[t] = statistics.median(ok) if ok else None
+            base = med[threads[0]]
+            rows.append(
+                [
+                    str(t),
+                    (
+                        f"{med[t] / 1e6:.2f} million ({min(ok) / 1e6:.2f}–{max(ok) / 1e6:.2f})"
+                        if ok
+                        else "—"
+                    ),
+                    f"{med[t] / base:.2f}" if ok and base else "—",
+                    f"{len(ok)} of {len(rs)}",
+                ]
+            )
+        if md:
+            md.append("")
+        md += [
+            f"M2 on the runner: alpha-beta (`bench`, depth {ab.get('depth')}, hash {ab.get('hash_mb')} MB)",
+            "",
+            "| Threads | Nodes/s, median (range) | Speed-up | Repeats used |",
+            "| --- | --- | --- | --- |",
+        ]
+        md += ["| " + " | ".join(r) + " |" for r in rows]
+        if not ab.get("complete", True):
+            md += ["", "M2 did not complete; the rows are the repeats it recorded."]
+        tex = [
+            "\\begin{tabular}{rlrl}",
+            "\\toprule",
+            "Threads & Nodes/s, median (range) & Speed-up & Repeats used \\\\",
+            "\\midrule",
+        ]
+        tex += [" & ".join(r) + " \\\\" for r in rows]
+        tex += ["\\bottomrule", "\\end{tabular}"]
+        (tdir / "runner_micro_m2.tex").write_text("\n".join(tex) + "\n")
+    (tdir / "runner_micro.md").write_text("\n".join(md) + "\n")
 
 
 def write_rq6d_contrast(pairs_by_cell: dict, tdir: pathlib.Path):
@@ -1729,6 +2032,43 @@ def write_rq6d_contrast(pairs_by_cell: dict, tdir: pathlib.Path):
             f"| RQ6d minus RQ1a (hints and verification off) | {fmt_pm(con['elo'], con['elo_pm'])} | {con['shared_openings'][0]} |"
         )
     (tdir / "rq6d.md").write_text("\n".join(md) + "\n")
+
+
+def write_oracle_stability(stab: dict, tdir: pathlib.Path):
+    """oracle_stability.md and .tex: each judge's runner verdicts against the workstation's on the
+    positions both machines judged; amendment 16 (e): a judge passes with at least 0.8 equal
+    verdicts and a correlation of at least 0.8."""
+    md = [
+        "| Judge | Positions judged on both machines | Same verdict | Correlation of the candidates' score difference | Passes (16 (e): both at least 0.8) |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    tex = [
+        "\\begin{tabular}{lrrrc}",
+        "\\toprule",
+        "Judge & Positions & Same verdict & Correlation & Passes \\\\",
+        "\\midrule",
+    ]
+    for name, st in stab.items():
+        sv = st.get("same_verdict")
+        r = st.get("delta_cp_correlation")
+        passes = (
+            "—"
+            if sv is None or r is None
+            else ("yes" if sv >= 0.8 and r >= 0.8 else "no")
+        )
+        sv_txt = f"{sv*100:.1f}%" if sv is not None else "—"
+        r_txt = f"{r:.3f}" if r is not None else "—"
+        md.append(
+            f"| {name} | {st.get('positions', 0)} | {sv_txt} | {r_txt} | {passes} |"
+        )
+        name_tex = str(name).replace("_", "\\_")
+        sv_tex = sv_txt.replace("%", "\\%")
+        tex.append(
+            f"{name_tex} & {st.get('positions', 0)} & {sv_tex} & {r_txt} & {passes} \\\\"
+        )
+    tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "oracle_stability.md").write_text("\n".join(md) + "\n")
+    (tdir / "oracle_stability.tex").write_text("\n".join(tex) + "\n")
 
 
 def write_oracle_tables(o: dict, tdir: pathlib.Path):
@@ -1798,6 +2138,65 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
             "",
             f"Projected Elo: {next(iter(cross.values()))['projected_elo_of_cross_bound']['label']}.",
         ]
+
+    # amendment 16: the class of outcome (pooled and per source cell) and each cell's bounds
+    def outcome_line(label, oc):
+        if not oc:
+            return f"{label}: no class computed."
+        if oc.get("class") is None:
+            return f"{label}: no class ({oc.get('reason')})."
+        bands = ", ".join(f"{k} {v}" for k, v in (oc.get("bands") or {}).items())
+        done = "complete" if oc.get("complete") else "incomplete"
+        return (
+            f"{label}: **{oc['class'].replace('_', ' ')}** ({bands}; tie band "
+            f"{oc['tie_band_es']} ES; {oc.get('positions_with_both_verdicts')} of "
+            f"{oc['sampled']} positions with both verdicts, {done})."
+        )
+
+    md += ["", "Class of outcome (protocol amendment 16 (b), (c)):", ""]
+    md.append("- " + outcome_line("Pooled", o.get("outcome")))
+    cells = o.get("by_source_cell") or {}
+    for cell, c in cells.items():
+        md.append("- " + outcome_line(cell, c.get("outcome")))
+    sens = o.get("conversion_sensitivity") or {}
+    if sens.get("computed") is False:
+        md += [
+            "",
+            f"Sensitivity to the conversion (16 (g)): not computed ({sens.get('reason')}).",
+        ]
+    elif sens:
+        md += [
+            "",
+            "Sensitivity to the conversion (16 (g); the tie band scaled with the constant):",
+            "",
+        ]
+        for scale, entry in sens.items():
+            for name, oc in entry.items():
+                if name != "tie_band_es":
+                    md.append("- " + outcome_line(f"{scale} cp, {name}", oc))
+    if cells:
+        md += [
+            "",
+            "Per source cell (amendment 16 (a); each reweighted by its own stratum population):",
+            "",
+            "| Cell | Positions | Bound per judge (ES) | Consensus bound (ES) | Cross bounds (ES) |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for cell, c in cells.items():
+            per = "; ".join(
+                f"{n} {ci(j['stats']['arbiter_upper_bound_es'])}"
+                for n, j in c["judges"].items()
+            )
+            cag = c.get("agreement")
+            cons = ci(cag["stats"]["consensus_bound_es"]) if cag else "—"
+            crs = (
+                "; ".join(
+                    f"{k} {ci(v['stats']['cross_bound_es'])}"
+                    for k, v in (c.get("cross_judge") or {}).items()
+                )
+                or "—"
+            )
+            md.append(f"| {cell} | {c['positions']} | {per} | {cons} | {crs} |")
     (tdir / "oracle.md").write_text("\n".join(md) + "\n")
     tex = [
         "\\begin{tabular}{lrlllll}",
@@ -1849,6 +2248,57 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
             )
         tex += ["\\bottomrule", "\\end{tabular}"]
         (tdir / "oracle_cross.tex").write_text("\n".join(tex) + "\n")
+    # amendment 16: the three bounds that decide the class, and the class, for all positions and
+    # for each source cell, with the class again at the halved and doubled constant (16 (g))
+    if o.get("outcome") is not None:
+        short = {
+            "little_to_gain": "L",
+            "room_under_both_judges": "R",
+            "judge_dependent_or_unresolved": "J",
+        }
+        keys = sorted(cross)
+        scales = [k for k in ("125", "500") if isinstance(sens.get(k), dict)]
+        cls = lambda oc: short.get((oc or {}).get("class"), "—")  # noqa: E731
+        tex = [
+            "\\begin{tabular}{lr"
+            + "l" * (1 + len(keys))
+            + "c" * (1 + len(scales))
+            + "}",
+            "\\toprule",
+            " & ".join(
+                ["Positions from", "$n$", "Consensus bound (ES)"]
+                + [
+                    f"{esc(cross[k]['selector'])} selects, {esc(cross[k]['scorer'])} scores"
+                    for k in keys
+                ]
+                + ["Class"]
+                + [f"Class at {s} cp" for s in scales]
+            )
+            + " \\\\",
+            "\\midrule",
+        ]
+        groups = [("all", o, "pooled")] + [(c, g, c) for c, g in cells.items()]
+        for label, g, skey in groups:
+            gag = g.get("agreement")
+            gcj = g.get("cross_judge") or {}
+            tex.append(
+                " & ".join(
+                    [
+                        esc(label),
+                        str(gag["n"] if gag else g["positions"]),
+                        ci(gag["stats"]["consensus_bound_es"]) if gag else "—",
+                    ]
+                    + [
+                        ci(gcj[k]["stats"]["cross_bound_es"]) if k in gcj else "—"
+                        for k in keys
+                    ]
+                    + [cls(g.get("outcome"))]
+                    + [cls(sens[s].get(skey)) for s in scales]
+                )
+                + " \\\\"
+            )
+        tex += ["\\bottomrule", "\\end{tabular}"]
+        (tdir / "oracle_cells.tex").write_text("\n".join(tex) + "\n")
 
 
 def main(argv=None):
@@ -1873,8 +2323,9 @@ def main(argv=None):
     gates = collect_gates(results)
     write_tables(cells, gates, out)
     write_runner_tables(runner_cells, results, out)
-    write_extra_tables(cells, results, out)
-    write_therm_table(cells, results, out)
+    write_runner_micro(results, out)
+    write_extra_tables(cells, results, out, runner_cells)
+    write_therm_table(cells, results, out, runner_cells)
     write_sensitivity_table(cells, results, out)
     write_health_table(cells, results, out)
     write_hostload_summary(cells, results, out)
@@ -1885,6 +2336,7 @@ def main(argv=None):
     export_diagrams(out)
     if args.final_analyses:
         write_final_analyses(cells, results, out)
+        write_runner_rates(runner_cells, results, out)
     print(
         f"cells: {len(cells)}, runner cells: {len(runner_cells)}, gates: {len(gates)} -> {out/'tables'}, {out/'figures'}"
     )

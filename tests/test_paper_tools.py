@@ -774,6 +774,27 @@ class OracleSamplingTest(unittest.TestCase):
         self.assertEqual(len(sample), 10)
         self.assertEqual(info["requested"], 10)
 
+    def test_sample_records_each_source_cells_strata(self):
+        """Amendment 16 (a): the sampling info carries each source cell's own stratum population
+        and sample, and adding them leaves the sample itself unchanged."""
+        recs = self._records()
+        for i, r in enumerate(recs):
+            r["source"] = f"results/paper_v2/{'RQ1a' if i % 2 else 'RQ1b'}/engines.log"
+        sample, info = self.op.stratified_sample(recs, 60, seed=1)
+        plain, _ = self.op.stratified_sample(self._records(), 60, seed=1)
+        self.assertEqual(
+            [r["mcts_root_visits"] for r in sample],
+            [r["mcts_root_visits"] for r in plain],
+        )
+        pop, smp = info["strata_population_by_source"], info["strata_sample_by_source"]
+        self.assertEqual(sorted(pop), ["RQ1a", "RQ1b"])
+        self.assertEqual(sum(sum(v.values()) for v in pop.values()), 300)
+        self.assertEqual(sum(sum(v.values()) for v in smp.values()), 60)
+        for key, n in info["strata_population"].items():
+            self.assertEqual(sum(v.get(key, 0) for v in pop.values()), n)
+        self.assertEqual(self.op.source_cell({"source": "x/RQ1a/engines.log"}), "RQ1a")
+        self.assertEqual(self.op.source_cell({}), "unknown")
+
 
 class OracleShardTest(unittest.TestCase):
     """Pins the contiguous shards of tools/paper/oracle_probe.py (protocol amendment 15)."""
@@ -1204,7 +1225,14 @@ class RunnerTablesTest(unittest.TestCase):
     from the workstation cells, the RQ6d-R contrast over shared openings, Q over the blocks.
     """
 
-    def _games(self, results, cell, outcomes, overrun_pair=None):
+    def _games(
+        self,
+        results,
+        cell,
+        outcomes,
+        overrun_pair=None,
+        images=("macos26 A", "macos26 B"),
+    ):
         d = results / cell
         d.mkdir(parents=True)
         text = ""
@@ -1233,10 +1261,7 @@ class RunnerTablesTest(unittest.TestCase):
                 {"cell": cell, "arm_a": "Hybrid-T3", "arm_b": "AB-T3", "stats": st}
             )
         )
-        blocks = [
-            {"block": 0, "image": "macos26 A"},
-            {"block": 1, "image": "macos26 B"},
-        ]
+        blocks = [{"block": b, "image": image} for b, image in enumerate(images)]
         (d / "manifest.json").write_text(json.dumps({"runner_blocks": blocks}))
 
     def test_runner_tables(self):
@@ -1277,7 +1302,13 @@ class RunnerTablesTest(unittest.TestCase):
                 ("1-0", "1-0"),
             ]
             self._games(results, "RQ1a-R", mix + mix[::-1], overrun_pair=0)
-            self._games(results, "RQ6d-R", mix[1:] + mix[:1] + mix)
+            # both of RQ6d-R's blocks ran on image B
+            self._games(
+                results,
+                "RQ6d-R",
+                mix[1:] + mix[:1] + mix,
+                images=("macos26 B", "macos26 B"),
+            )
             self._games(results, "RQ1a", mix * 2)
             saved = mf.REPO
             mf.REPO = root
@@ -1307,6 +1338,7 @@ class RunnerTablesTest(unittest.TestCase):
                 ana, r"\| RQ1a-R \| [+-][0-9.]+, [+-][0-9.]+ \| [0-9.]+ \(1\) \|"
             )
             self.assertIn("macos26 A: — (6); macos26 B: — (6)", ana)
+            self.assertIn("| macos26 B: — (12) |", ana)
             # the cell with a time margin: one overrun, by the first arm, and the
             # registered-referee estimate (the Hybrid's 1-0 in pair 0 becomes a loss)
             row = next(r for r in ana.splitlines() if r.startswith("| RQ1a-R |"))
@@ -1323,16 +1355,307 @@ class RunnerTablesTest(unittest.TestCase):
                 r"RQ6d-R minus RQ1a-R \(hints and verification off\) & \$[+-][0-9.]+ \\pm [0-9.]+\$ & 12 \\\\",
             )
             sens = (root / "out" / "tables" / "runner_sensitivity.tex").read_text()
-            self.assertTrue(sens.startswith("\\begin{tabular}"))
+            # one column per runner image, headed by its version
+            self.assertTrue(sens.startswith("\\begin{tabular}{lrrrrrlll}"))
             self.assertTrue(sens.rstrip().endswith("\\end{tabular}"))
+            self.assertIn(
+                "& & & & & & & \\multicolumn{2}{c}{By runner image (pairs)} \\\\\n"
+                "\\cmidrule(l){8-9}\n",
+                sens,
+            )
+            self.assertIn("& No margin & A & B \\\\", sens)
             row = next(r for r in sens.splitlines() if r.startswith("RQ1a-R &"))
             self.assertRegex(
                 row,
                 r"^RQ1a-R & [0-9.]+ \(1\) & [0-9.]+ & \$\[[+-][0-9.]+, [+-][0-9.]+\]\$ & 0 & 1 \(1 / 0\) & "
-                r"\$[+-][0-9.]+ \\pm [0-9.]+\$( \(time-sensitive\))? & A: — \(6\); B: — \(6\) \\\\$",
+                r"\$[+-][0-9.]+ \\pm [0-9.]+\$( \(time-sensitive\))? & — \(6\) & — \(6\) \\\\$",
             )
+            row = next(r for r in sens.splitlines() if r.startswith("RQ6d-R &"))
+            self.assertTrue(row.endswith(" & — & — (12) \\\\"), row)
             self.assertNotIn("±", sens + con)
             self.assertNotIn("macos26", sens)
+            # every block's estimate and the adjudications (protocol section 7.1)
+            bmd = (
+                (root / "out" / "tables" / "runner_blocks.md").read_text().splitlines()
+            )
+            btex = (root / "out" / "tables" / "runner_blocks.tex").read_text()
+            self.assertEqual(
+                bmd[0],
+                "| Cell | Block 0 | Block 1 | Adjudicated draws / wins (first / second arm) |",
+            )
+            self.assertRegex(
+                bmd[2],
+                r"^\| RQ1a-R \| [+-][0-9.]+ ± [0-9.]+ \| [+-][0-9.]+ ± [0-9.]+ \| [0-9]+ / [0-9]+ / [0-9]+ \|$",
+            )
+            self.assertTrue(btex.startswith("\\begin{tabular}{lrrl}"))
+            self.assertRegex(
+                btex,
+                r"RQ1a-R & \$[+-][0-9.]+ \\pm [0-9.]+\$ & \$[+-][0-9.]+ \\pm [0-9.]+\$ & [0-9]+ / [0-9]+ / [0-9]+ \\\\",
+            )
+            self.assertNotIn("±", btex)
+
+    def test_runner_micro(self):
+        import make_figures as mf
+
+        nn = {
+            "metalfish": [
+                {
+                    "precision": "fp16",
+                    "batch": 1,
+                    "median_ms": 20.5,
+                    "median_positions_per_second": 48.8,
+                },
+                {
+                    "precision": "fp16",
+                    "batch": 2,
+                    "median_ms": 30.0,
+                    "median_positions_per_second": 66.7,
+                    "gpu_error_lines": 2,
+                },
+                {"precision": "fp32", "batch": 1, "timed_out": True, "error": "x"},
+                {"precision": "fp32", "batch": 2, "error": "no latency"},
+            ],
+            "lc0": [
+                {"minibatch": 1, "nps_steady_median": 41},
+                {"minibatch": 2, "nps_steady_median": None},
+            ],
+            "lc0_backendbench": [
+                {"batch": 1, "median_eps": 1234.4},
+                {"batch": 2, "error": "x"},
+            ],
+            "hardware": "Apple M1 (Virtual)",
+            "complete": True,
+        }
+        ab = {
+            "depth": 16,
+            "hash_mb": 1024,
+            "rows": [
+                {"threads": 1, "repeat": 0, "nps": 1_000_000},
+                {"threads": 1, "repeat": 1, "nps": 1_200_000},
+                {"threads": 2, "repeat": 0, "nps": 2_000_000},
+                {"threads": 2, "repeat": 1, "nps": 9_000_000, "timed_out": True},
+                {"threads": 3, "repeat": 0, "nps": None},
+            ],
+            "complete": False,
+        }
+        with tempfile.TemporaryDirectory() as d:
+            results, out = pathlib.Path(d) / "results", pathlib.Path(d) / "out"
+            mf.write_runner_micro(results, out)  # nothing downloaded yet: no table
+            self.assertFalse((out / "tables").exists())
+            (results / "runner_micro").mkdir(parents=True)
+            (results / "runner_micro" / "nn_latency.json").write_text(json.dumps(nn))
+            (results / "runner_micro" / "ab_scaling.json").write_text(json.dumps(ab))
+            mf.write_runner_micro(results, out)
+            md = (out / "tables" / "runner_micro.md").read_text()
+            m1 = (out / "tables" / "runner_micro_m1.tex").read_text()
+            m2 = (out / "tables" / "runner_micro_m2.tex").read_text()
+        self.assertIn("| 1 | 20.50 ms; 49/s | not used (time limit) | 1,234 | 41 |", md)
+        self.assertIn("| 2 | not used (GPU error) | failed | failed | failed |", md)
+        self.assertIn(
+            "1 & 20.50 ms; 49/s & not used (time limit) & 1,234 & 41 \\\\", m1
+        )
+        # medians over the usable repeats only; the speed-up is over the first thread count
+        self.assertIn("| 1 | 1.10 million (1.00–1.20) | 1.00 | 2 of 2 |", md)
+        self.assertIn("| 2 | 2.00 million (2.00–2.00) | 1.82 | 1 of 2 |", md)
+        self.assertIn("| 3 | — | — | 0 of 1 |", md)
+        self.assertIn("M2 did not complete", md)
+        self.assertNotIn("M1 sweep did not complete", md)
+        self.assertNotIn("backendbench gave no rate", md)
+        self.assertTrue(m2.rstrip().endswith("\\end{tabular}"))
+
+    def test_runner_micro_without_backendbench(self):
+        """A sweep in which Lc0's backendbench gave no rate at any batch size drops its column."""
+        import make_figures as mf
+
+        nn = {
+            "metalfish": [
+                {
+                    "precision": p,
+                    "batch": 1,
+                    "median_ms": 19.0,
+                    "median_positions_per_second": 52.6,
+                }
+                for p in ("fp16", "fp32")
+            ],
+            "lc0": [{"minibatch": 1, "nps_steady_median": 43}],
+            "lc0_backendbench": [{"batch": 1, "error": "no table"}],
+        }
+        with tempfile.TemporaryDirectory() as d:
+            results, out = pathlib.Path(d) / "results", pathlib.Path(d) / "out"
+            (results / "runner_micro").mkdir(parents=True)
+            (results / "runner_micro" / "nn_latency.json").write_text(json.dumps(nn))
+            mf.write_runner_micro(results, out)
+            md = (out / "tables" / "runner_micro.md").read_text()
+            m1 = (out / "tables" / "runner_micro_m1.tex").read_text()
+        self.assertIn(
+            "| --- | --- | --- | --- |\n| 1 | 19.00 ms; 53/s | 19.00 ms; 53/s | 43 |",
+            md,
+        )
+        self.assertIn("backendbench gave no rate at any batch size", md)
+        self.assertNotIn("Lc0 Metal backend", md)
+        self.assertTrue(m1.startswith("\\begin{tabular}{rlll}"))
+        self.assertIn("MetalFish FP32 & Lc0 search (nodes/s) \\\\", m1)
+        self.assertIn("1 & 19.00 ms; 53/s & 19.00 ms; 53/s & 43 \\\\", m1)
+
+    def test_runner_compute(self):
+        """The compute table (T6) lists the runner cells under their own heading: hours of play
+        from the PGN's game durations, blocks from the manifest's history."""
+        import make_figures as mf
+
+        with tempfile.TemporaryDirectory() as d:
+            results, out = pathlib.Path(d) / "results", pathlib.Path(d) / "out"
+            cells = []
+            for name, duration, blocks in (
+                ("RQ1a", "00:01:30", [0, 1]),
+                ("RQ1a-R", "00:03:00", [0]),
+            ):
+                (results / name).mkdir(parents=True)
+                (results / name / "games.pgn").write_text(
+                    f'[Event "t"]\n[GameDuration "{duration}"]\n\n1. e4 1-0\n\n' * 4
+                )
+                (results / name / "manifest.json").write_text(
+                    json.dumps({"history": [{"block": b} for b in blocks]})
+                )
+                cells.append(
+                    {"cell": name, "dir": name, "games": 4, "blocks": 0}
+                    | {"arm_a": "", "telemetry": {}}
+                )
+            mf.write_extra_tables(cells[:1], results, out, cells[1:])
+            md = (out / "tables" / "compute.md").read_text().splitlines()
+            tex = (out / "tables" / "compute.tex").read_text()
+        self.assertEqual(
+            md[2:],
+            [
+                "| RQ1a | 4 | 2 | 0.1 | 1.50 |",
+                "| Runner cells (one runner per block) | | | | |",
+                "| RQ1a-R | 4 | 1 | 0.2 | 3.00 |",
+            ],
+        )
+        self.assertIn(
+            "\\midrule\n\\multicolumn{5}{l}{Runner cells (one runner per block)} \\\\\n"
+            "RQ1a-R & 4 & 1 & 0.2 & 3.00 \\\\\n\\bottomrule",
+            tex,
+        )
+
+    def test_runner_telemetry_and_therm(self):
+        """The telemetry (M5, RQ6a) and thermal (M6) tables list the runner cells under their own
+        heading; a fraction below 10% keeps one decimal; a runner cell without a hybrid arm has no
+        telemetry row."""
+        import make_figures as mf
+
+        self.assertEqual(mf.pct(0.016811), "1.7%")
+        self.assertEqual(mf.pct(0.5309), "53%")
+        self.assertEqual(mf.pct(0.0999), "10%")
+        tel = {
+            "moves_total": 100,
+            "gpu_active_fraction": 0.53,
+            "mcts_evals_median": 36,
+            "mcts_playouts_median": 38,
+            "disagreement_rate": 0.367,
+            "disagreements": 20,
+            "mcts_move_selected_on_disagreement": 1,
+            "reasons": {"engines_agree": 30},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            results, out = pathlib.Path(d) / "results", pathlib.Path(d) / "out"
+            cells = []
+            for name, t in (
+                ("RQ1a", tel),
+                ("RQ1c-R", tel | {"gpu_active_fraction": 0.016811}),
+                ("RQ2a-R", None),
+            ):
+                (results / name).mkdir(parents=True)
+                (results / name / "games.pgn").write_text(
+                    '[Event "t"]\n[GameDuration "00:01:00"]\n\n1. e4 1-0\n\n'
+                )
+                (results / name / "therm.log").write_text(
+                    "# block 0\n"
+                    + "t Note: No thermal warning level has been recorded\n" * 3
+                )
+                cells.append(
+                    {"cell": name, "dir": name, "games": 1, "blocks": 0}
+                    | {"arm_a": "", "telemetry": t}
+                )
+            mf.write_extra_tables(cells[:1], results, out, cells[1:])
+            mf.write_therm_table(cells[:1], results, out, cells[1:])
+            tmd = (out / "tables" / "telemetry.md").read_text().splitlines()
+            ttex = (out / "tables" / "telemetry.tex").read_text()
+            hmd = (out / "tables" / "therm.md").read_text().splitlines()
+            htex = (out / "tables" / "therm.tex").read_text()
+        self.assertEqual(len(tmd), 5)
+        self.assertEqual(tmd[3], "| Runner cells | | | | | | | |")
+        self.assertEqual(
+            [tmd[2].split(" | ")[:3], tmd[4].split(" | ")[:3]],
+            [["| RQ1a", "100", "53%"], ["| RQ1c-R", "100", "1.7%"]],
+        )
+        self.assertIn(
+            "\\midrule\n\\multicolumn{7}{l}{Runner cells} \\\\\n"
+            "RQ1c-R & 100 & 1.7\\% & 36 & 38 & 36.7\\% & 1/20 \\\\\n\\bottomrule",
+            ttex,
+        )
+        self.assertEqual(
+            hmd[2:],
+            [
+                "| RQ1a | 3 | 0 | — |",
+                "| Runner cells | | | |",
+                "| RQ1c-R | 3 | 0 | — |",
+                "| RQ2a-R | 3 | 0 | — |",
+            ],
+        )
+        self.assertIn(
+            "\\multicolumn{4}{l}{Runner cells} \\\\\nRQ1c-R & 3 & 0 & — \\\\", htex
+        )
+
+    def test_runner_rates(self):
+        """M3 on the runners: evaluations per second of move time over the hybrid's
+        transformer-enabled moves, each trace record matched to its PGN move by position; a
+        time-safety move and a position traced twice are not used."""
+        import chess
+        import make_figures as mf
+
+        board = chess.Board()
+        fens = []
+        for mv in ("e4", "e5", "Nf3", "Nc6"):
+            fens.append(board.fen())
+            board.push_san(mv)
+        pgn = (
+            '[Event "t"]\n[White "Hybrid-T3"]\n[Black "AB-T3"]\n[Result "1-0"]\n\n'
+            "1. e4 {+0.30/20 0.500s} e5 {-0.20/18 0.500s} "
+            "2. Nf3 {+0.31/21 2.000s} Nc6 {-0.10/18 0.400s} 1-0\n"
+        )
+        recs = [
+            {"fen": fens[0], "reason": "engines_agree", "mcts_evals": 50},
+            {"fen": fens[2], "reason": "engines_agree", "mcts_evals": 10},
+            # a time-safety record carries no evaluations to rate
+            {"fen": fens[1], "reason": "ab_fallback_time_safety", "mcts_evals": 0},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            results, out = pathlib.Path(d) / "results", pathlib.Path(d) / "out"
+            (results / "RQ1a-R").mkdir(parents=True)
+            (results / "RQ1a-R" / "games.pgn").write_text(pgn)
+            (results / "RQ1a-R" / "moves.jsonl").write_text(
+                "".join(json.dumps(r) + "\n" for r in recs)
+            )
+            (results / "RQ2a-R").mkdir(parents=True)
+            cells = [
+                {"cell": "RQ1a-R", "dir": "RQ1a-R", "arm_a": "Hybrid-T3"}
+                | {"telemetry": {"moves_total": 2}},
+                {
+                    "cell": "RQ2a-R",
+                    "dir": "RQ2a-R",
+                    "arm_a": "AB-T1",
+                    "telemetry": None,
+                },
+            ]
+            mf.write_runner_rates(cells, results, out)
+            md = (out / "tables" / "runner_rates.md").read_text().splitlines()
+        # 50 evaluations in 0.5 s and 10 in 2.0 s: rates 100 and 5, total 60 / 2.5 s = 24
+        self.assertEqual(md[2], "| RQ1a-R | 2 | 52 (14) | 24 |")
+        self.assertIn(
+            "RQ1a-R: 2 of 2 transformer-enabled trace records with a unique position matched a PGN move.",
+            md,
+        )
+        self.assertFalse(any(r.startswith("| RQ2a-R") for r in md))
 
 
 class FakeJudge:
@@ -1553,6 +1876,291 @@ class OracleJudgingTest(unittest.TestCase):
             body[0].startswith("sf & lc0 & 1 & 1.000 [1.000, 1.000] & 0.015 [")
         )
         self.assertTrue(body[1].startswith("lc0 & sf & 2 & 0.500 ["))
+
+    def test_outcome_class_rules(self):
+        """Amendment 16 (b), (c): the consensus and both cross-judge bounds decide the class against
+        the 0.01 tie band; an incomplete run gets no class when a sampled stratum is uncovered.
+        """
+
+        def summ(cons, cross1, cross2, n=600, covered=("A", "B")):
+            st = lambda ci: {"estimate": sum(ci) / 2, "ci95": list(ci)}  # noqa: E731
+            return {
+                "agreement": {
+                    "n": n,
+                    "strata_covered": list(covered),
+                    "stats": {"consensus_bound_es": st(cons)},
+                },
+                "cross_judge": {
+                    "sf->lc0": {"stats": {"cross_bound_es": st(cross1)}},
+                    "lc0->sf": {"stats": {"cross_bound_es": st(cross2)}},
+                },
+            }
+
+        strata = {"A": 300, "B": 300}
+        oc = self.op.outcome_class
+        small = (0.001, 0.009)
+        big = (0.02, 0.05)
+        straddle = (0.005, 0.02)
+        self.assertEqual(
+            oc(summ(small, small, small), strata, 600)["class"], "little_to_gain"
+        )
+        self.assertEqual(
+            oc(summ(big, big, big), strata, 600)["class"], "room_under_both_judges"
+        )
+        self.assertEqual(
+            oc(summ(big, small, big), strata, 600)["class"],
+            "judge_dependent_or_unresolved",
+        )
+        r = oc(summ(straddle, small, small), strata, 600)
+        self.assertEqual(r["class"], "judge_dependent_or_unresolved")
+        self.assertEqual(r["bands"]["consensus"], "neither")
+        # the upper limit at exactly 0.01 is within the band
+        self.assertEqual(
+            oc(summ((0.0, 0.01), small, small), strata, 600)["class"], "little_to_gain"
+        )
+        # incomplete: classed only when every sampled stratum is covered
+        r = oc(summ(small, small, small, n=500), strata, 600)
+        self.assertEqual((r["class"], r["complete"]), ("little_to_gain", False))
+        r = oc(summ(small, small, small, n=500, covered=("A",)), strata, 600)
+        self.assertIsNone(r["class"])
+        self.assertEqual(r["strata_missing"], ["B"])
+        self.assertIsNone(oc({"agreement": None}, strata, 600)["class"])
+
+    def test_results_per_source_cell(self):
+        """Amendment 16 (a): each cell's positions are summarised apart, reweighted by that cell's
+        own stratum population, and each gets its class of outcome."""
+        rows = self._rows()
+        for r, cell in zip(rows, ("RQ1a", "RQ1a", "RQ1b", "RQ1b")):
+            r["source"] = f"results/paper_v2/{cell}/engines.log"
+        sampling = {
+            "strata_population": {"A": 300, "B": 100},
+            "strata_sample": {"A": 2, "B": 2},
+            "strata_population_by_source": {"RQ1a": {"A": 300}, "RQ1b": {"B": 100}},
+            "strata_sample_by_source": {"RQ1a": {"A": 2}, "RQ1b": {"B": 2}},
+        }
+        s = self.op.summarise(rows, ["sf", "lc0"], sampling, n_boot=200, seed=1)
+        s = self.op.with_source_cells(s, rows, rows, ["sf", "lc0"], sampling, 200, 1)
+        self.assertEqual(sorted(s["by_source_cell"]), ["RQ1a", "RQ1b"])
+        a = s["by_source_cell"]["RQ1a"]
+        self.assertEqual(a["positions"], 2)
+        self.assertEqual(a["sampling"]["strata_population"], {"A": 300})
+        self.assertEqual(a["outcome"]["sampled"], 2)
+        self.assertIn(
+            s["outcome"]["class"],
+            (
+                "little_to_gain",
+                "room_under_both_judges",
+                "judge_dependent_or_unresolved",
+            ),
+        )
+        # the RQ1a positions alone: sf's bound is the mean of its two bounds there
+        self.assertAlmostEqual(
+            a["judges"]["sf"]["stats"]["arbiter_upper_bound_es"]["estimate"], 0.05
+        )
+
+    def test_conversion_sensitivity_rescores_from_centipawns(self):
+        """Amendment 16 (g): the losses are recomputed from each judgment's centipawns with the
+        constant halved and doubled, the verdicts kept, and the class reported for each constant
+        with the tie band scaled to match."""
+        op = self.op
+        rows = []
+        for i, (ab, mc) in enumerate(
+            ((0.0, 40.0), (30.0, 0.0), (0.0, 0.0), (10.0, 60.0))
+        ):
+            r = {
+                "ab_move": "a",
+                "mcts_move": "m",
+                "selected": "a",
+                "stratum": "A",
+                "cluster": f"g{i}",
+                "source": "results/paper_v2/RQ1a/engines.log",
+                "judges": {},
+            }
+            for name in ("sf", "lc0"):
+                j = {"cand_cp": {"a": ab, "m": mc}, "best_cp": max(ab, mc)}
+                r["judges"][name] = op.score_candidates(j, r, 10.0, 250.0)
+            rows.append(r)
+        again = op.rescored(rows, 125.0)
+        j0, k0 = rows[0]["judges"]["sf"], again[0]["judges"]["sf"]
+        self.assertEqual(j0["verdict"], k0["verdict"])
+        self.assertAlmostEqual(
+            k0["loss_ab_es"], op.logistic(40.0, 125.0) - op.logistic(0.0, 125.0)
+        )
+        self.assertGreater(k0["loss_ab_es"], j0["loss_ab_es"])
+        sampling = {
+            "strata_population": {"A": 100},
+            "strata_sample": {"A": 4},
+            "strata_population_by_source": {"RQ1a": {"A": 100}},
+            "strata_sample_by_source": {"RQ1a": {"A": 4}},
+        }
+        s = op.summarise(rows, ["sf", "lc0"], sampling, n_boot=100, seed=1)
+        s = op.with_source_cells(s, rows, rows, ["sf", "lc0"], sampling, 100, 1)
+        sens = s["conversion_sensitivity"]
+        self.assertEqual(sorted(sens), ["125", "500"])
+        self.assertAlmostEqual(sens["125"]["tie_band_es"], 0.02)
+        self.assertAlmostEqual(sens["500"]["tie_band_es"], 0.005)
+        self.assertIn("class", sens["125"]["pooled"])
+        self.assertIn("RQ1a", sens["500"])
+
+    def test_tables_carry_the_class_and_the_cells(self):
+        import make_figures as mf
+
+        rows = self._rows()
+        for r, cell in zip(rows, ("RQ1a", "RQ1a", "RQ1b", "RQ1b")):
+            r["source"] = f"results/paper_v2/{cell}/engines.log"
+        sampling = {
+            "strata_population": {"A": 300, "B": 100},
+            "strata_sample": {"A": 2, "B": 2},
+            "strata_population_by_source": {"RQ1a": {"A": 300}, "RQ1b": {"B": 100}},
+            "strata_sample_by_source": {"RQ1a": {"A": 2}, "RQ1b": {"B": 2}},
+        }
+        s = self.op.summarise(rows, ["sf", "lc0"], sampling, n_boot=200, seed=1)
+        s = self.op.with_source_cells(s, rows, rows, ["sf", "lc0"], sampling, 200, 1)
+        s["method"]["expected_score"] = "logistic, 250 cp per unit of log-odds"
+        with tempfile.TemporaryDirectory() as d:
+            mf.write_oracle_tables(s, pathlib.Path(d))
+            md = (pathlib.Path(d) / "oracle.md").read_text()
+            tex = (pathlib.Path(d) / "oracle_cells.tex").read_text().splitlines()
+        self.assertIn("Class of outcome (protocol amendment 16 (b), (c)):", md)
+        self.assertIn("- Pooled: **", md)
+        self.assertIn("- RQ1a: ", md)
+        self.assertIn("| RQ1a | 2 | sf ", md)
+        self.assertIn("| RQ1b | 2 | sf ", md)
+        # the synthetic judgments carry no centipawns, so 16 (g) is reported as not computed
+        self.assertIn("Sensitivity to the conversion (16 (g)): not computed", md)
+        # oracle_cells.tex: all positions, then each cell; no class columns for 16 (g)
+        self.assertEqual(
+            tex[2],
+            "Positions from & $n$ & Consensus bound (ES) & lc0 selects, sf scores & "
+            "sf selects, lc0 scores & Class \\\\",
+        )
+        body = [l for l in tex[4:] if l.endswith("\\\\")]
+        self.assertEqual(
+            [l.split(" & ")[:2] for l in body],
+            [["all", "4"], ["RQ1a", "2"], ["RQ1b", "2"]],
+        )
+        self.assertTrue(all(l.split(" & ")[-1][0] in "LRJ—" for l in body))
+
+    def test_cells_table_gives_the_class_at_each_constant(self):
+        """oracle_cells.tex adds the class at the halved and doubled constant (16 (g)) when the
+        judgments keep their centipawns."""
+        import make_figures as mf
+
+        op = self.op
+        rows = []
+        for i, (ab, mc) in enumerate(
+            ((0.0, 40.0), (30.0, 0.0), (0.0, 0.0), (10.0, 60.0))
+        ):
+            r = {
+                "ab_move": "a",
+                "mcts_move": "m",
+                "selected": "a",
+                "stratum": "A",
+                "cluster": f"g{i}",
+                "source": "results/paper_v2/RQ1a/engines.log",
+                "judges": {},
+            }
+            for name in ("sf", "lc0"):
+                j = {"cand_cp": {"a": ab, "m": mc}, "best_cp": max(ab, mc)}
+                r["judges"][name] = op.score_candidates(j, r, 10.0, 250.0)
+            rows.append(r)
+        sampling = {
+            "strata_population": {"A": 100},
+            "strata_sample": {"A": 4},
+            "strata_population_by_source": {"RQ1a": {"A": 100}},
+            "strata_sample_by_source": {"RQ1a": {"A": 4}},
+        }
+        s = op.summarise(rows, ["sf", "lc0"], sampling, n_boot=100, seed=1)
+        s = op.with_source_cells(s, rows, rows, ["sf", "lc0"], sampling, 100, 1)
+        s["method"]["expected_score"] = "logistic, 250 cp per unit of log-odds"
+        with tempfile.TemporaryDirectory() as d:
+            mf.write_oracle_tables(s, pathlib.Path(d))
+            tex = (pathlib.Path(d) / "oracle_cells.tex").read_text().splitlines()
+        self.assertTrue(
+            tex[2].endswith("& Class & Class at 125 cp & Class at 500 cp \\\\")
+        )
+        body = [l for l in tex[4:] if l.endswith("\\\\")]
+        self.assertEqual([l.split(" & ")[0] for l in body], ["all", "RQ1a"])
+        short = {
+            "little_to_gain": "L",
+            "room_under_both_judges": "R",
+            "judge_dependent_or_unresolved": "J",
+        }
+        sens = s["conversion_sensitivity"]
+        self.assertEqual(
+            body[0].removesuffix(" \\\\").split(" & ")[-3:],
+            [
+                short[s["outcome"]["class"]],
+                short[sens["125"]["pooled"]["class"]],
+                short[sens["500"]["pooled"]["class"]],
+            ],
+        )
+
+    def test_os_builds_tables(self):
+        """Amendment 13: each cell by macOS build, with a dash below 100 pairs and RQ1a's rows
+        marked as computed after its interpretation."""
+        import make_figures as mf
+
+        rows = [
+            ("RQ1a", "macOS 27.2 beta", 514, 256, "-10.9 ± 12.4", True),
+            ("RQ1a_pilot", "macOS 27.2 beta", 100, 50, None, False),
+            ("RQ2b", "macOS 27.2", 250, 125, "-15.3 ± 18.5", False),
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            mf.write_os_builds(rows, pathlib.Path(d))
+            md = (pathlib.Path(d) / "os_builds.md").read_text().splitlines()
+            tex = (pathlib.Path(d) / "os_builds.tex").read_text().splitlines()
+        self.assertEqual(
+            md[2:],
+            [
+                "| RQ1a | macOS 27.2 beta | 514 | 256 | -10.9 ± 12.4 (added after the interpretation) |",
+                "| RQ1a_pilot | macOS 27.2 beta | 100 | 50 | — |",
+                "| RQ2b | macOS 27.2 | 250 | 125 | -15.3 ± 18.5 |",
+            ],
+        )
+        self.assertEqual(
+            tex[4:7],
+            [
+                "RQ1a & macOS 27.2 beta & 514 & 256 & $-10.9 \\pm 12.4$$^\\dagger$ \\\\",
+                "RQ1a\\_pilot & macOS 27.2 beta & 100 & 50 & — \\\\",
+                "RQ2b & macOS 27.2 & 250 & 125 & $-15.3 \\pm 18.5$ \\\\",
+            ],
+        )
+
+    def test_stability_tables_apply_the_pass_criterion(self):
+        """Amendment 16 (e): a judge passes with at least 0.8 equal verdicts and a correlation of at
+        least 0.8; a judge without the two statistics gets a dash."""
+        import make_figures as mf
+
+        stab = {
+            "sf": {"positions": 74, "same_verdict": 0.8, "delta_cp_correlation": 0.9},
+            "lc0": {
+                "positions": 74,
+                "same_verdict": 0.95,
+                "delta_cp_correlation": 0.79,
+            },
+            "x_y": {"positions": 0},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            mf.write_oracle_stability(stab, pathlib.Path(d))
+            md = (pathlib.Path(d) / "oracle_stability.md").read_text().splitlines()
+            tex = (pathlib.Path(d) / "oracle_stability.tex").read_text().splitlines()
+        self.assertEqual(
+            md[2:],
+            [
+                "| sf | 74 | 80.0% | 0.900 | yes |",
+                "| lc0 | 74 | 95.0% | 0.790 | no |",
+                "| x_y | 0 | — | — | — |",
+            ],
+        )
+        self.assertEqual(
+            tex[4:7],
+            [
+                "sf & 74 & 80.0\\% & 0.900 & yes \\\\",
+                "lc0 & 74 & 95.0\\% & 0.790 & no \\\\",
+                "x\\_y & 0 & — & — & — \\\\",
+            ],
+        )
 
     def test_weights_fall_back_to_row_shares(self):
         rows = self._rows()
@@ -1801,6 +2409,87 @@ class OracleJudgeFailureTest(unittest.TestCase):
             self.assertEqual(
                 again[1]["judges"]["lc0"]["config"], "lc0 --backend=blas nodes=100"
             )
+
+
+class DepositTest(unittest.TestCase):
+    """tools/paper/make_deposit.py for the v2 deposit: the runner cells with their health logs, both
+    oracle runs, the runner microbenchmarks, readings, probes and campaign record; the merge
+    watchers and the private directory stay out, and an existing deposit is never mixed in.
+    """
+
+    def test_v2_layout(self):
+        import make_deposit as md
+
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            res = root / "results" / "paper_v2"
+            files = {
+                "RQ1a/games.pgn": "pgn",
+                "RQ1a/summary.json": "{}",
+                "RQ1c-R/summary.json": "{}",
+                "RQ1c-R/vm_sampler.log": "health",
+                "RQ6b/oracle.jsonl": "{}",
+                "RQ6b-R/oracle.jsonl": "{}",
+                "RQ6b-R/oracle.jsonl.summary.json": "{}",
+                "RQ6b-R/stability.json": "{}",
+                "RQ6b-R/shards/0/runner.json": "{}",
+                "runner_micro/nn_latency.json": "{}",
+                "runner_readings/RQ1c-R/reading.md": "r",
+                "runner_readings/tools/__pycache__/x.pyc": "c",
+                "runner_probe/run_1/a.json": "{}",
+                "runner_campaign_log.txt": "log",
+                "loadgate.sh": "#!/bin/sh",
+                "automerge_pr1.sh": "#!/bin/sh",
+                "deposit/old.txt": "v1",
+                "private/secret.txt": "s",
+            }
+            for rel, text in files.items():
+                (res / rel).parent.mkdir(parents=True, exist_ok=True)
+                (res / rel).write_text(text)
+            for rel in (
+                ".github/workflows/paper-runner-cells.yml",
+                "results/ars_pipeline/tools/runner_driver.py",
+                "docs/paper_v2/README.md",
+                "tools/paper/x.py",
+            ):
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text("x")
+            saved = md.REPO, md.RESULTS
+            md.REPO, md.RESULTS = root, res
+            try:
+                out = root / "out"
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(
+                        md.main(["--out", str(out), "--version", "2.0.0"]), 0
+                    )
+                    # a second build into the same directory is refused
+                    self.assertEqual(md.main(["--out", str(out)]), 2)
+            finally:
+                md.REPO, md.RESULTS = saved
+            got = {str(p.relative_to(out)) for p in out.rglob("*") if p.is_file()}
+        for rel in (
+            "cells/RQ1a/games.pgn.gz",
+            "cells/RQ1c-R/vm_sampler.log",
+            "oracle/RQ6b/oracle.jsonl",
+            "oracle/RQ6b-R/oracle.jsonl",
+            "oracle/RQ6b-R/oracle.jsonl.summary.json",
+            "oracle/RQ6b-R/stability.json",
+            "oracle/RQ6b-R/shards/0/runner.json",
+            "micro_runner/nn_latency.json",
+            "readings/RQ1c-R/reading.md",
+            "runner_probe/run_1/a.json",
+            "runner/runner_campaign_log.txt",
+            "runner/paper-runner-cells.yml",
+            "runner/runner_driver.py",
+            "scripts/loadgate.sh",
+            "plan/README.md",
+            "tools/x.py",
+            "zenodo.json",
+            "CHECKSUMS.sha256",
+        ):
+            self.assertIn(rel, got)
+        for part in ("automerge", "__pycache__", "private", "old.txt", "cells/RQ6b"):
+            self.assertFalse(any(part in g for g in got), part)
 
 
 if __name__ == "__main__":

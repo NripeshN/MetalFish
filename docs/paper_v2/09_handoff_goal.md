@@ -117,7 +117,8 @@ runner (one measurement per runner VM, no load gate needed, health from `vm_samp
   must show "0 judge errors, 0 rows lacking a judge, 0 Lc0 judgments of an earlier configuration" when
   it succeeds. A shard resumed from a GPU-era artifact keeps its Stockfish rows and judges Lc0 again.
 - **Read so far** (once each, after the last block): RQ1a-R and RQ6d-R on 2026-11-07; RQ2a-R,
-  RQ2b-R and RQ2c-R on 2026-11-08 (08 §F, 07). For
+  RQ2b-R, RQ2c-R, RQ5a-R and RQ1c-R on 2026-11-08 (08 §F, 07). That is all seven runner cells. The
+  microbenchmarks M1 and M2 were downloaded and read on 2026-11-08 (08 §F). For
   each reading, run the joiner and `make_figures.py` with an interpreter that has python-chess
   (`python3.14` here). Homebrew's default `python3` lacks it. A join that fails partway leaves a
   partial cell directory behind. Move that directory aside unread before you try again, because the
@@ -125,7 +126,20 @@ runner (one measurement per runner VM, no load gate needed, health from `vm_samp
   checks of a reading are `runner_reading_checks.py`, kept with each record; reuse it for the next
   cells. The driver (`results/ars_pipeline/tools/runner_driver.py`, not tracked) now logs a failed
   `gh` call and retries on its next loop instead of exiting; restart it with `--resume --last oracle`
-  if it stops.
+  if it stops. The scratch directory is cleared every night, so the watch and reading scripts are kept
+  in `results/paper_v2/runner_readings/tools/` (not tracked): `block_health_watch.py` (health lines,
+  counts only), `runner_reading_checks.py` and `sampler_summary.py`. A reading's extra scripts are
+  kept with its record, as RQ5a-R's `memory_summary.py`, `other_processes.py` and
+  `overrun_profile.py` are.
+- **Micro task** (M1, M2): dispatched after the last game block and before the oracle shards. Since
+  #150, a measurement that hangs or logs a GPU error is recorded and not used, and the sweep goes on.
+  Once the job has started, `results/paper_v2/hold_micro_once_started.sh` holds the task in the
+  driver's control file (`runner_driver_control.json`), so a failed attempt is looked at before it
+  is dispatched again. The results come from `gh run download <run> -n micro`. The driver dispatched
+  it on 2026-11-08 at 09:59 UTC (run 42469489470); its job ran 13:19–13:38 UTC and succeeded, the
+  hold was released, and the results are in `results/paper_v2/runner_micro/` (08 §F). Lc0's
+  backendbench gave no rate there (the sweep's parser reads a table, this Lc0 build prints sentences);
+  the measurement is not repeated, and the probe's backendbench rates are cited instead.
 
 ## Phase B — the arXiv preprint (the author decided: do it)
 
