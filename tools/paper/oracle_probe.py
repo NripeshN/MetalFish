@@ -58,6 +58,7 @@ import json
 import logging
 import math
 import os
+import pathlib
 import random
 import signal
 import sys
@@ -83,6 +84,19 @@ KEEP_FIELDS = (
     "game",
     "opening",
 )
+
+# Amendment 16 (b): a bound is within the tie band when the upper limit of its 95% interval is at
+# most this, and beyond it when the lower limit exceeds it: the expected-score difference of the
+# registered 10 cp tie threshold at an even position (10/250 x 1/4, logistic with 250 cp per unit
+# of log-odds).
+TIE_BAND_ES = 0.01
+
+
+def source_cell(rec: Dict) -> str:
+    """The cell a disagreement record came from, the directory of its source log
+    (results/paper_v2/RQ1a/engines.log -> RQ1a), or "unknown" (amendment 16 (a))."""
+    src = rec.get("source")
+    return pathlib.PurePosixPath(src).parent.name if src else "unknown"
 
 
 def logistic(cp: float, scale: float) -> float:
@@ -538,6 +552,7 @@ def summarise(
             agreement: Dict = {
                 "judges": names,
                 "n": len(both),
+                "strata_covered": sorted({r.get("stratum") or "all" for r in both}),
                 "games": len(
                     {r.get("cluster") or f"position:{i}" for i, r in enumerate(both)}
                 ),
@@ -615,6 +630,107 @@ def cross_judge(
             "projected_elo_of_cross_bound": with_elo(stats["cross_bound_es"]),
         }
     return out
+
+
+def tie_band(stat: Optional[Dict]) -> Optional[str]:
+    """Amendment 16 (b): "within" the tie band when the 95% interval's upper limit is at most
+    TIE_BAND_ES, "beyond" when its lower limit exceeds it, "neither" otherwise; None without an
+    interval."""
+    ci = (stat or {}).get("ci95")
+    if not ci:
+        return None
+    lo, hi = ci
+    if hi <= TIE_BAND_ES:
+        return "within"
+    if lo > TIE_BAND_ES:
+        return "beyond"
+    return "neither"
+
+
+def outcome_class(
+    summary: Dict, strata_sampled: Dict[str, int], n_sampled: int
+) -> Dict:
+    """Amendment 16 (b), (c): the class of oracle outcome, decided by the consensus bound and the
+    two cross-judge bounds against the tie band: "little_to_gain" (all within), "room_under_both_
+    judges" (all beyond) or "judge_dependent_or_unresolved". An incomplete run (fewer positions with
+    both verdicts than were sampled) gets a class only when every sampled stratum has a position
+    with both verdicts. The per-judge bounds do not enter."""
+    ag = summary.get("agreement")
+    cj = summary.get("cross_judge") or {}
+    out: Dict = {"tie_band_es": TIE_BAND_ES, "sampled": n_sampled}
+    if not ag or len(cj) != 2:
+        out.update(
+            {"class": None, "reason": "no two judges with verdicts on common positions"}
+        )
+        return out
+    out["positions_with_both_verdicts"] = ag["n"]
+    out["complete"] = ag["n"] >= n_sampled
+    covered = set(ag.get("strata_covered") or [])
+    missing = sorted(s for s, k in strata_sampled.items() if k > 0 and s not in covered)
+    if not out["complete"] and missing:
+        out.update(
+            {
+                "class": None,
+                "reason": "incomplete run: a sampled stratum has no position with both verdicts",
+                "strata_missing": missing,
+            }
+        )
+        return out
+    bands = {"consensus": tie_band(ag["stats"].get("consensus_bound_es"))}
+    bands.update(
+        {k: tie_band(v["stats"].get("cross_bound_es")) for k, v in sorted(cj.items())}
+    )
+    out["bands"] = bands
+    found = set(bands.values())
+    out["class"] = (
+        "little_to_gain"
+        if found == {"within"}
+        else (
+            "room_under_both_judges"
+            if found == {"beyond"}
+            else "judge_dependent_or_unresolved"
+        )
+    )
+    return out
+
+
+def with_source_cells(
+    summary: Dict,
+    rows: List[Dict],
+    sample: List[Dict],
+    judge_names: List[str],
+    sampling: Dict,
+    n_boot: int,
+    seed: int,
+) -> Dict:
+    """Amendment 16 (a)-(c): every statistic again for each source cell's positions, reweighted by
+    that cell's own stratum population, and the class of outcome, pooled and per cell.
+    """
+    by_pop = sampling.get("strata_population_by_source")
+    if by_pop:
+        summary["by_source_cell"] = {}
+        for cell in sorted({source_cell(r) for r in sample}):
+            cell_rows = [r for r in rows if source_cell(r) == cell]
+            if not cell_rows:
+                continue
+            cell_sampling = dict(
+                sampling,
+                strata_population=by_pop.get(cell, {}),
+                strata_sample=(sampling.get("strata_sample_by_source") or {}).get(
+                    cell, {}
+                ),
+            )
+            cs = summarise(cell_rows, judge_names, cell_sampling, n_boot, seed)
+            cs["outcome"] = outcome_class(
+                cs,
+                cell_sampling["strata_sample"],
+                sum(cell_sampling["strata_sample"].values()),
+            )
+            summary["by_source_cell"][cell] = cs
+    summary["outcome"] = outcome_class(
+        summary, sampling.get("strata_sample") or {}, len(sample)
+    )
+    return summary
 
 
 def phase_of(fen: str, opening_moves: int = 15, endgame_pieces: int = 6) -> str:
@@ -706,6 +822,16 @@ def stratified_sample(
             r["_stratum"] = key
             sample.append(r)
     rng.shuffle(sample)
+    # amendment 16 (a): each source cell's own stratum population and sample, for its reweighting
+    by_source: Dict[str, Dict[str, int]] = {}
+    for key in sorted(strata):
+        for r in strata[key]:
+            cell = by_source.setdefault(source_cell(r), {})
+            cell[key] = cell.get(key, 0) + 1
+    sample_by_source: Dict[str, Dict[str, int]] = {}
+    for r in sample:
+        cell = sample_by_source.setdefault(source_cell(r), {})
+        cell[r["_stratum"]] = cell.get(r["_stratum"], 0) + 1
     info = {
         "method": "stratified",
         "seed": seed,
@@ -718,6 +844,12 @@ def stratified_sample(
         },
         "strata_population": {k: len(v) for k, v in sorted(strata.items())},
         "strata_sample": {k: alloc[k] for k in sorted(strata)},
+        "strata_population_by_source": {
+            c: dict(sorted(v.items())) for c, v in sorted(by_source.items())
+        },
+        "strata_sample_by_source": {
+            c: dict(sorted(v.items())) for c, v in sorted(sample_by_source.items())
+        },
     }
     return sample, info
 
@@ -1053,6 +1185,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"shard {args.shard}: {len(rows)} rows in {args.out}", file=sys.stderr)
         return 3 if incomplete else 0
     summary = summarise(rows, judge_names, sampling, args.bootstrap, args.seed)
+    summary = with_source_cells(
+        summary, rows, sample, judge_names, sampling, args.bootstrap, args.seed
+    )
     summary["judging"] = judging
     summary["method"].update(
         {

@@ -774,6 +774,27 @@ class OracleSamplingTest(unittest.TestCase):
         self.assertEqual(len(sample), 10)
         self.assertEqual(info["requested"], 10)
 
+    def test_sample_records_each_source_cells_strata(self):
+        """Amendment 16 (a): the sampling info carries each source cell's own stratum population
+        and sample, and adding them leaves the sample itself unchanged."""
+        recs = self._records()
+        for i, r in enumerate(recs):
+            r["source"] = f"results/paper_v2/{'RQ1a' if i % 2 else 'RQ1b'}/engines.log"
+        sample, info = self.op.stratified_sample(recs, 60, seed=1)
+        plain, _ = self.op.stratified_sample(self._records(), 60, seed=1)
+        self.assertEqual(
+            [r["mcts_root_visits"] for r in sample],
+            [r["mcts_root_visits"] for r in plain],
+        )
+        pop, smp = info["strata_population_by_source"], info["strata_sample_by_source"]
+        self.assertEqual(sorted(pop), ["RQ1a", "RQ1b"])
+        self.assertEqual(sum(sum(v.values()) for v in pop.values()), 300)
+        self.assertEqual(sum(sum(v.values()) for v in smp.values()), 60)
+        for key, n in info["strata_population"].items():
+            self.assertEqual(sum(v.get(key, 0) for v in pop.values()), n)
+        self.assertEqual(self.op.source_cell({"source": "x/RQ1a/engines.log"}), "RQ1a")
+        self.assertEqual(self.op.source_cell({}), "unknown")
+
 
 class OracleShardTest(unittest.TestCase):
     """Pins the contiguous shards of tools/paper/oracle_probe.py (protocol amendment 15)."""
@@ -1855,6 +1876,111 @@ class OracleJudgingTest(unittest.TestCase):
             body[0].startswith("sf & lc0 & 1 & 1.000 [1.000, 1.000] & 0.015 [")
         )
         self.assertTrue(body[1].startswith("lc0 & sf & 2 & 0.500 ["))
+
+    def test_outcome_class_rules(self):
+        """Amendment 16 (b), (c): the consensus and both cross-judge bounds decide the class against
+        the 0.01 tie band; an incomplete run gets no class when a sampled stratum is uncovered.
+        """
+
+        def summ(cons, cross1, cross2, n=600, covered=("A", "B")):
+            st = lambda ci: {"estimate": sum(ci) / 2, "ci95": list(ci)}  # noqa: E731
+            return {
+                "agreement": {
+                    "n": n,
+                    "strata_covered": list(covered),
+                    "stats": {"consensus_bound_es": st(cons)},
+                },
+                "cross_judge": {
+                    "sf->lc0": {"stats": {"cross_bound_es": st(cross1)}},
+                    "lc0->sf": {"stats": {"cross_bound_es": st(cross2)}},
+                },
+            }
+
+        strata = {"A": 300, "B": 300}
+        oc = self.op.outcome_class
+        small = (0.001, 0.009)
+        big = (0.02, 0.05)
+        straddle = (0.005, 0.02)
+        self.assertEqual(
+            oc(summ(small, small, small), strata, 600)["class"], "little_to_gain"
+        )
+        self.assertEqual(
+            oc(summ(big, big, big), strata, 600)["class"], "room_under_both_judges"
+        )
+        self.assertEqual(
+            oc(summ(big, small, big), strata, 600)["class"],
+            "judge_dependent_or_unresolved",
+        )
+        r = oc(summ(straddle, small, small), strata, 600)
+        self.assertEqual(r["class"], "judge_dependent_or_unresolved")
+        self.assertEqual(r["bands"]["consensus"], "neither")
+        # the upper limit at exactly 0.01 is within the band
+        self.assertEqual(
+            oc(summ((0.0, 0.01), small, small), strata, 600)["class"], "little_to_gain"
+        )
+        # incomplete: classed only when every sampled stratum is covered
+        r = oc(summ(small, small, small, n=500), strata, 600)
+        self.assertEqual((r["class"], r["complete"]), ("little_to_gain", False))
+        r = oc(summ(small, small, small, n=500, covered=("A",)), strata, 600)
+        self.assertIsNone(r["class"])
+        self.assertEqual(r["strata_missing"], ["B"])
+        self.assertIsNone(oc({"agreement": None}, strata, 600)["class"])
+
+    def test_results_per_source_cell(self):
+        """Amendment 16 (a): each cell's positions are summarised apart, reweighted by that cell's
+        own stratum population, and each gets its class of outcome."""
+        rows = self._rows()
+        for r, cell in zip(rows, ("RQ1a", "RQ1a", "RQ1b", "RQ1b")):
+            r["source"] = f"results/paper_v2/{cell}/engines.log"
+        sampling = {
+            "strata_population": {"A": 300, "B": 100},
+            "strata_sample": {"A": 2, "B": 2},
+            "strata_population_by_source": {"RQ1a": {"A": 300}, "RQ1b": {"B": 100}},
+            "strata_sample_by_source": {"RQ1a": {"A": 2}, "RQ1b": {"B": 2}},
+        }
+        s = self.op.summarise(rows, ["sf", "lc0"], sampling, n_boot=200, seed=1)
+        s = self.op.with_source_cells(s, rows, rows, ["sf", "lc0"], sampling, 200, 1)
+        self.assertEqual(sorted(s["by_source_cell"]), ["RQ1a", "RQ1b"])
+        a = s["by_source_cell"]["RQ1a"]
+        self.assertEqual(a["positions"], 2)
+        self.assertEqual(a["sampling"]["strata_population"], {"A": 300})
+        self.assertEqual(a["outcome"]["sampled"], 2)
+        self.assertIn(
+            s["outcome"]["class"],
+            (
+                "little_to_gain",
+                "room_under_both_judges",
+                "judge_dependent_or_unresolved",
+            ),
+        )
+        # the RQ1a positions alone: sf's bound is the mean of its two bounds there
+        self.assertAlmostEqual(
+            a["judges"]["sf"]["stats"]["arbiter_upper_bound_es"]["estimate"], 0.05
+        )
+
+    def test_tables_carry_the_class_and_the_cells(self):
+        import make_figures as mf
+
+        rows = self._rows()
+        for r, cell in zip(rows, ("RQ1a", "RQ1a", "RQ1b", "RQ1b")):
+            r["source"] = f"results/paper_v2/{cell}/engines.log"
+        sampling = {
+            "strata_population": {"A": 300, "B": 100},
+            "strata_sample": {"A": 2, "B": 2},
+            "strata_population_by_source": {"RQ1a": {"A": 300}, "RQ1b": {"B": 100}},
+            "strata_sample_by_source": {"RQ1a": {"A": 2}, "RQ1b": {"B": 2}},
+        }
+        s = self.op.summarise(rows, ["sf", "lc0"], sampling, n_boot=200, seed=1)
+        s = self.op.with_source_cells(s, rows, rows, ["sf", "lc0"], sampling, 200, 1)
+        s["method"]["expected_score"] = "logistic, 250 cp per unit of log-odds"
+        with tempfile.TemporaryDirectory() as d:
+            mf.write_oracle_tables(s, pathlib.Path(d))
+            md = (pathlib.Path(d) / "oracle.md").read_text()
+        self.assertIn("Class of outcome (protocol amendment 16 (b), (c)):", md)
+        self.assertIn("- Pooled: **", md)
+        self.assertIn("- RQ1a: ", md)
+        self.assertIn("| RQ1a | 2 | sf ", md)
+        self.assertIn("| RQ1b | 2 | sf ", md)
 
     def test_weights_fall_back_to_row_shares(self):
         rows = self._rows()
