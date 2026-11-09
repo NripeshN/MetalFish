@@ -1554,24 +1554,7 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
         write_oracle_tables(load(osum), tdir)
     stab = results / "RQ6b-R" / "stability.json"
     if stab.exists():
-        # amendment 16 (e): a judge passes with at least 0.8 equal verdicts and a correlation of
-        # at least 0.8
-        md = [
-            "| Judge | Positions judged on both machines | Same verdict | Correlation of the candidates' score difference | Passes (16 (e): both at least 0.8) |",
-            "| --- | --- | --- | --- | --- |",
-        ]
-        for name, st in load(stab).items():
-            sv = st.get("same_verdict")
-            r = st.get("delta_cp_correlation")
-            passes = (
-                "—"
-                if sv is None or r is None
-                else ("yes" if sv >= 0.8 and r >= 0.8 else "no")
-            )
-            md.append(
-                f"| {name} | {st.get('positions', 0)} | {f'{sv*100:.1f}%' if sv is not None else '—'} | {f'{r:.3f}' if r is not None else '—'} | {passes} |"
-            )
-        (tdir / "oracle_stability.md").write_text("\n".join(md) + "\n")
+        write_oracle_stability(load(stab), tdir)
 
 
 def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
@@ -2025,6 +2008,43 @@ def write_rq6d_contrast(pairs_by_cell: dict, tdir: pathlib.Path):
     (tdir / "rq6d.md").write_text("\n".join(md) + "\n")
 
 
+def write_oracle_stability(stab: dict, tdir: pathlib.Path):
+    """oracle_stability.md and .tex: each judge's runner verdicts against the workstation's on the
+    positions both machines judged; amendment 16 (e): a judge passes with at least 0.8 equal
+    verdicts and a correlation of at least 0.8."""
+    md = [
+        "| Judge | Positions judged on both machines | Same verdict | Correlation of the candidates' score difference | Passes (16 (e): both at least 0.8) |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    tex = [
+        "\\begin{tabular}{lrrrc}",
+        "\\toprule",
+        "Judge & Positions & Same verdict & Correlation & Passes \\\\",
+        "\\midrule",
+    ]
+    for name, st in stab.items():
+        sv = st.get("same_verdict")
+        r = st.get("delta_cp_correlation")
+        passes = (
+            "—"
+            if sv is None or r is None
+            else ("yes" if sv >= 0.8 and r >= 0.8 else "no")
+        )
+        sv_txt = f"{sv*100:.1f}%" if sv is not None else "—"
+        r_txt = f"{r:.3f}" if r is not None else "—"
+        md.append(
+            f"| {name} | {st.get('positions', 0)} | {sv_txt} | {r_txt} | {passes} |"
+        )
+        name_tex = str(name).replace("_", "\\_")
+        sv_tex = sv_txt.replace("%", "\\%")
+        tex.append(
+            f"{name_tex} & {st.get('positions', 0)} & {sv_tex} & {r_txt} & {passes} \\\\"
+        )
+    tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "oracle_stability.md").write_text("\n".join(md) + "\n")
+    (tdir / "oracle_stability.tex").write_text("\n".join(tex) + "\n")
+
+
 def write_oracle_tables(o: dict, tdir: pathlib.Path):
     """oracle.md, oracle.tex and oracle_cross.tex from the RQ6b summary of
     tools/paper/oracle_probe.py: per judge, the judges' agreement, and the cross-judge results of
@@ -2202,6 +2222,57 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
             )
         tex += ["\\bottomrule", "\\end{tabular}"]
         (tdir / "oracle_cross.tex").write_text("\n".join(tex) + "\n")
+    # amendment 16: the three bounds that decide the class, and the class, for all positions and
+    # for each source cell, with the class again at the halved and doubled constant (16 (g))
+    if o.get("outcome") is not None:
+        short = {
+            "little_to_gain": "L",
+            "room_under_both_judges": "R",
+            "judge_dependent_or_unresolved": "J",
+        }
+        keys = sorted(cross)
+        scales = [k for k in ("125", "500") if isinstance(sens.get(k), dict)]
+        cls = lambda oc: short.get((oc or {}).get("class"), "—")  # noqa: E731
+        tex = [
+            "\\begin{tabular}{lr"
+            + "l" * (1 + len(keys))
+            + "c" * (1 + len(scales))
+            + "}",
+            "\\toprule",
+            " & ".join(
+                ["Positions from", "$n$", "Consensus bound (ES)"]
+                + [
+                    f"{esc(cross[k]['selector'])} selects, {esc(cross[k]['scorer'])} scores"
+                    for k in keys
+                ]
+                + ["Class"]
+                + [f"Class at {s} cp" for s in scales]
+            )
+            + " \\\\",
+            "\\midrule",
+        ]
+        groups = [("all", o, "pooled")] + [(c, g, c) for c, g in cells.items()]
+        for label, g, skey in groups:
+            gag = g.get("agreement")
+            gcj = g.get("cross_judge") or {}
+            tex.append(
+                " & ".join(
+                    [
+                        esc(label),
+                        str(gag["n"] if gag else g["positions"]),
+                        ci(gag["stats"]["consensus_bound_es"]) if gag else "—",
+                    ]
+                    + [
+                        ci(gcj[k]["stats"]["cross_bound_es"]) if k in gcj else "—"
+                        for k in keys
+                    ]
+                    + [cls(g.get("outcome"))]
+                    + [cls(sens[s].get(skey)) for s in scales]
+                )
+                + " \\\\"
+            )
+        tex += ["\\bottomrule", "\\end{tabular}"]
+        (tdir / "oracle_cells.tex").write_text("\n".join(tex) + "\n")
 
 
 def main(argv=None):
