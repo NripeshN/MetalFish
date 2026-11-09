@@ -87,25 +87,17 @@ reported descriptively.
 
 ## §1, Results paragraph (replaces `\pending{the oracle study RQ6b-R: one sentence}`)
 
-**1.** Judged on the runners by Stockfish~19 and by Lc0 with the BT4 network, 600 disagreement
-positions from the workstation's RQ1a and RQ1b games leave little to gain for an arbiter choosing
-between the two root candidates (RQ6b-R; Section~\ref{sec:oracle}). The consensus bound is ⟨CONS⟩
-expected-score points per disagreement position, and it and both cross-judge bounds lie within the
-tie band of 0.01.
-
-**2.** Judged on the runners by Stockfish~19 and by Lc0 with the BT4 network, 600 disagreement
-positions from the workstation's RQ1a and RQ1b games leave room under both judges (RQ6b-R;
-Section~\ref{sec:oracle}). The consensus bound, ⟨CONS⟩ expected-score points per disagreement
-position, is an upper bound on what any arbiter between the two root candidates could gain, not a
-prediction of game results; it and both cross-judge bounds exceed the tie band of 0.01.
-
-**3a / 3b.** Judged on the runners, 600 disagreement positions from the workstation's RQ1a and RQ1b
-games give bounds of ⟨CONS⟩ where Stockfish~19 and Lc0 agree, ⟨X_SL⟩ when Stockfish selects and Lc0
-scores, and ⟨X_LS⟩ the other way round (RQ6b-R; Section~\ref{sec:oracle}). Whether an arbiter could
-gain therefore depends on the judge (3a) / is not resolved at this sample size (3b).
-
-**D.** The oracle study on the runners (RQ6b-R) was incomplete at the cut-off, and its results are
-reported descriptively (Section~\ref{sec:oracle}).
+- **1.** The oracle study on the runners (RQ6b-R) finds little to gain: the consensus bound is ⟨CONS⟩
+  expected-score points per disagreement position, and it and both cross-judge bounds lie within the
+  tie band of 0.01 (Section~\ref{sec:oracle}).
+- **2.** The oracle study on the runners (RQ6b-R) finds room under both judges: the consensus bound,
+  ⟨CONS⟩ expected-score points per disagreement position, is an upper bound on what any arbiter could
+  gain, and it and both cross-judge bounds exceed the tie band of 0.01 (Section~\ref{sec:oracle}).
+- **3a / 3b.** In the oracle study on the runners (RQ6b-R) the bounds are ⟨CONS⟩ where the judges
+  agree, and ⟨X_SL⟩ and ⟨X_LS⟩ across judges, so whether an arbiter could gain depends on the judge
+  (3a) / is not resolved at this sample size (3b) (Section~\ref{sec:oracle}).
+- **D.** The oracle study on the runners (RQ6b-R) was incomplete at the cut-off and is reported
+  descriptively (Section~\ref{sec:oracle}).
 
 ## Contribution 4 (replaces `\pending{the oracle study's results on the runners (RQ6b-R)}`)
 
@@ -130,69 +122,57 @@ reported descriptively (Section~\ref{sec:oracle}).
 
 ## §6 (replaces `\pending{oracle study RQ6b-R on the runners: …}`)
 
-**Common part (every class).**
+**Common part (every class).** Shares are given as point estimates, with their intervals in the
+table; bounds are given with their intervals.
 
-RQ6b-R has verdicts from both judges on ⟨N⟩ of the 600 sampled positions (Stockfish~19 on ⟨N_SF⟩, Lc0 on
-⟨N_LC⟩), from ⟨G⟩ games. A position without both verdicts enters only its judge's per-judge results.
-
-On the 74 positions the workstation had judged, the runners' verdicts were compared with the
-workstation's (Table~\ref{tab:oracle-stability}):
-- Stockfish~19 gave the same verdict on ⟨SF_SAME⟩ of them, with a correlation of ⟨SF_R⟩ between the
-  two machines' score differences between the candidates;
-- Lc0 gave the same verdict on ⟨LC_SAME⟩, with a correlation of ⟨LC_R⟩.
-
-⟨STABILITY⟩. Over all disagreement positions (Table~\ref{tab:oracle}):
-- Stockfish rated the alpha-beta move better on ⟨SF_AB⟩ of them and the MCTS move on ⟨SF_MCTS⟩;
-- Lc0 rated them ⟨LC_AB⟩ and ⟨LC_MCTS⟩;
-- the judges agreed on ⟨AGREE⟩ (Cohen's $\kappa = ⟨KAPPA⟩$).
-
-The bounds that decide the class (Table~\ref{tab:oracle-cells}) are:
-- ⟨CONS⟩ expected-score points per disagreement position where both judges agree;
-- ⟨X_SL⟩ when Stockfish selects and Lc0 scores;
-- ⟨X_LS⟩ when Lc0 selects and Stockfish scores.
-
-A judge that both selects and scores gives ⟨SF⟩ (Stockfish) and ⟨LC⟩ (Lc0); these per-judge bounds
-do not decide the class.
+RQ6b-R has verdicts from both judges on ⟨N⟩ of the 600 sampled positions, from ⟨G⟩ games (Stockfish~19
+judged ⟨N_SF⟩ and Lc0 ⟨N_LC⟩; a position without both verdicts enters only its judge's results). On the
+74 positions the workstation had judged, the runners' Stockfish~19 gave the same verdict on ⟨SF_SAME⟩
+and Lc0 on ⟨LC_SAME⟩, with correlations of ⟨SF_R⟩ and ⟨LC_R⟩ between the two machines' score
+differences (Table~\ref{tab:oracle-stability}); ⟨STABILITY⟩. Stockfish rated the alpha-beta move
+better on ⟨SF_AB⟩ of the disagreement positions and the MCTS move on ⟨SF_MCTS⟩, Lc0 on ⟨LC_AB⟩ and
+⟨LC_MCTS⟩, and the judges agreed on ⟨AGREE⟩ (Table~\ref{tab:oracle}). The bounds that decide the class
+are ⟨CONS⟩ expected-score points per disagreement position where both judges agree, ⟨X_SL⟩ when
+Stockfish selects and Lc0 scores, and ⟨X_LS⟩ the other way round (Table~\ref{tab:oracle-cells}); the
+per-judge bounds, in which one judge both selects and scores, are in Table~\ref{tab:oracle} and do not
+decide it.
 
 ⟨STABILITY⟩ is one of:
-- **both pass:** "Both judges pass amendment~16's criterion (both statistics at least 0.8); for
-  Stockfish the same two statistics show how sensitive its verdicts are to search depth (the same
-  60~s on 3 threads against 8)"
-- **one fails:** "⟨Judge⟩ fails amendment~16's criterion, so its runner verdicts are described as
-  those of its runner configuration, and the class below carries that qualification" (the other
-  judge's pass is stated as in the case above)
-- **both fail:** "Both judges fail amendment~16's criterion, so their runner verdicts are described
-  as those of their runner configurations, and the class below carries that qualification"
+- **both pass:** "both pass amendment~16's criterion, and for Stockfish the two statistics also show
+  how sensitive its verdicts are to search depth (3 threads against 8)"
+- **one fails:** "⟨Judge⟩ fails amendment~16's criterion, so its runner verdicts are those of its
+  runner configuration, and the class below carries that qualification" (the other judge's pass is
+  stated as above)
+- **both fail:** "both fail amendment~16's criterion, so their runner verdicts are those of their
+  runner configurations, and the class below carries that qualification"
 
 **The class.**
 
-- **1.** All three lie within the tie band of 0.01, so by amendment~16 the class is *little to
-  gain*. Judged by two related engines, an arbiter choosing between these two root candidates could
-  have gained little on these positions.
+- **1.** All three lie within the tie band of 0.01, so by amendment~16 the class is *little to gain*:
+  judged by two related engines, an arbiter choosing between these two root candidates could have
+  gained little on these positions.
 - **2.** All three exceed the tie band of 0.01, so by amendment~16 the class is *room under both
-  judges*. The consensus bound converts to ⟨ELO_CONS⟩~Elo per disagreement position. This is an
-  upper bound on what any arbiter between the two root candidates could gain there, not a
-  prediction of game results. The judges are related (Section~\ref{sec:threats}), so their agreement
-  counts as that of two related judges, not two independent confirmations.
+  judges*: the consensus bound, ⟨ELO_CONS⟩~Elo per disagreement position as a conversion, is an upper
+  bound on what any arbiter between the two root candidates could gain there, not a prediction of game
+  results, and the two judges are related (Section~\ref{sec:threats}).
 - **3a.** The bounds fall on both sides of the tie band of 0.01, so by amendment~16 the class is
-  *judge-dependent or unresolved*. Whether an arbiter could gain depends on the judge, and no
-  direction is claimed.
+  *judge-dependent or unresolved*: whether an arbiter could gain depends on the judge, and no direction
+  is claimed.
 - **3b.** At least one bound's interval contains 0.01, so by amendment~16 the class is
-  *judge-dependent or unresolved*. Whether an arbiter could gain is not resolved at this sample size,
+  *judge-dependent or unresolved*: whether an arbiter could gain is not resolved at this sample size,
   and no direction is claimed.
 - **D.** Not every stratum has a position with verdicts from both judges, so by amendment~16 (c) the
   results are descriptive and no class is assigned.
 
-**Per source cell (every class except D).** On the positions from RQ1a's games alone (⟨N_A⟩,
-reweighted by RQ1a's own strata), the three bounds are ⟨CONS_A⟩, ⟨X_SL_A⟩ and ⟨X_LS_A⟩, so the class
-is ⟨CLASS_A⟩. On RQ1b's (⟨N_B⟩), they are ⟨CONS_B⟩, ⟨X_SL_B⟩ and ⟨X_LS_B⟩, so the class is
-⟨CLASS_B⟩.
+**Per source cell (every class except D).** "On the positions from RQ1a's games alone the class is
+⟨CLASS_A⟩, and on RQ1b's ⟨CLASS_B⟩ (Table~\ref{tab:oracle-cells}, each reweighted by its own cell's
+strata)."
 
-**The conversion (every class except D).** Take the constant halved and doubled: 125 or 500~cp per
-unit of log-odds, with tie bands of 0.02 and 0.005.
-- If no class changes: "the classes are unchanged".
-- Otherwise: "the class ⟨of which positions⟩ becomes ⟨X⟩ at ⟨125 | 500⟩~cp, so it is sensitive to
-  the conversion".
+**The conversion (every class except D).**
+- If no class changes: "With the conversion constant halved or doubled (tie bands of 0.02 and 0.005),
+  the classes are unchanged."
+- Otherwise: "With the constant at ⟨125 | 500⟩~cp per unit of log-odds, the class ⟨of which positions⟩
+  becomes ⟨X⟩, so it is sensitive to the conversion."
 
 ## Conclusion (replaces `\pending{the oracle study's result on the runners (RQ6b-R)}`)
 
@@ -225,3 +205,8 @@ Added before any RQ6b-R output was read:
   appendix gives the same time in its Preceded column.
 - §6 gives each judge's count of positions judged, and how a position without both verdicts is handled
   (re-review NS-2).
+- §1 and §6 are shortened, so that the main text stays within the length ceiling once the numbers are
+  in (a trial fill with placeholder numbers counted 10,570 words against a ceiling of 10,450). The
+  shares become point estimates, with their intervals in the table. The per-cell bounds move to the
+  table, and the text gives the classes. No class rule, number or wording of a class's reading
+  changes.
