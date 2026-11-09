@@ -2096,6 +2096,37 @@ class OracleJudgingTest(unittest.TestCase):
             ],
         )
 
+    def test_os_builds_tables(self):
+        """Amendment 13: each cell by macOS build, with a dash below 100 pairs and RQ1a's rows
+        marked as computed after its interpretation."""
+        import make_figures as mf
+
+        rows = [
+            ("RQ1a", "macOS 27.2 beta", 514, 256, "-10.9 ± 12.4", True),
+            ("RQ1a_pilot", "macOS 27.2 beta", 100, 50, None, False),
+            ("RQ2b", "macOS 27.2", 250, 125, "-15.3 ± 18.5", False),
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            mf.write_os_builds(rows, pathlib.Path(d))
+            md = (pathlib.Path(d) / "os_builds.md").read_text().splitlines()
+            tex = (pathlib.Path(d) / "os_builds.tex").read_text().splitlines()
+        self.assertEqual(
+            md[2:],
+            [
+                "| RQ1a | macOS 27.2 beta | 514 | 256 | -10.9 ± 12.4 (added after the interpretation) |",
+                "| RQ1a_pilot | macOS 27.2 beta | 100 | 50 | — |",
+                "| RQ2b | macOS 27.2 | 250 | 125 | -15.3 ± 18.5 |",
+            ],
+        )
+        self.assertEqual(
+            tex[4:7],
+            [
+                "RQ1a & macOS 27.2 beta & 514 & 256 & $-10.9 \\pm 12.4$$^\\dagger$ \\\\",
+                "RQ1a\\_pilot & macOS 27.2 beta & 100 & 50 & — \\\\",
+                "RQ2b & macOS 27.2 & 250 & 125 & $-15.3 \\pm 18.5$ \\\\",
+            ],
+        )
+
     def test_stability_tables_apply_the_pass_criterion(self):
         """Amendment 16 (e): a judge passes with at least 0.8 equal verdicts and a correlation of at
         least 0.8; a judge without the two statistics gets a dash."""

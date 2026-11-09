@@ -1116,6 +1116,31 @@ def count_log_lines(path: pathlib.Path, patterns):
     return counts
 
 
+def write_os_builds(rows, tdir: pathlib.Path):
+    """os_builds.md and .tex: each cell by the macOS build its pairs started on (amendment 13).
+    rows: (cell, build, games, pairs, "x ± y" or None below 100 pairs, computed after the cell's
+    interpretation)."""
+    md = [
+        "| Cell | macOS build | Games | Pairs | Elo (95% CI), builds with at least 100 pairs |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    tex = [
+        "\\begin{tabular}{llrrl}",
+        "\\toprule",
+        "Cell & macOS build & Games & Pairs & Elo \\\\",
+        "\\midrule",
+    ]
+    for cell, build, games, pairs, est, late in rows:
+        note = " (added after the interpretation)" if late else ""
+        md.append(f"| {cell} | {build} | {games} | {pairs} | {est or '—'}{note} |")
+        cell_tex = str(cell).replace("_", "\\_")
+        est_tex = (tex_pm(est) + ("$^\\dagger$" if late else "")) if est else "—"
+        tex.append(f"{cell_tex} & {build} & {games} & {pairs} & {est_tex} \\\\")
+    tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "os_builds.md").write_text("\n".join(md) + "\n")
+    (tdir / "os_builds.tex").write_text("\n".join(tex) + "\n")
+
+
 def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
     """Final-reading analyses of amendment 12 and of the review (tools/paper/robustness.py):
     load regression, forfeit and opening variants with the load-sensitivity verdict, block
@@ -1264,10 +1289,7 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
     bpath = REPO / "docs" / "paper_v2" / "os_builds.json"
     if bpath.exists():
         builds = robustness.load_builds(str(bpath))
-        md = [
-            "| Cell | macOS build | Games | Pairs | Elo (95% CI), builds with at least 100 pairs |",
-            "| --- | --- | --- | --- | --- |",
-        ]
+        rows = []
         for c in cells:
             pgn = results / c["dir"] / "games.pgn"
             if not pgn.exists() or not c["arm_a"]:
@@ -1279,16 +1301,20 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
                 est = (
                     fmt_pm(st.get("elo"), st.get("elo_pm"))
                     if st.get("pairs", 0) >= 100
-                    else "—"
+                    else None
                 )
                 # RQ1a was interpreted before amendment 13 added this breakdown
-                note = (
-                    " (added after the interpretation)" if c["cell"] == "RQ1a" else ""
+                rows.append(
+                    (
+                        c["cell"],
+                        build,
+                        st["games"],
+                        st.get("pairs", 0),
+                        est,
+                        c["cell"] == "RQ1a",
+                    )
                 )
-                md.append(
-                    f"| {c['cell']} | {build} | {st['games']} | {st.get('pairs', 0)} | {est}{note} |"
-                )
-        (tdir / "os_builds.md").write_text("\n".join(md) + "\n")
+        write_os_builds(rows, tdir)
     (tdir / "robustness.tex").write_text("\n".join(rob_tex) + "\n")
     (tdir / "blocks_q.md").write_text("\n".join(blk_md) + "\n")
     (tdir / "adjudications.md").write_text("\n".join(adj_md) + "\n")
