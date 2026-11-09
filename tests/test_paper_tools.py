@@ -2411,5 +2411,86 @@ class OracleJudgeFailureTest(unittest.TestCase):
             )
 
 
+class DepositTest(unittest.TestCase):
+    """tools/paper/make_deposit.py for the v2 deposit: the runner cells with their health logs, both
+    oracle runs, the runner microbenchmarks, readings, probes and campaign record; the merge
+    watchers and the private directory stay out, and an existing deposit is never mixed in.
+    """
+
+    def test_v2_layout(self):
+        import make_deposit as md
+
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            res = root / "results" / "paper_v2"
+            files = {
+                "RQ1a/games.pgn": "pgn",
+                "RQ1a/summary.json": "{}",
+                "RQ1c-R/summary.json": "{}",
+                "RQ1c-R/vm_sampler.log": "health",
+                "RQ6b/oracle.jsonl": "{}",
+                "RQ6b-R/oracle.jsonl": "{}",
+                "RQ6b-R/oracle.jsonl.summary.json": "{}",
+                "RQ6b-R/stability.json": "{}",
+                "RQ6b-R/shards/0/runner.json": "{}",
+                "runner_micro/nn_latency.json": "{}",
+                "runner_readings/RQ1c-R/reading.md": "r",
+                "runner_readings/tools/__pycache__/x.pyc": "c",
+                "runner_probe/run_1/a.json": "{}",
+                "runner_campaign_log.txt": "log",
+                "loadgate.sh": "#!/bin/sh",
+                "automerge_pr1.sh": "#!/bin/sh",
+                "deposit/old.txt": "v1",
+                "private/secret.txt": "s",
+            }
+            for rel, text in files.items():
+                (res / rel).parent.mkdir(parents=True, exist_ok=True)
+                (res / rel).write_text(text)
+            for rel in (
+                ".github/workflows/paper-runner-cells.yml",
+                "results/ars_pipeline/tools/runner_driver.py",
+                "docs/paper_v2/README.md",
+                "tools/paper/x.py",
+            ):
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text("x")
+            saved = md.REPO, md.RESULTS
+            md.REPO, md.RESULTS = root, res
+            try:
+                out = root / "out"
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(
+                        md.main(["--out", str(out), "--version", "2.0.0"]), 0
+                    )
+                    # a second build into the same directory is refused
+                    self.assertEqual(md.main(["--out", str(out)]), 2)
+            finally:
+                md.REPO, md.RESULTS = saved
+            got = {str(p.relative_to(out)) for p in out.rglob("*") if p.is_file()}
+        for rel in (
+            "cells/RQ1a/games.pgn.gz",
+            "cells/RQ1c-R/vm_sampler.log",
+            "oracle/RQ6b/oracle.jsonl",
+            "oracle/RQ6b-R/oracle.jsonl",
+            "oracle/RQ6b-R/oracle.jsonl.summary.json",
+            "oracle/RQ6b-R/stability.json",
+            "oracle/RQ6b-R/shards/0/runner.json",
+            "micro_runner/nn_latency.json",
+            "readings/RQ1c-R/reading.md",
+            "runner_probe/run_1/a.json",
+            "runner/runner_campaign_log.txt",
+            "runner/paper-runner-cells.yml",
+            "runner/runner_driver.py",
+            "scripts/loadgate.sh",
+            "plan/README.md",
+            "tools/x.py",
+            "zenodo.json",
+            "CHECKSUMS.sha256",
+        ):
+            self.assertIn(rel, got)
+        for part in ("automerge", "__pycache__", "private", "old.txt", "cells/RQ6b"):
+            self.assertFalse(any(part in g for g in got), part)
+
+
 if __name__ == "__main__":
     unittest.main()
