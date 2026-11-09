@@ -153,5 +153,6 @@ designed so the paper is publishable whichever way the measurements come out.
   judge-dependent result, and what each changes in the abstract and conclusion. It adds results for
   each source cell (RQ1a's positions apart from RQ1b's), a rule for an incomplete run, and a pass
   criterion for the judges' stability on the 74 workstation positions (equal verdicts and
-  correlation, each at least 0.8). The pre-submission review of the v2 manuscript asked for all
-  three.
+  correlation, each at least 0.8). It also recomputes the class with the conversion constant halved
+  and doubled, and reads the two judges as related (Stockfish 19's networks are trained on Leela
+  data). The pre-submission review of the v2 manuscript asked for all of these.

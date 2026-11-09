@@ -836,5 +836,17 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     judge is stated with this qualification. For Stockfish the same two statistics also show how
     sensitive its verdicts are to search depth: the same 60 s on 3 threads against 8. The
     workstation rows enter no estimate.
-    (f) **Tools.** The per-cell results of (a) come from `oracle_probe.py --summarise-only` and are
-    tabulated by `make_figures.py`. Both changes are merged before the oracle is read.
+    (f) **Tools.** The per-cell results of (a), the classes of (b) and (c) and the sensitivity of
+    (g) come from `oracle_probe.py --summarise-only`, and `make_figures.py` tabulates them. Both
+    changes are merged before the oracle is read.
+    (g) **Sensitivity to the conversion.** The judges report on different scales. Stockfish 19
+    normalises its centipawns to its win-rate model; Lc0's default score type is WDL_mu. Both are
+    converted with one logistic constant (12 (d)), which is a convention. The classes of (b) are
+    therefore also computed with the constant halved and doubled (125 and 500 cp per unit of
+    log-odds), with the tie band scaled to match (0.02 and 0.005). Verdicts are decided in
+    centipawns, so they do not change. A class that changes with the constant is reported as
+    sensitive to the conversion.
+    (h) **Related judges.** Stockfish 19's networks are trained on data from the Leela Chess Zero
+    project, so the two judges' lineages are not independent. Agreement between them is read as
+    agreement of two related judges, not as two independent confirmations. Only the Stockfish judge
+    has the Syzygy tables (15 (a)).
