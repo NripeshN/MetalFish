@@ -2112,6 +2112,22 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
     cells = o.get("by_source_cell") or {}
     for cell, c in cells.items():
         md.append("- " + outcome_line(cell, c.get("outcome")))
+    sens = o.get("conversion_sensitivity") or {}
+    if sens.get("computed") is False:
+        md += [
+            "",
+            f"Sensitivity to the conversion (16 (g)): not computed ({sens.get('reason')}).",
+        ]
+    elif sens:
+        md += [
+            "",
+            "Sensitivity to the conversion (16 (g); the tie band scaled with the constant):",
+            "",
+        ]
+        for scale, entry in sens.items():
+            for name, oc in entry.items():
+                if name != "tie_band_es":
+                    md.append("- " + outcome_line(f"{scale} cp, {name}", oc))
     if cells:
         md += [
             "",

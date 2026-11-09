@@ -1958,6 +1958,50 @@ class OracleJudgingTest(unittest.TestCase):
             a["judges"]["sf"]["stats"]["arbiter_upper_bound_es"]["estimate"], 0.05
         )
 
+    def test_conversion_sensitivity_rescores_from_centipawns(self):
+        """Amendment 16 (g): the losses are recomputed from each judgment's centipawns with the
+        constant halved and doubled, the verdicts kept, and the class reported for each constant
+        with the tie band scaled to match."""
+        op = self.op
+        rows = []
+        for i, (ab, mc) in enumerate(
+            ((0.0, 40.0), (30.0, 0.0), (0.0, 0.0), (10.0, 60.0))
+        ):
+            r = {
+                "ab_move": "a",
+                "mcts_move": "m",
+                "selected": "a",
+                "stratum": "A",
+                "cluster": f"g{i}",
+                "source": "results/paper_v2/RQ1a/engines.log",
+                "judges": {},
+            }
+            for name in ("sf", "lc0"):
+                j = {"cand_cp": {"a": ab, "m": mc}, "best_cp": max(ab, mc)}
+                r["judges"][name] = op.score_candidates(j, r, 10.0, 250.0)
+            rows.append(r)
+        again = op.rescored(rows, 125.0)
+        j0, k0 = rows[0]["judges"]["sf"], again[0]["judges"]["sf"]
+        self.assertEqual(j0["verdict"], k0["verdict"])
+        self.assertAlmostEqual(
+            k0["loss_ab_es"], op.logistic(40.0, 125.0) - op.logistic(0.0, 125.0)
+        )
+        self.assertGreater(k0["loss_ab_es"], j0["loss_ab_es"])
+        sampling = {
+            "strata_population": {"A": 100},
+            "strata_sample": {"A": 4},
+            "strata_population_by_source": {"RQ1a": {"A": 100}},
+            "strata_sample_by_source": {"RQ1a": {"A": 4}},
+        }
+        s = op.summarise(rows, ["sf", "lc0"], sampling, n_boot=100, seed=1)
+        s = op.with_source_cells(s, rows, rows, ["sf", "lc0"], sampling, 100, 1)
+        sens = s["conversion_sensitivity"]
+        self.assertEqual(sorted(sens), ["125", "500"])
+        self.assertAlmostEqual(sens["125"]["tie_band_es"], 0.02)
+        self.assertAlmostEqual(sens["500"]["tie_band_es"], 0.005)
+        self.assertIn("class", sens["125"]["pooled"])
+        self.assertIn("RQ1a", sens["500"])
+
     def test_tables_carry_the_class_and_the_cells(self):
         import make_figures as mf
 
@@ -1981,6 +2025,8 @@ class OracleJudgingTest(unittest.TestCase):
         self.assertIn("- RQ1a: ", md)
         self.assertIn("| RQ1a | 2 | sf ", md)
         self.assertIn("| RQ1b | 2 | sf ", md)
+        # the synthetic judgments carry no centipawns, so 16 (g) is reported as not computed
+        self.assertIn("Sensitivity to the conversion (16 (g)): not computed", md)
 
     def test_weights_fall_back_to_row_shares(self):
         rows = self._rows()

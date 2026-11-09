@@ -632,23 +632,48 @@ def cross_judge(
     return out
 
 
-def tie_band(stat: Optional[Dict]) -> Optional[str]:
+def tie_band(stat: Optional[Dict], band: float = TIE_BAND_ES) -> Optional[str]:
     """Amendment 16 (b): "within" the tie band when the 95% interval's upper limit is at most
-    TIE_BAND_ES, "beyond" when its lower limit exceeds it, "neither" otherwise; None without an
+    `band`, "beyond" when its lower limit exceeds it, "neither" otherwise; None without an
     interval."""
     ci = (stat or {}).get("ci95")
     if not ci:
         return None
     lo, hi = ci
-    if hi <= TIE_BAND_ES:
+    if hi <= band:
         return "within"
-    if lo > TIE_BAND_ES:
+    if lo > band:
         return "beyond"
     return "neither"
 
 
+def rescored(rows: List[Dict], cp_scale: float) -> List[Dict]:
+    """Copies of `rows` whose judgments' expected-score losses use another logistic constant
+    (amendment 16 (g)), from the centipawns each judgment keeps; verdicts, decided in centipawns,
+    are unchanged."""
+    out = []
+    for r in rows:
+        judges = {}
+        for name, j in r["judges"].items():
+            j = dict(j)
+            if "verdict" in j:
+                best = max(j["best_cp"], j["ab_cp"], j["mcts_cp"])
+                j["loss_ab_es"] = logistic(best, cp_scale) - logistic(
+                    j["ab_cp"], cp_scale
+                )
+                j["loss_mcts_es"] = logistic(best, cp_scale) - logistic(
+                    j["mcts_cp"], cp_scale
+                )
+            judges[name] = j
+        out.append(dict(r, judges=judges))
+    return out
+
+
 def outcome_class(
-    summary: Dict, strata_sampled: Dict[str, int], n_sampled: int
+    summary: Dict,
+    strata_sampled: Dict[str, int],
+    n_sampled: int,
+    tie_band_es: float = TIE_BAND_ES,
 ) -> Dict:
     """Amendment 16 (b), (c): the class of oracle outcome, decided by the consensus bound and the
     two cross-judge bounds against the tie band: "little_to_gain" (all within), "room_under_both_
@@ -657,7 +682,7 @@ def outcome_class(
     with both verdicts. The per-judge bounds do not enter."""
     ag = summary.get("agreement")
     cj = summary.get("cross_judge") or {}
-    out: Dict = {"tie_band_es": TIE_BAND_ES, "sampled": n_sampled}
+    out: Dict = {"tie_band_es": tie_band_es, "sampled": n_sampled}
     if not ag or len(cj) != 2:
         out.update(
             {"class": None, "reason": "no two judges with verdicts on common positions"}
@@ -676,9 +701,12 @@ def outcome_class(
             }
         )
         return out
-    bands = {"consensus": tie_band(ag["stats"].get("consensus_bound_es"))}
+    bands = {"consensus": tie_band(ag["stats"].get("consensus_bound_es"), tie_band_es)}
     bands.update(
-        {k: tie_band(v["stats"].get("cross_bound_es")) for k, v in sorted(cj.items())}
+        {
+            k: tie_band(v["stats"].get("cross_bound_es"), tie_band_es)
+            for k, v in sorted(cj.items())
+        }
     )
     out["bands"] = bands
     found = set(bands.values())
@@ -702,10 +730,13 @@ def with_source_cells(
     sampling: Dict,
     n_boot: int,
     seed: int,
+    tie_cp: float = 10.0,
+    cp_scale: float = 250.0,
 ) -> Dict:
-    """Amendment 16 (a)-(c): every statistic again for each source cell's positions, reweighted by
-    that cell's own stratum population, and the class of outcome, pooled and per cell.
-    """
+    """Amendment 16 (a)-(c), (g): every statistic again for each source cell's positions,
+    reweighted by that cell's own stratum population; the class of outcome, pooled and per cell;
+    and the class again with the conversion constant halved and doubled, the tie band scaled
+    with it (tie_cp at an even position)."""
     by_pop = sampling.get("strata_population_by_source")
     if by_pop:
         summary["by_source_cell"] = {}
@@ -725,11 +756,46 @@ def with_source_cells(
                 cs,
                 cell_sampling["strata_sample"],
                 sum(cell_sampling["strata_sample"].values()),
+                tie_cp / cp_scale / 4,
             )
             summary["by_source_cell"][cell] = cs
     summary["outcome"] = outcome_class(
-        summary, sampling.get("strata_sample") or {}, len(sample)
+        summary,
+        sampling.get("strata_sample") or {},
+        len(sample),
+        tie_cp / cp_scale / 4,
     )
+    groups = [("pooled", rows, sampling, len(sample))]
+    for cell, cs in sorted((summary.get("by_source_cell") or {}).items()):
+        groups.append(
+            (
+                cell,
+                [r for r in rows if source_cell(r) == cell],
+                cs["sampling"],
+                cs["outcome"]["sampled"],
+            )
+        )
+    sens: Dict[str, Dict] = {}
+    cp_fields = all(
+        all(k in j for k in ("best_cp", "ab_cp", "mcts_cp"))
+        for r in rows
+        for j in r["judges"].values()
+        if "verdict" in j
+    )
+    for scale in (cp_scale / 2, cp_scale * 2) if cp_fields else ():
+        entry: Dict = {"tie_band_es": tie_cp / scale / 4}
+        for name, group_rows, group_sampling, n in groups:
+            gs = summarise(
+                rescored(group_rows, scale), judge_names, group_sampling, n_boot, seed
+            )
+            entry[name] = outcome_class(
+                gs, group_sampling.get("strata_sample") or {}, n, tie_cp / scale / 4
+            )
+        sens[f"{scale:g}"] = entry
+    summary["conversion_sensitivity"] = sens or {
+        "computed": False,
+        "reason": "judgments without their centipawn scores",
+    }
     return summary
 
 
@@ -1186,7 +1252,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 3 if incomplete else 0
     summary = summarise(rows, judge_names, sampling, args.bootstrap, args.seed)
     summary = with_source_cells(
-        summary, rows, sample, judge_names, sampling, args.bootstrap, args.seed
+        summary,
+        rows,
+        sample,
+        judge_names,
+        sampling,
+        args.bootstrap,
+        args.seed,
+        args.tie_cp,
+        args.cp_scale,
     )
     summary["judging"] = judging
     summary["method"].update(
