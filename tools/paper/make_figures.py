@@ -1587,11 +1587,13 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
     """Tables of the runner cells (protocol amendment 15): runner_cells.md/.tex with the columns of
     cells.md, and runner_analyses.md with the contrasts the runner was given baselines for
     (RQ6d-R minus RQ1a-R; RQ2c-R direct against RQ2b-R + RQ2a-R; shared openings), and per cell the
-    block estimates with Cochran's Q over its blocks and a block bootstrap, the forfeit variants,
+    block estimates with Cochran's Q over its blocks, a block bootstrap and the mean of the block
+    estimates with a Student t interval over the blocks (amendment 17), the forfeit variants,
     the games with a clock overrun and the cell under the registered referee rule (cells played
     with a time margin, amendment 15 (j)), the adjudications and the estimate by runner image
-    (images with at least 100 pairs). runner_contrasts.tex and runner_sensitivity.tex hold the
-    same for the paper (the sensitivity table without the block estimates and the adjudications).
+    (images with at least 100 pairs). Each contrast is also formed block by block, with the same
+    t interval (amendment 17). runner_contrasts.tex and runner_sensitivity.tex hold the same for
+    the paper (the sensitivity table without the block estimates and the adjudications).
     None of the workstation's host-load analyses applies to a runner (amendment 15 (e)).
     """
     sys.path.insert(0, str(REPO / "tools" / "paper"))
@@ -1634,11 +1636,13 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
     defs = {d["id"]: d for d in spec["cells"]}
     pairs_by_cell = {}
     blk = [
-        "| Cell | Block estimates | Cochran's Q (df) | p | Block-bootstrap 95% interval | Forfeits | Forfeit pairs removed | Forfeits as draws | Games with a clock overrun (first / second arm) | Registered referee, no time margin | Adjudicated draws / wins (first / second arm) | By runner image (pairs) |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Cell | Block estimates | Cochran's Q (df) | p | Block-bootstrap 95% interval | Mean of the block estimates, t interval (df) | Forfeits | Forfeit pairs removed | Forfeits as draws | Games with a clock overrun (first / second arm) | Registered referee, no time margin | Adjudicated draws / wins (first / second arm) | By runner image (pairs) |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     # per cell: its columns and its estimate by runner image (the tabular is composed below)
     sens, blocks_rows = [], []
+    # per cell: every block's Elo estimate in block order, None where a block has none
+    block_elo = {}
     for c in cells:
         d = results / c["dir"]
         if not (d / "games.pgn").exists() or not c["arm_a"] or c["cell"] not in defs:
@@ -1670,6 +1674,15 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
             blocks.append(next(b for b, first, end in ranges if first <= p["i"] < end))
         q = robustness.cochran_q(ests, ses)
         boot = robustness.chunk_bootstrap(pairs, blocks)
+        block_elo[c["cell"]] = [
+            (
+                st["elo"]
+                if st.get("elo") is not None and math.isfinite(st["elo"])
+                else None
+            )
+            for st in per_block
+        ]
+        tint = robustness.block_t_interval(block_elo[c["cell"]])
         ff = robustness.forfeit_variants(games, c["arm_a"])
         # a cell played with fastchess's time margin, scored as the registered referee (no margin)
         # would have scored it: lost by the arm that overran its clock first (amendment 15 (j));
@@ -1712,33 +1725,47 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
         q_txt = f"{q['q']:.2f} ({q['df']})" if q else "—"
         p_txt = f"{q['p']:.3f}" if q else "—"
         boot_txt = f"[{boot['ci95'][0]:+.1f}, {boot['ci95'][1]:+.1f}]" if boot else "—"
+        t_txt = fmt_pm(tint["mean"], tint["pm"]) if tint else "—"
         est_txt = ", ".join(f"{e:+.1f}" for e in ests)
         removed = fmt_pm(ff["removed"].get("elo"), ff["removed"].get("elo_pm"))
         drawn = fmt_pm(ff["as_draws"].get("elo"), ff["as_draws"].get("elo_pm"))
         adj_txt = f"{adj['draws']} / {adj['wins'].get(c['arm_a'], 0)} / {adj['wins'].get(c['arm_b'], 0)}"
         blocks_rows.append((c["cell"], per_block, adj_txt))
         blk.append(
-            f"| {c['cell']} | {est_txt} | {q_txt} | {p_txt} | {boot_txt} | {ff['forfeit_games']} | "
+            f"| {c['cell']} | {est_txt} | {q_txt} | {p_txt} | {boot_txt} | "
+            f"{t_txt + (' (' + str(tint['df']) + ')' if tint else '')} | {ff['forfeit_games']} | "
             f"{removed} | {drawn} | {over_txt} | {strict_txt} | {adj_txt} | {'; '.join(by_image) or '—'} |"
         )
         sens.append(
             (
                 [c["cell"], q_txt, p_txt, f"${boot_txt}$" if boot else boot_txt]
+                + [tex_pm(t_txt)]
                 + [str(ff["forfeit_games"]), over_txt, tex_pm(strict_txt)],
                 image_est,
             )
         )
     con = [
-        "| Contrast (runner cells, shared openings) | Elo | Shared openings |",
-        "| --- | --- | --- |",
+        "| Contrast (runner cells, shared openings) | Elo | Shared openings | Paired by block, t interval (blocks) |",
+        "| --- | --- | --- | --- |",
     ]
+
+    def paired(terms):
+        # the contrast formed block by block, with a t interval over the blocks (amendment 17)
+        if any(cell not in block_elo for cell, _ in terms):
+            return "—"
+        r = robustness.block_paired_contrast(
+            [(block_elo[cell], coef) for cell, coef in terms]
+        )
+        return f"{fmt_pm(r['mean'], r['pm'])} ({r['blocks']})" if r else "—"
+
     if "RQ6d-R" in pairs_by_cell and "RQ1a-R" in pairs_by_cell:
         r = robustness.linear_combination(
             [(pairs_by_cell["RQ6d-R"], 1.0), (pairs_by_cell["RQ1a-R"], -1.0)]
         )
         if r:
             con.append(
-                f"| RQ6d-R minus RQ1a-R (hints and verification off) | {fmt_pm(r['elo'], r['elo_pm'])} | {r['shared_openings'][0]} |"
+                f"| RQ6d-R minus RQ1a-R (hints and verification off) | {fmt_pm(r['elo'], r['elo_pm'])} | {r['shared_openings'][0]} | "
+                f"{paired([('RQ6d-R', 1.0), ('RQ1a-R', -1.0)])} |"
             )
     if "RQ2a-R" in pairs_by_cell and "RQ2b-R" in pairs_by_cell:
         der = robustness.linear_combination(
@@ -1746,7 +1773,8 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
         )
         if der:
             con.append(
-                f"| RQ2c-R derived (RQ2b-R + RQ2a-R) | {fmt_pm(der['elo'], der['elo_pm'])} | {der['shared_openings'][0]} |"
+                f"| RQ2c-R derived (RQ2b-R + RQ2a-R) | {fmt_pm(der['elo'], der['elo_pm'])} | {der['shared_openings'][0]} | "
+                f"{paired([('RQ2b-R', 1.0), ('RQ2a-R', 1.0)])} |"
             )
         if "RQ2c-R" in pairs_by_cell:
             diff = robustness.linear_combination(
@@ -1758,31 +1786,33 @@ def write_runner_tables(cells, results: pathlib.Path, out: pathlib.Path):
             )
             if diff:
                 con.append(
-                    f"| derived minus direct RQ2c-R | {fmt_pm(diff['elo'], diff['elo_pm'])} | {', '.join(map(str, diff['shared_openings']))} |"
+                    f"| derived minus direct RQ2c-R | {fmt_pm(diff['elo'], diff['elo_pm'])} | {', '.join(map(str, diff['shared_openings']))} | "
+                    f"{paired([('RQ2b-R', 1.0), ('RQ2a-R', 1.0), ('RQ2c-R', -1.0)])} |"
                 )
     (tdir / "runner_analyses.md").write_text("\n".join(con + [""] + blk) + "\n")
     ctex = [
-        "\\begin{tabular}{lrl}",
+        "\\begin{tabular}{lrlr}",
         "\\toprule",
-        "Contrast (shared openings) & Elo & Openings \\\\",
+        "Contrast (shared openings) & Elo & Openings & Paired by block (blocks) \\\\",
         "\\midrule",
     ]
     for row in con[2:]:
-        name, elo, n = [x.strip() for x in row.strip("|").split("|")]
-        ctex.append(f"{name} & {tex_pm(elo)} & {n} \\\\")
+        name, elo, n, blockwise = [x.strip() for x in row.strip("|").split("|")]
+        ctex.append(f"{name} & {tex_pm(elo)} & {n} & {tex_pm(blockwise)} \\\\")
     ctex += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "runner_contrasts.tex").write_text("\n".join(ctex) + "\n")
     # one column per runner image, headed by its version, so that no row repeats the images' names;
     # a dash alone: the cell played no block on that image
     imgs = sorted({i for _, est in sens for i in est})
-    stex = ["\\begin{tabular}{lrrrrrl" + "l" * len(imgs) + "}", "\\toprule"]
+    stex = ["\\begin{tabular}{lrrrrrrl" + "l" * len(imgs) + "}", "\\toprule"]
     if imgs:
         stex += [
-            "& " * 7
+            "& " * 8
             + f"\\multicolumn{{{len(imgs)}}}{{c}}{{By runner image (pairs)}} \\\\",
-            f"\\cmidrule(l){{8-{7 + len(imgs)}}}",
+            f"\\cmidrule(l){{9-{8 + len(imgs)}}}",
         ]
-    head = ["Cell", "$Q$ (df)", "$p$", "Block bootstrap", "Forfeits", "Overruns"]
+    head = ["Cell", "$Q$ (df)", "$p$", "Block bootstrap", "Blocks, $t$ interval"]
+    head += ["Forfeits", "Overruns"]
     head += ["No margin"] + [i.replace("macos26 ", "") for i in imgs]
     stex += [" & ".join(head) + " \\\\", "\\midrule"]
     stex += [
@@ -1868,6 +1898,63 @@ def write_runner_rates(cells, results: pathlib.Path, out: pathlib.Path):
             f"{c['cell']}: {v['moves']} of {enabled} transformer-enabled trace records with a unique position matched a PGN move."
         )
     (tdir / "runner_rates.md").write_text("\n".join(md + [""] + notes) + "\n")
+
+
+def write_agreement_counter(cells, results: pathlib.Path, out: pathlib.Path):
+    """agreement.md/.tex (amendment 17 (e)): per cell with traced hybrid moves, its
+    transformer-enabled moves (the trace records that are not time-safety moves), how many ended
+    with the MCTS playout counter at or above 100 and at or above 150, and how many the agreement
+    rule ended early (engine log: "engines agree, stopping early"). The rule reads that counter
+    against 100, or 150 in positions the classifier rates as highly complex; the trace does not
+    record the position's class, so the share of moves on which the counter reached the rule's
+    threshold lies between the two. Streams every trace record and engine log, so it runs only
+    for the final reading (--final-analyses)."""
+    sys.path.insert(0, str(REPO / "tools" / "paper"))
+    import robustness  # noqa: E402
+
+    tdir = out / "tables"
+    tdir.mkdir(parents=True, exist_ok=True)
+    stop = "engines agree, stopping early"
+    md = [
+        "| Cell | Transformer-enabled moves | Playout counter at least 100 | Playout counter at least 150 | Ended early by the agreement rule |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    tex = [
+        "\\begin{tabular}{lrrrr}",
+        "\\toprule",
+        "Cell & Enabled moves & Counter $\\geq 100$ & Counter $\\geq 150$ & Ended early \\\\",
+        "\\midrule",
+    ]
+    notes = []
+    for c in cells:
+        d = results / c["dir"]
+        mj = d / "moves.jsonl"
+        if not (c["telemetry"] or {}).get("moves_total") or not mj.exists():
+            continue
+        with open(mj) as fh:
+            v = robustness.playout_counter_shares(map(json.loads, fh))
+        n = v["with_counter"]
+        if not n:
+            continue
+        if n != v["enabled"]:
+            notes.append(
+                f"{c['cell']}: {v['enabled'] - n} of {v['enabled']} transformer-enabled trace "
+                "records carry no playout counter; the counter's shares are over the others."
+            )
+        logc = count_log_lines(d / "engines.log", [stop])
+        cols = [f"{k} ({100.0 * k / n:.1f}%)" for k in v["reached"].values()]
+        cols.append(
+            f"{logc[stop]} ({100.0 * logc[stop] / v['enabled']:.1f}%)" if logc else "—"
+        )
+        md.append(f"| {c['cell']} | {v['enabled']} | " + " | ".join(cols) + " |")
+        tex.append(
+            f"{c['cell']} & {v['enabled']} & "
+            + " & ".join(x.replace("%", "\\%") for x in cols)
+            + " \\\\"
+        )
+    tex += ["\\bottomrule", "\\end{tabular}"]
+    (tdir / "agreement.md").write_text("\n".join(md + [""] + notes) + "\n")
+    (tdir / "agreement.tex").write_text("\n".join(tex).replace("_", "\\_") + "\n")
 
 
 def tex_pm(s: str) -> str:
@@ -2337,6 +2424,7 @@ def main(argv=None):
     if args.final_analyses:
         write_final_analyses(cells, results, out)
         write_runner_rates(runner_cells, results, out)
+        write_agreement_counter(cells + runner_cells, results, out)
     print(
         f"cells: {len(cells)}, runner cells: {len(runner_cells)}, gates: {len(gates)} -> {out/'tables'}, {out/'figures'}"
     )

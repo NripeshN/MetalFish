@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "tools" / "paper"))
 
 import parse_hybrid_trace  # noqa: E402
 import penta_stats  # noqa: E402
+import robustness  # noqa: E402
 
 
 def pgn_game(
@@ -1332,10 +1333,32 @@ class RunnerTablesTest(unittest.TestCase):
             ana = (root / "out" / "tables" / "runner_analyses.md").read_text()
             self.assertRegex(
                 ana,
-                r"\| RQ6d-R minus RQ1a-R \(hints and verification off\) \| [+-][0-9.]+ ± [0-9.]+ \| 12 \|",
+                r"\| RQ6d-R minus RQ1a-R \(hints and verification off\) \| [+-][0-9.]+ ± [0-9.]+ \| 12 \| "
+                r"[+-][0-9.]+ ± [0-9.]+ \(2\) \|",
             )
             self.assertRegex(
                 ana, r"\| RQ1a-R \| [+-][0-9.]+, [+-][0-9.]+ \| [0-9.]+ \(1\) \|"
+            )
+            # the block-level interval (amendment 17): the mean of the two block estimates with
+            # a t interval on 1 degree of freedom, and the contrast formed block by block
+            row = next(r for r in ana.splitlines() if r.startswith("| RQ1a-R |"))
+            ests = [float(x) for x in row.split(" | ")[1].split(", ")]
+            want = robustness.block_t_interval(ests)
+            self.assertAlmostEqual(want["pm"], 12.7062 * abs(ests[0] - ests[1]) / 2, 2)
+            self.assertEqual(
+                row.split(" | ")[5],
+                f"{mf.fmt_pm(sum(ests) / 2, want['pm'])} (1)",
+            )
+            other = next(r for r in ana.splitlines() if r.startswith("| RQ6d-R |"))
+            ests_d = [float(x) for x in other.split(" | ")[1].split(", ")]
+            diffs = [d - a for d, a in zip(ests_d, ests)]
+            con_row = next(r for r in ana.splitlines() if "RQ6d-R minus RQ1a-R" in r)
+            mean, pm = re.match(
+                r"([+-][0-9.]+) ± ([0-9.]+) \(2\)", con_row.split(" | ")[3]
+            ).groups()
+            self.assertAlmostEqual(float(mean), sum(diffs) / 2, delta=0.11)
+            self.assertAlmostEqual(
+                float(pm), 12.7062 * abs(diffs[0] - diffs[1]) / 2, delta=1.5
             )
             self.assertIn("macos26 A: — (6); macos26 B: — (6)", ana)
             self.assertIn("| macos26 B: — (12) |", ana)
@@ -1352,22 +1375,26 @@ class RunnerTablesTest(unittest.TestCase):
             con = (root / "out" / "tables" / "runner_contrasts.tex").read_text()
             self.assertRegex(
                 con,
-                r"RQ6d-R minus RQ1a-R \(hints and verification off\) & \$[+-][0-9.]+ \\pm [0-9.]+\$ & 12 \\\\",
+                r"RQ6d-R minus RQ1a-R \(hints and verification off\) & \$[+-][0-9.]+ \\pm [0-9.]+\$ & 12 & "
+                r"\$[+-][0-9.]+ \\pm [0-9.]+\$ \(2\) \\\\",
             )
             sens = (root / "out" / "tables" / "runner_sensitivity.tex").read_text()
             # one column per runner image, headed by its version
-            self.assertTrue(sens.startswith("\\begin{tabular}{lrrrrrlll}"))
+            self.assertTrue(con.startswith("\\begin{tabular}{lrlr}"))
+            self.assertTrue(sens.startswith("\\begin{tabular}{lrrrrrrlll}"))
             self.assertTrue(sens.rstrip().endswith("\\end{tabular}"))
             self.assertIn(
-                "& & & & & & & \\multicolumn{2}{c}{By runner image (pairs)} \\\\\n"
-                "\\cmidrule(l){8-9}\n",
+                "& & & & & & & & \\multicolumn{2}{c}{By runner image (pairs)} \\\\\n"
+                "\\cmidrule(l){9-10}\n",
                 sens,
             )
             self.assertIn("& No margin & A & B \\\\", sens)
+            self.assertIn("& Block bootstrap & Blocks, $t$ interval & Forfeits &", sens)
             row = next(r for r in sens.splitlines() if r.startswith("RQ1a-R &"))
             self.assertRegex(
                 row,
-                r"^RQ1a-R & [0-9.]+ \(1\) & [0-9.]+ & \$\[[+-][0-9.]+, [+-][0-9.]+\]\$ & 0 & 1 \(1 / 0\) & "
+                r"^RQ1a-R & [0-9.]+ \(1\) & [0-9.]+ & \$\[[+-][0-9.]+, [+-][0-9.]+\]\$ & "
+                r"\$[+-][0-9.]+ \\pm [0-9.]+\$ & 0 & 1 \(1 / 0\) & "
                 r"\$[+-][0-9.]+ \\pm [0-9.]+\$( \(time-sensitive\))? & — \(6\) & — \(6\) \\\\$",
             )
             row = next(r for r in sens.splitlines() if r.startswith("RQ6d-R &"))
@@ -1656,6 +1683,105 @@ class RunnerTablesTest(unittest.TestCase):
             md,
         )
         self.assertFalse(any(r.startswith("| RQ2a-R") for r in md))
+
+
+class BlockIntervalTest(unittest.TestCase):
+    """Pins the block-level interval and the block-paired contrast of tools/paper/robustness.py
+    (amendment 17): the blocks are the units, with a Student t interval over them."""
+
+    def test_t_quantile_matches_the_table(self):
+        for df, want in ((1, 12.7062), (2, 4.3027), (5, 2.5706), (9, 2.2622)):
+            self.assertAlmostEqual(robustness.t_quantile(df), want, 4)
+        self.assertAlmostEqual(robustness.t_quantile(10**6), 1.96, 3)
+        self.assertAlmostEqual(robustness.t_two_sided_tail(2.2622, 9), 0.05, 4)
+
+    def test_block_t_interval(self):
+        v = robustness.block_t_interval([1.0, 2.0, 3.0, 4.0])
+        self.assertAlmostEqual(v["mean"], 2.5)
+        # sd 1.2910, t(3) 3.1824: 3.1824 x 1.2910 / 2
+        self.assertAlmostEqual(v["pm"], 2.0543, 3)
+        self.assertEqual((v["blocks"], v["df"]), (4, 3))
+        # one block, or a block without an estimate: no interval
+        self.assertIsNone(robustness.block_t_interval([1.0]))
+        self.assertIsNone(robustness.block_t_interval([1.0, None, 2.0]))
+        self.assertIsNone(robustness.block_t_interval([1.0, float("inf")]))
+
+    def test_block_paired_contrast(self):
+        a, b = [10.0, 20.0, 30.0], [5.0, 25.0, 20.0]
+        v = robustness.block_paired_contrast([(a, 1.0), (b, -1.0)])
+        want = robustness.block_t_interval([5.0, -5.0, 10.0])
+        self.assertAlmostEqual(v["mean"], want["mean"])
+        self.assertAlmostEqual(v["pm"], want["pm"])
+        # a shift shared by the blocks of both cells cancels; one in a single cell does not
+        shifted = robustness.block_paired_contrast(
+            [([x + 7.0 for x in a], 1.0), ([x + 7.0 for x in b], -1.0)]
+        )
+        self.assertAlmostEqual(shifted["mean"], v["mean"])
+        self.assertAlmostEqual(shifted["pm"], v["pm"])
+        # cells with different numbers of blocks, or a missing block estimate
+        self.assertIsNone(robustness.block_paired_contrast([(a, 1.0), (b[:2], -1.0)]))
+        self.assertIsNone(
+            robustness.block_paired_contrast([(a, 1.0), ([5.0, None, 20.0], -1.0)])
+        )
+        self.assertIsNone(robustness.block_paired_contrast([]))
+
+    def test_agreement_counter_table(self):
+        """How many transformer-enabled moves ended with the playout counter at the agreement
+        rule's thresholds (100, or 150 in highly complex positions), and how many the rule ended
+        early; time-safety moves are not counted."""
+        import make_figures as mf
+
+        recs = (
+            [
+                {"reason": "engines_agree", "mcts_playouts": n}
+                for n in (99, 100, 149, 150)
+            ]
+            + [{"reason": "ab_default", "mcts_playouts": 400}]
+            + [{"reason": "ab_fallback_time_safety", "mcts_playouts": 0}] * 3
+            # a record without the counter is left out of the counter's shares
+            + [{"reason": "ab_default"}]
+        )
+        v = robustness.playout_counter_shares(recs)
+        self.assertEqual(
+            v, {"enabled": 6, "with_counter": 5, "reached": {100: 4, 150: 2}}
+        )
+        log = (
+            "info string Hybrid: engines agree, stopping early at 812ms\n"
+            "info string Hybrid: time safety\n"
+            "info string Hybrid: engines agree, stopping early at 300ms\n"
+            "info string Hybrid: engines agree, stopping early at 301ms\n"
+        )
+        with tempfile.TemporaryDirectory() as d:
+            results, out = pathlib.Path(d) / "results", pathlib.Path(d) / "out"
+            for cell in ("RQ1a", "RQ1a-R", "RQ2a-R"):
+                (results / cell).mkdir(parents=True)
+            (results / "RQ1a" / "moves.jsonl").write_text(
+                "".join(json.dumps(r) + "\n" for r in recs)
+            )
+            (results / "RQ1a" / "engines.log").write_text(log)
+            # a cell without an engine log: the counter's shares only
+            (results / "RQ1a-R" / "moves.jsonl").write_text(
+                "".join(json.dumps(r) + "\n" for r in recs[:4])
+            )
+            cells = [
+                {"cell": "RQ1a", "dir": "RQ1a", "telemetry": {"moves_total": 9}},
+                {"cell": "RQ1a-R", "dir": "RQ1a-R", "telemetry": {"moves_total": 4}},
+                {"cell": "RQ2a-R", "dir": "RQ2a-R", "telemetry": None},
+            ]
+            mf.write_agreement_counter(cells, results, out)
+            md = (out / "tables" / "agreement.md").read_text().splitlines()
+            tex = (out / "tables" / "agreement.tex").read_text()
+        self.assertEqual(md[2], "| RQ1a | 6 | 4 (80.0%) | 2 (40.0%) | 3 (50.0%) |")
+        self.assertEqual(md[3], "| RQ1a-R | 4 | 3 (75.0%) | 1 (25.0%) | — |")
+        self.assertFalse(any(r.startswith("| RQ2a-R") for r in md))
+        self.assertIn(
+            "RQ1a: 1 of 6 transformer-enabled trace records carry no playout counter; "
+            "the counter's shares are over the others.",
+            md,
+        )
+        self.assertIn("RQ1a & 6 & 4 (80.0\\%) & 2 (40.0\\%) & 3 (50.0\\%) \\\\", tex)
+        self.assertIn("RQ1a-R & 4 & 3 (75.0\\%) & 1 (25.0\\%) & — \\\\", tex)
+        self.assertNotIn("%)", tex.replace("\\%)", ""))
 
 
 class FakeJudge:
