@@ -273,3 +273,9 @@ rule and no wording of a class's reading changes.
     numbers give 10,281 to 10,408 words for the five forms without an optional clause, and 10,427
     for class 2 with the RQ1a clause (ceiling about 10,450). No text is cut after the reading: if
     optional clauses take the count above the ceiling, the count is reported as it is.
+
+Note of 2026-11-10, 23:06 UTC, still before reading (69 shards finished; only health lines seen).
+Corrections from the reference check added nine words to sections 1 to 9 (two citation contexts
+reworded). They now stand at 10,027 words before the fill, and the trial fills with made-up numbers
+give 10,290 to 10,417 words for the five forms without an optional clause and 10,436 for class 2
+with the RQ1a clause. Point 10 is otherwise unchanged.
