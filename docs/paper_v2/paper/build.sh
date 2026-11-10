@@ -18,6 +18,11 @@ for arg in "$@"; do
   esac
 done
 "$PY" ../../../tools/paper/make_bib.py --offline
+# A final, non-anonymous build cites the data deposit: refuse it while that reference has no DOI.
+if [[ "$PRE" == *FINAL* && "$JOB" == main ]] && grep -q 'note = {DOI pending}' refs.bib; then
+  echo "final build refused: the deposit's reference (zenodo, refs_manual.bib) still says 'DOI pending'"
+  exit 3
+fi
 # --final also writes the final-reading analyses (amendment 12; slow). RESULTS=<dir> reads the cells from
 # another directory: a version's cut-off (the cells it reports, and hostload.log up to its last game).
 "$PY" ../../../tools/paper/make_figures.py $FIG ${RESULTS:+--results "$RESULTS"}
