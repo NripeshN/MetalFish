@@ -1574,7 +1574,7 @@ def write_final_analyses(cells, results: pathlib.Path, out: pathlib.Path):
     )
 
     # oracle summary, written by tools/paper/oracle_probe.py: RQ6b-R on the runners (amendment 15
-    # (a)); the workstation's RQ6b was stopped unread and has no summary
+    # (a)); the workstation's RQ6b was stopped after 74 positions and has no summary
     osum = results / "RQ6b-R" / "oracle.jsonl.summary.json"
     if osum.exists():
         write_oracle_tables(load(osum), tdir)

@@ -166,3 +166,14 @@ designed so the paper is publishable whichever way the measurements come out.
   is a count, per cell, of the transformer-enabled moves that ended with the MCTS playout counter
   at the agreement rule's thresholds (100, or 150 in highly complex positions). The tools are merged
   with the amendment.
+- **2026-11-10 (corrections)** — Two corrections to the record, added to the protocol as 15 (l)
+  and 17 (g) (02 §11). No estimate, interval or reading changes.
+  - Amendment 15 and the entry above for 2026-11-04 say that the workstation's RQ6b rows were
+    unread. One row, the first, was displayed once on 3 November to check the output's format.
+    No other oracle output has been read.
+  - Amendment 17 says that neither of its analyses had been run on the records when it was
+    written. On 8 November the methodology review had formed the first runner contrast block by
+    block from the game records with a script of its own, before it recomputed both contrasts
+    from the table of block estimates. The amendment already said that both values were known.
+  - Both were found on 10 November: the second by the integrity check of the manuscript, the
+    first by the audit of the campaign's commands that followed.
