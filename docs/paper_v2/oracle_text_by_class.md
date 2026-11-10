@@ -5,6 +5,13 @@ was read. At that time 21 of the 150 shards had finished. Only their health line
 positions judged, judge errors, rows lacking a judge, judgments of an earlier configuration,
 positions judged again and GPU error lines.
 
+Note added on 2026-11-10 (protocol items 15 (l) and 15 (i)). Two things had been seen of the
+oracle's earlier runs before this file was written. The first row of the workstation's stopped
+RQ6b run was displayed once on 3 November to check the
+output's format; it holds both judges' verdicts for the first position of the sample. And the
+shards that failed on the runners' GPU were inspected on 6 November for row counts and error
+messages only. The texts below were not changed after this note.
+
 The manuscript's oracle sentences are taken from this file. Which variant is used is decided
 mechanically by the class of amendment 16 (b), as computed by `oracle_probe.py --summarise-only` and
 tabulated by `make_figures.py` (`oracle.md`, `oracle_cells.tex`, `oracle_stability.md`). Numbers in
