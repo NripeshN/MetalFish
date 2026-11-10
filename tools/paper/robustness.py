@@ -13,11 +13,16 @@ records; tools/paper/make_figures.py writes the tables. No games are run.
   (runner cells, amendment 15 (j))
 - without_first_openings: a cell without the pairs of its first k openings (RQ1a: 92)
 - cochran_q: heterogeneity of the block estimates; chunk_bootstrap: resamples the runner's chunks
+- block_t_interval / block_paired_contrast: the mean of a runner cell's block estimates, or of
+  the block-by-block differences of compared cells, with a Student t interval over the blocks
+  (amendment 17)
 - linear_combination: a sum of cells' Elo estimates whose variance includes the covariance of
   their pair scores on shared openings (derived RQ2c = RQ2b + RQ2a)
 - move_stats: time, depth and nodes per second of each arm's moves from the PGN move comments
 - adjudications: adjudicated games by type and by the arm they favoured
 - flag_counts: how often each 0/1 trace flag held on the disagreement records
+- playout_counter_shares: how many transformer-enabled moves ended with the MCTS playout
+  counter at the agreement rule's thresholds (amendment 17)
 - evals_by_position / eval_rate_by_block: the hybrid's MCTS evaluation rate by block, a measure
   of GPU health (amendment 12 (c)), from the traces joined to the PGN move times by position
 - load_builds / split_by_build: the games grouped by the macOS build each pair started on
@@ -253,6 +258,95 @@ def cochran_q(estimates: Sequence[float], ses: Sequence[float]) -> Optional[Dict
     q = sum(wi * (e - pooled) ** 2 for wi, (e, _) in zip(w, pts))
     df = len(pts) - 1
     return {"q": q, "df": df, "p": chi2_sf(q, df), "pooled": pooled}
+
+
+def _betainc(a: float, b: float, x: float) -> float:
+    """Regularised incomplete beta I_x(a, b) (continued fraction, modified Lentz)."""
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    if x > (a + 1.0) / (a + b + 2.0):
+        return 1.0 - _betainc(b, a, 1.0 - x)
+    front = math.exp(
+        math.lgamma(a + b)
+        - math.lgamma(a)
+        - math.lgamma(b)
+        + a * math.log(x)
+        + b * math.log(1.0 - x)
+    )
+    tiny = 1e-300
+    c = 1.0
+    d = 1.0 - (a + b) * x / (a + 1.0)
+    d = 1.0 / (tiny if abs(d) < tiny else d)
+    h = d
+    for m in range(1, 1000):
+        for num in (
+            m * (b - m) * x / ((a + 2 * m - 1.0) * (a + 2 * m)),
+            -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1.0)),
+        ):
+            d = 1.0 + num * d
+            d = 1.0 / (tiny if abs(d) < tiny else d)
+            c = 1.0 + num / c
+            c = tiny if abs(c) < tiny else c
+            delta = d * c
+            h *= delta
+        if abs(delta - 1.0) < 1e-15:
+            break
+    return front * h / a
+
+
+def t_two_sided_tail(t: float, df: int) -> float:
+    """P(|T| > t) for Student's t with df degrees of freedom."""
+    return _betainc(df / 2.0, 0.5, df / (df + t * t))
+
+
+def t_quantile(df: int, two_sided: float = 0.05) -> float:
+    """The t with P(|T| > t) = two_sided (0.05: the multiplier of a 95% interval), by bisection."""
+    lo, hi = 0.0, 1e6
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        if t_two_sided_tail(mid, df) > two_sided:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
+def block_t_interval(estimates: Sequence[Optional[float]]) -> Optional[Dict]:
+    """Unweighted mean of k block estimates with a 95% Student t interval on k - 1 degrees of
+    freedom (amendment 17 (b)). Each block of a runner cell ran on its own runner, so the blocks
+    are the units and the interval includes the variation between runners. None unless there are
+    at least two blocks and every block has a finite estimate."""
+    k = len(estimates)
+    if k < 2 or any(e is None or not math.isfinite(e) for e in estimates):
+        return None
+    mean = sum(estimates) / k
+    sd = math.sqrt(sum((e - mean) ** 2 for e in estimates) / (k - 1))
+    return {
+        "mean": mean,
+        "pm": t_quantile(k - 1) * sd / math.sqrt(k),
+        "sd": sd,
+        "blocks": k,
+        "df": k - 1,
+    }
+
+
+def block_paired_contrast(
+    cells: List[Tuple[Sequence[Optional[float]], float]],
+) -> Optional[Dict]:
+    """Sum of coef * (block estimate) formed block by block over cells whose blocks played the
+    same openings and were dispatched together, with the t interval of block_t_interval over the
+    k differences (amendment 17 (c)). None unless the cells have the same number of blocks, each
+    with a finite estimate."""
+    if not cells or len({len(ests) for ests, _ in cells}) != 1:
+        return None
+    if any(e is None or not math.isfinite(e) for ests, _ in cells for e in ests):
+        return None
+    k = len(cells[0][0])
+    return block_t_interval(
+        [sum(coef * ests[i] for ests, coef in cells) for i in range(k)]
+    )
 
 
 def chunk_of_pairs(pairs: List[Dict], chunk_starts: Sequence[int]) -> List[int]:
@@ -608,6 +702,29 @@ def flag_counts(records: Iterable[Dict]) -> Dict:
         "traced_with_hints": traced_hints,
         "traced_with_verification": traced_verified,
     }
+
+
+def playout_counter_shares(
+    records: Iterable[Dict], thresholds: Sequence[int] = (100, 150)
+) -> Dict:
+    """Over the traced transformer-enabled moves (every trace record that is not a time-safety
+    move): how many ended with the MCTS search's playout counter at or above each threshold. The
+    agreement rule reads that counter (hybrid_search.cpp: Stats().total_nodes) against 100, or 150
+    in positions the classifier rates as highly complex; the trace records it at the end of the
+    move as mcts_playouts, but not the position's class (amendment 17 (e))."""
+    enabled = counted = 0
+    reached = {t: 0 for t in thresholds}
+    for r in records:
+        if r.get("reason") == "ab_fallback_time_safety":
+            continue
+        enabled += 1
+        n = r.get("mcts_playouts")
+        if not isinstance(n, (int, float)) or isinstance(n, bool):
+            continue
+        counted += 1
+        for t in thresholds:
+            reached[t] += n >= t
+    return {"enabled": enabled, "with_counter": counted, "reached": reached}
 
 
 def evals_by_position(records: Iterable[Dict]) -> Dict[str, Optional[int]]:
