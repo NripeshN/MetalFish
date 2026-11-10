@@ -1388,7 +1388,7 @@ Stage 2.5, by two independent verifiers):
   table gives the sum of the PGN game durations (26.1 h for RQ1a-R).
 
 **Amendment 17: block-level intervals and the agreement rule's playout counter** (2026-11-10; post hoc
-analyses of cells that had already been read, amendment 17 (a) to (f)). PR #162 merged at 15:25:01 UTC
+analyses of cells that had already been read, amendment 17 (a) to (g)). PR #162 merged at 15:25:01 UTC
 as main `8bab7da`. The tools were first run on the records after that merge, from 15:25:44 to
 15:30:46 UTC (`make_figures.py --final-analyses`); a script that calls the merged functions then
 printed the intervals at full precision. Nothing of the oracle study was opened. Record in
@@ -1425,9 +1425,11 @@ contrasts stay the cells' results (amendment 17 (d)).
   The paper states the exclusion range from the block-paired interval and gives the registered
   interval beside it (amendment 17 (d)).
 - **Derived against direct RQ2c-R.** No discrepancy was detected under either interval.
-- **The review's recomputation.** The two block-paired contrasts agree with the values the review
-  had recomputed from the table of block estimates (about +9.9 ± 19.7 and +11.0 ± 19.4), which were
-  known when the amendment was written (amendment 17 (a)).
+- **The review's values.** The two block-paired contrasts agree with the values the review had
+  computed on 8 November (about +9.9 ± 19.7 and +11.0 ± 19.4). It computed the first from the game
+  records with a script of its own and again from the table of block estimates, and the second
+  from the table. Both were known when the amendment was written (amendment 17 (a), corrected by
+  (g); see the corrections below).
 
 The agreement rule's playout counter (amendment 17 (e); `agreement.md`). Counts are over the
 transformer-enabled moves of the trace; every such record carries the counter.
@@ -1458,3 +1460,28 @@ Reading. Descriptive counts with no test.
 - **Earlier wording.** The entries of §E that give the rule's condition as "at least 100 MCTS nodes"
   refer to this counter (the MCTS search's playout count), with the threshold of 150 in highly
   complex positions added here.
+
+**Corrections to the record** (2026-11-10; protocol items 15 (l) and 17 (g), PR #163). An integrity
+check of the manuscript on 10 November found a script from the pre-submission review that computes a
+block-paired contrast from two game files. An audit of the commands run during the campaign followed:
+the campaign's command log and those of the review and verification steps, read for what each
+command printed. Record: the review's script and what it printed are in
+`results/paper_v2/runner_readings/amendment17/` (`review_script_blocks.py`,
+`review_computation_2026-11-08.txt`); the stopped run's manifest carries a correction line
+(`results/paper_v2/RQ6b/manifest.txt`); the audit's notes on the command logs are kept privately
+with the review's files. No estimate, interval or reading changes.
+
+| What the record said | What the audit found | Where it is corrected |
+| --- | --- | --- |
+| Amendment 17: neither analysis had been run on the records when it was written; the review had recomputed the two contrasts from the table of block estimates | On 8 November at 20:03 UTC the methodology review ran a script of its own on `RQ1a-R/games.pgn` and `RQ6d-R/games.pgn`: RQ6d-R minus RQ1a-R block by block, +9.9 ± 19.7 (t on 9 degrees of freedom), and a DerSimonian–Laird random-effects estimate for RQ1a-R, −36.1 ± 14.7. At 20:14 it recomputed both contrasts from the table of block estimates, and its report cites the table. The second contrast, the cells' block-level intervals and the playout-counter counts were first computed from the records after the merge | 02 §11, 17 (g) |
+| Amendment 15 and the README: the rows of the workstation's stopped RQ6b run (74 of 600 positions) were unread | On 3 November at 18:36 UTC, nine minutes after the run started, its first row was displayed once to check the output's format. The row holds both judges' scores and verdicts for one position, the first of the sample. Every other access printed line counts, the manifest or the judges' error output | 02 §11, 15 (l) |
+
+What the audit confirmed.
+- **Runner shards.** The only downloads of oracle shard artifacts were those of 6 November for the
+  GPU failure; the commands printed row counts, which judge had an error and the error messages, as
+  the entry "Oracle judge failure on the runners' GPU" says. No shard has been downloaded since.
+- **Review and verification steps.** None of them opened the workstation's or the runners' oracle
+  output.
+- **Runner cells.** No command printed a result of a runner cell before the cell's final reading.
+- **So, for the oracle:** when the reading rules of amendment 16 were written, the verdicts on one of
+  the 600 positions had been seen, and nothing else.
