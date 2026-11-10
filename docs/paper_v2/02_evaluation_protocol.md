@@ -769,6 +769,17 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
        most the position in progress. The oracle needs about 675 runner-hours (150 × 4.5 h). The
        game cells keep the priority of (i) 3: the driver dispatches a shard only into a slot that no
        game block can take (`--last oracle`).
+    (l) **Correction (2026-11-10).** The heading of this amendment and (a) say that the rows of
+    the workstation's RQ6b run were not read. One row was. On 2026-11-03 at 18:36 UTC, nine
+    minutes after the workstation run started, the first row of its output was displayed once to
+    check the output's format. The row holds both judges' scores and verdicts for one position,
+    the first of the sample. No other row of the workstation run was read: every other access
+    printed line counts, the manifest or the judges' error output. This was found on 2026-11-10
+    by an audit of the commands run during the campaign. The audit confirmed what (i) and 08 §F
+    say about the runner shards inspected on 2026-11-06 (row counts and error messages only) and
+    found no other read of oracle output. So the reading rules of amendment 16 were written
+    after the verdicts on one of the 600 positions had been seen. The row enters no estimate, as
+    (a) says of all 74 workstation rows; its position is one of the 74 of the stability check.
 16. **2026-11-08 — reading rules for the oracle study, results per source cell, and a pass
     criterion for the judges' stability (written before any oracle shard has been read).** The
     pre-submission review of the v2 manuscript (2026-11-08) asked that how each class of oracle
@@ -899,3 +910,19 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     `playout_counter_shares`) and `make_figures.py` (the runner tables, and `agreement.md` with
     the final-reading analyses) are merged together with this amendment, and are run on the
     records only after the merge.
+    (g) **Correction (2026-11-10, after the tools had run).** The heading says that neither
+    analysis had been run on the records when this amendment was written, and (a) says that the
+    review recomputed the two contrasts from the manuscript's table of block estimates. That is
+    incomplete for the first contrast. On 2026-11-08 at 20:03 UTC the methodology review ran a
+    script of its own on the game records of RQ1a-R and RQ6d-R. The script formed RQ6d-R minus
+    RQ1a-R block by block with a Student t interval on 9 degrees of freedom (+9.9 ± 19.7), which
+    is the method (c) then fixed. It also gave a DerSimonian–Laird random-effects estimate for
+    RQ1a-R (−36.1 ± 14.7), which (b) does not use. Eleven minutes later the review recomputed
+    both contrasts from the table of block estimates, and its report cites the table; this
+    amendment was written from that report. The second contrast, the cells' block-level
+    intervals of (b) and the counts of (e) had not been computed from the records before this
+    amendment was merged (2026-11-10, 15:25 UTC); the tools first ran on the records at 15:25:44
+    UTC. The heading's last clause should therefore read "before the tools of (f) were run on
+    the records". Nothing in (b) to (f) changes: the analyses were already labelled post hoc,
+    and (a) already says that both contrasts' approximate values were known. The integrity check
+    of the manuscript found the review's script on 2026-11-10.
