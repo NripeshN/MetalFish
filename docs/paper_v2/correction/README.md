@@ -22,8 +22,14 @@ Everything else in the note is final and cites an existing artifact. Items 8–1
 stated per batch size, and the early-stop and arbiter statements are scoped to the records they
 come from. Items 8 and 9 were re-checked against the complete RQ1a cell on 2026-11-01 and now
 cite it (the agreement stop fired on 1.0% of the moves with the transformer active; the MCTS move
-was chosen on 7 of 25,138 disagreements); the picture is unchanged. If RQ1b is complete before
-filing, check it as well.
+was chosen on 7 of 25,138 disagreements); the picture is unchanged. RQ1b was complete on
+2026-11-03, and the note was checked against it and against the frozen build's microbenchmark
+on 2026-11-10: item 8 now gives both cells (the stop fired on 1.0% of the moves with the
+transformer active at 30 s + 0.3 s and on 48.6% at 60 s + 0.6 s); item 9 is unchanged (in RQ1b
+the MCTS move was chosen on 1 of 17,338 disagreements); item 10 gives the frozen build's rates
+and no longer compares MetalFish's evaluation rate with Lc0's search rate, a comparison the new
+evaluation withdraws as not like for like; item 1 calls Lc0's rate on the Apple GPU a search
+rate. Item 14 gained the RQ1c-R result on 2026-11-09.
 
 ## Files
 

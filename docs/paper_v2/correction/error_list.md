@@ -38,7 +38,8 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
   constants for the named engines; the skill-level anchors the chapter's Fig. 2 shows, levels
   5–16 at 2800–3584, are not in that file); no PGN/JSON of the 322-game run anywhere in the
   repository (audit A1, A4);
-  Lc0 BT4 Metal throughput `results/paper_v2/micro/nn_latency.json` (165–725 nps). Audit A1–A6.
+  Lc0 BT4 Metal search rate `results/paper_v2/micro/nn_latency.json` (165–725 nodes/s,
+  2026-10-13) and `nn_latency_frozen.json` (217–763, 2026-11-01). Audit A1–A6.
 
 ### E2 — Provenance of the alpha-beta engine · Wrong (overstated) / Misleading
 
@@ -149,15 +150,19 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
 - **Corrected**: the stop exists but requires a clock search, `agreement_count ≥ 3` consecutive
   coordinator polls (~1.5 ms apart), elapsed > 25% of budget, MCTS playouts ≥ max(100,
   `min_mcts_nodes`), AB depth ≥ 10. It fired 0 of 209 times in the July 2026 telemetry
-  (median 45 playouts < 100); in the current engine it fires rarely: 660 of the 68,456 moves
-  with the transformer active in RQ1a (1.0%; 2,002 games at 30+0.3, October 2026; 3 of 3,278 in
-  the pilot; also in some gate matches). No time-saving measurement exists; "10–40%" withdrawn.
+  (median 45 playouts < 100); in the current engine how often it fires depends on the time
+  control: 660 of the 68,456 moves with the transformer active in RQ1a (1.0%; 2,002 games at
+  30+0.3, October 2026; 3 of 3,278 in the pilot; also in some gate matches) and 25,774 of
+  53,020 in RQ1b (48.6%; 1,000 games at 60+0.6, exploratory, November 2026). No time-saving
+  measurement exists; "10–40%" withdrawn.
 - **Evidence**: `ec1dee5:src/hybrid/hybrid_search.cpp` lines 640–702 (`agreement_count`,
   gate at 695); `results/tournament_20260701_212250/results.json` parsed with
   `tools/paper/parse_hybrid_trace.py` (0 agreement stops; `../08_evidence_map.md` §C); current
   engine: "engines agree, stopping early" lines in `results/paper_v2/RQ1a_pilot/engines.log.gz`
   (3), `results/paper_v2/RQ1a/engines.log` (660; `tables/flags.md` of `make_figures.py
-  --final-analyses`; denominator `moves_hybrid` in `RQ1a/summary.json`) and
+  --final-analyses`; denominator `moves_hybrid` in `RQ1a/summary.json`),
+  `results/paper_v2/RQ1b/engines.log` (25,774 of 53,020; `tables/agreement.md`,
+  `../08_evidence_map.md` §F, amendment 17) and
   `results/paper_v2/sprt/*/engines.log.gz`; message at
   `365f36a:src/hybrid/hybrid_search.cpp` 4077–4081. Audit C5.
 
@@ -187,18 +192,19 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
 - **As published**: "MetalFish achieves 1.26× higher average throughput, with the largest
   advantage in middlegame positions (5.5×)"; Table 4 "Complex middlegame 77 14 5.50×",
   "Average 172 136 1.26×"; "our throughput is 1.26× higher at 2 threads".
-- **Corrected**: 4 positions × 10 s; Lc0 at 14 nps is a harness fault. Sweep of 2026-10-13
-  (no game running; build 8777b99, whose network code is identical to the frozen engine's), same
-  BT4 network: MetalFish MPSGraph FP16 b1 7.40 ms = 135 pos/s, b2 224, b4 326, b8 407, b16 446,
-  b32 531, b64 538 pos/s; Lc0 0.32.1 Metal `benchmark` (search nodes/s) mb1 165, mb2 163,
-  mb4 189, mb8 294, mb16 606, mb32 725, mb64 530. MetalFish's evaluation rate is below Lc0's search
-  rate at batch 1, the setting it plays with (0.82×), and at each program's best batch size (538
-  vs 725, 0.74×), while it is above at batch 2–8, below at 16 and 32 and about equal at 64; the two tools count different things
-  (network evaluations vs search nodes), so the comparison is indicative only. The chapter's
-  advantage is not supported.
-- **Evidence**: `results/paper_v2/micro/nn_latency.json` (fields `metalfish[*].median_ms`,
-  `median_positions_per_second`; `lc0[*].nps_steady_median`); `../06_environment_and_baselines.md`
-  (2026-10-07 sweep, consistent). Audit B4.
+- **Corrected**: 4 positions × 10 s; Lc0 at 14 nps is a harness fault. The two tools count
+  different things (network evaluations vs search nodes, which include cache hits and terminal
+  nodes), so the new evaluation makes no throughput comparison (withdrawn there as not like for
+  like). Frozen build, 2026-11-01 (no game running; other processes used 1.5 to 3.6 cores),
+  same BT4 network: MetalFish MPSGraph FP16 b1 7.21 ms = 139 pos/s, b2 227, b4 327, b8 422,
+  b16 447, b32 532, b64 538 pos/s; Lc0 0.32.1 Metal `benchmark` (search nodes/s) mb1 217,
+  mb2 222, mb4 297, mb8 447, mb16 638, mb32 763, mb64 671. The earlier sweep of 2026-10-13
+  (build 8777b99, whose network code is identical to the frozen engine's) gave 135 pos/s at b1
+  and 538 at b64, and Lc0 165 to 725 nodes/s. The chapter's advantage is not supported.
+- **Evidence**: `results/paper_v2/micro/nn_latency_frozen.json` (fields `metalfish[*].median_ms`,
+  `median_positions_per_second`; `lc0[*].nps_steady_median`; `../08_evidence_map.md` §B, M1
+  frozen build); the earlier sweep `results/paper_v2/micro/nn_latency.json`;
+  `../06_environment_and_baselines.md` (2026-10-07 sweep, consistent). Audit B4.
 
 ### E11 — M1 Ultra figures and 7.24× scaling · Unsupported
 

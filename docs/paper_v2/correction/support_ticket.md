@@ -1,7 +1,7 @@
 # Springer Nature support ticket — author-initiated Correction (text to paste)
 
 **Filing is the author's action.** Nothing in this directory has been sent anywhere. Steps and
-the text to paste are below; fill the three remaining `{{…}}` fields in `correction_note.md` first.
+the text to paste are below; fill the two remaining `{{…}}` fields in `correction_note.md` first.
 
 ## Where to file (verified 2026-10-14)
 
@@ -71,14 +71,15 @@ text; the attached Correction note lists all fourteen items. In summary:
 7. The position classifier does not adjust the decision weighting, and Fig. 1's routing through
    the classifier is wrong (mode selection is by UCI option).
 8. The agreement-based early stop never fired in the retained July 2026 telemetry (0 of 209
-   decisions) and fires rarely in the current engine; the "10–40% time
-   savings" figure is unsupported.
+   decisions); in the current engine it fired on 1.0% of the moves with the transformer
+   active at 30 s + 0.3 s and on 48.6% at 60 s + 0.6 s; the "10–40% time savings" figure is
+   unsupported.
 9. The inference that the hybrid is "heavily influenced by its neural network component" is
    wrong: the final move was the alpha-beta move in 207 of 209 logged decisions; the
    Bratko–Kopec suite is at ceiling and was used during tuning.
-10. The "1.26× / 5.5× higher throughput than Lc0" result is withdrawn; controlled measurements
-    put MetalFish's evaluation rate below Lc0's search rate at batch size 1, the setting it plays
-    with, and at each program's best batch size (an indicative comparison).
+10. The "1.26× / 5.5× higher throughput than Lc0" result is withdrawn: it rests on four
+    positions and a harness fault, and the two programs' tools count different things (network
+    evaluations and search nodes), so the new evaluation makes no throughput comparison.
 11. The M1 Ultra figures (9.8M NPS, 7.24× scaling, ∼382 NPS) have no record; withdrawn.
 12. Two related-work characterisations (Baier & Winands; Lanctot et al.) are wrong.
 13. The hybrid does not use the Lc0-style time manager; 14. the chapter omits the time-safety

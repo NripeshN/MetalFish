@@ -8,7 +8,12 @@ https://doi.org/10.1007/978-3-032-32726-0_39
 > after the manuscript's integrity check: items 8–10; the RQ1a result in item 1 filled on
 > 2026-10-31 from `results/paper_v2/RQ1a/summary.json`, the cell's final reading in
 > `08_evidence_map.md` §E; the RQ1c-R result in item 14 added on 2026-11-09 from
-> `results/paper_v2/RQ1c-R/summary.json`, the cell's final reading in `08_evidence_map.md` §F).
+> `results/paper_v2/RQ1c-R/summary.json`, the cell's final reading in `08_evidence_map.md` §F;
+> items 8 and 10 and one clause of item 1 revised on 2026-11-10 against the complete
+> evaluation: the agreement stop's count in the 60 s + 0.6 s cell (`08_evidence_map.md` §F,
+> amendment 17) and the frozen build's inference rates
+> (`results/paper_v2/micro/nn_latency_frozen.json`, `08_evidence_map.md` §B), without the
+> comparison with Lc0's search rate, which the new evaluation withdraws).
 > Fields in double braces are filled before filing: `{{PREPRINT}}`
 > (arXiv identifier of the follow-up paper) and `{{ZENODO_DOI}}`. Nothing else in this note
 > depends on pending work; every other number cites an existing artifact (see `error_list.md`).
@@ -31,7 +36,8 @@ concern how its components and its results were characterised.
    five-game match score, with the difference clamped to ±400 for 5–0 scores. The assumed
    ratings of the Stockfish skill-level opponents were never measured, and the CCRL ratings
    used for Berserk, Patricia and Lc0 refer to other hardware and time controls; in particular,
-   Lc0 with the BT4 network on the Apple GPU evaluates roughly 160–700 positions per second,
+   Lc0 with the BT4 network on the Apple GPU searches a few hundred nodes per second (165 to
+   763 in two measurements of October and November 2026),
    far below the hardware behind its CCRL rating. The procedure is not a valid rating estimate
    and no rating for any of the three modes should be inferred from the chapter. The game
    records of the 322-game tournament were not retained, so the win/draw/loss counts in
@@ -118,9 +124,11 @@ concern how its components and its results were characterised.
    iterations); more than a quarter of the budget elapsed; at least 100 MCTS playouts; and
    alpha-beta depth of at least 10. In the retained July 2026 telemetry (a build later than the
    chapter's) it never fired (0 of 209 hybrid decisions at 20 s + 0.2 s; median 45 MCTS playouts
-   per move); in the current engine it fires rarely (on 660 of the 68,456 moves with the
-   transformer active, 1.0%, in the 2,002 games of a pre-registered 30 s + 0.3 s cell, October
-   2026). No measurement of a time saving exists; the "10–40%" figure is withdrawn.
+   per move). In the current engine how often it fires depends on the time control: on 660 of
+   the 68,456 moves with the transformer active (1.0%) in the 2,002 games of a pre-registered
+   30 s + 0.3 s cell (October 2026), and on 25,774 of 53,020 (48.6%) in the 1,000 games of an
+   exploratory 60 s + 0.6 s cell (November 2026) {{PREPRINT}}. No measurement of a time saving
+   exists; the "10–40%" figure is withdrawn.
 
 9. **Influence of the neural-network component** (Sect. 5.2; Sect. 6.1; Tables 2 and 3).
    "The 95.8% agreement between the hybrid engine and Lc0 suggests the hybrid's
@@ -139,16 +147,14 @@ concern how its components and its results were characterised.
     1.26× higher average throughput, with the largest advantage in middlegame positions (5.5×)"
     and "our throughput is 1.26× higher at 2 threads" are withdrawn. Table 4 rests on four
     positions of 10 s each, and the Lc0 value of 14 nodes per second in the "Complex
-    middlegame" row indicates a harness fault rather than engine behaviour. Measured on an
-    Apple M2 Max with no game running and the same BT4 network (13 October 2026, with the
-    engine's network code as later frozen), MetalFish's Metal inference runs at 135 positions/s
-    at batch size 1 (7.4 ms per evaluation, FP16), the setting it plays with, and at best
-    538 positions/s (batch size 64), whereas a search with the Metal backend of Lc0 0.32.1
-    reaches 165 nodes/s at minibatch 1 and at best 725 nodes/s (minibatch 32). MetalFish's
-    evaluation rate is therefore below Lc0's search rate at batch size 1 and at each program's
-    best batch size (it is above at batch sizes 2 to 8, below at 16 and 32 and about equal at 64);
-    the two tools count different things
-    (network evaluations against search nodes), so the comparison is indicative only. The
+    middlegame" row indicates a harness fault rather than engine behaviour. The two programs'
+    tools also count different things, network evaluations in MetalFish's benchmark and search
+    nodes in Lc0's, so the new evaluation makes no throughput comparison between them
+    {{PREPRINT}}. Measured there on an Apple M2 Max with the frozen engine and no game running
+    (1 November 2026), MetalFish's Metal inference of the BT4 network runs at 139 positions/s
+    at batch size 1 (7.2 ms per evaluation, FP16), the setting it plays with, and at best
+    538 positions/s (batch size 64); a search with the Metal backend of Lc0 0.32.1 on the same
+    network reported 217 nodes/s at minibatch 1 and at best 763 nodes/s (minibatch 32). The
     chapter's throughput advantage is not supported.
 
 11. **M1 Ultra figures and thread scaling** (Sect. 3.1; Sect. 3.2). No measurement record
