@@ -217,3 +217,59 @@ Added before any RQ6b-R output was read:
   shares become point estimates, with their intervals in the table. The per-cell bounds move to the
   table, and the text gives the classes. No class rule, number or wording of a class's reading
   changes.
+
+## Clarifications before reading (2026-11-10)
+
+Written on 2026-11-10 at 21:23 UTC. At that time 69 of the 150 shards had finished and only their
+health lines had been seen (see also the note of 2026-11-10 at the top). These points settle what
+the rules above leave open, so that the fill needs no decision once the numbers are known. No class
+rule and no wording of a class's reading changes.
+
+1. **Numbers.** Every number is rounded once, from the value in the summary or the stability file,
+   to the precision the tables print: bounds and shares to three decimals, the stability shares as
+   percentages to one decimal, correlations to three decimals, Elo to one decimal. Every bound in
+   the body carries its interval (`0.004 [0.001, 0.008]`), in §1 and the conclusion as in §6. In the
+   abstract a bound is written `0.004 (95\% interval 0.001 to 0.008)`; in the 3a and 3b abstracts
+   each of the three bounds is written that way.
+2. **Lists.** The three items of the 3a and 3b abstracts are joined in one sentence: "⟨X_SL⟩ when
+   Stockfish~19 selects and Lc0 with the BT4 network scores, ⟨X_LS⟩ the other way round, and ⟨CONS⟩
+   where both agree (tie band 0.01). No direction is claimed."
+3. **Where the optional clauses go.**
+   - The RQ1a clause of rule 3 follows the words that state the class: "could have gained little"
+     (abstract, class 1), "where both judges agree" (abstract, class 2), "finds little to gain" and
+     "finds room under both judges" (§1), "on the positions sampled" and "both judges leave room"
+     (conclusion), and "depends on the judge" or "is not resolved at this sample size" (class 3, in
+     all three places).
+   - The incomplete-run clause of rule 4 stands in the conclusion at the same place, before the
+     RQ1a clause. In Contribution 4 it joins the closing parenthesis: "(RQ6b-R; ⟨N⟩ of the 600
+     positions; the run is incomplete)".
+   - The stability clause of rule 5 and then the conversion clause of rule 6 stand, in the abstract,
+     after "tie band of 0.01" or "(tie band 0.01)"; in the conclusion, after the RQ1a clause.
+   - Where several meet, the order is: incomplete run, RQ1a, stability, conversion.
+4. **Rule 3 compares classes** (1, 2, 3 or none), not the forms 3a and 3b. A set of positions
+   without a class is written "no class".
+5. **Rule 6's "the class" is the pooled class.** The abstract and the conclusion add the clause only
+   if the pooled class at 125 or 500 cp differs from the pooled class at 250 cp. §6 reports every
+   change, for all positions and for each cell, in one sentence per constant: "With the constant at
+   125~cp per unit of log-odds, the class of all positions becomes ⟨X⟩ and that of RQ1a's positions
+   ⟨Y⟩, so it is sensitive to the conversion." A constant that changes no class gets "At 500~cp the
+   classes are unchanged."
+6. **Stability.**
+   - One judge fails: "⟨Judge⟩ fails amendment~16's criterion, so its runner verdicts are those of
+     its runner configuration, and the class below carries that qualification; ⟨the other⟩ passes
+     it", followed, when the judge that passes is Stockfish, by ", and its two statistics also show
+     how sensitive its verdicts are to search depth (3 threads against 8)".
+   - Both fail, in the abstract and the conclusion: ", with both judges' verdicts those of their
+     runner configurations (both failed the stability check)".
+   - A judge compared on fewer than 74 positions has that count in parentheses after its share.
+7. **A run that finishes without 600 positions judged by both judges**, with no cut-off: the
+   incomplete forms are used, with "RQ6b-R finished with" in place of "RQ6b-R was cut off on ⟨date⟩
+   with".
+8. **The status table's RQ6b row** ends ": complete" or ": incomplete (⟨N⟩ of 600 positions)".
+9. **The time of the first reading** is taken from the clock immediately before the command that
+   joins the shards is run (it prints the judge-error count and the stability statistics). It is
+   written "14 November at 06:10~UTC" in §4.4 and "14 Nov 06:10" in the amendments table.
+10. **Length.** Sections 1 to 9 stand at 10,018 words before the fill. Trial fills with made-up
+    numbers give 10,281 to 10,408 words for the five forms without an optional clause, and 10,427
+    for class 2 with the RQ1a clause (ceiling about 10,450). No text is cut after the reading: if
+    optional clauses take the count above the ceiling, the count is reported as it is.
