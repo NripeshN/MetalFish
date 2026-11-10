@@ -1461,7 +1461,8 @@ Reading. Descriptive counts with no test.
   refer to this counter (the MCTS search's playout count), with the threshold of 150 in highly
   complex positions added here.
 
-**Corrections to the record** (2026-11-10; protocol items 15 (l) and 17 (g), PR #163). An integrity
+**Corrections to the record** (2026-11-10; protocol items 15 (l) and 17 (g), PR #163, merged
+2026-11-10 19:57 UTC). An integrity
 check of the manuscript on 10 November found a script from the pre-submission review that computes a
 block-paired contrast from two game files. An audit of the commands run during the campaign followed:
 the campaign's command log and those of the review and verification steps, read for what each
