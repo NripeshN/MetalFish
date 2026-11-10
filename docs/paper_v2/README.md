@@ -156,3 +156,13 @@ designed so the paper is publishable whichever way the measurements come out.
   correlation, each at least 0.8). It also recomputes the class with the conversion constant halved
   and doubled, and reads the two judges as related (Stockfish 19's networks are trained on Leela
   data). The pre-submission review of the v2 manuscript asked for all of these.
+- **2026-11-10** — Protocol amendment 17 (02 §11), post hoc: written after the runner cells and the
+  workstation cells had been read, and before either analysis was run on the records. It adds two
+  exploratory analyses the pre-submission review asked for. The first is a block-level interval for
+  each runner cell and each runner contrast: the mean of the block estimates, or of the
+  block-by-block differences, with a Student t interval over the blocks, so that the variation
+  between runners is included. The registered estimates stay the cells' results; where the paper
+  says which differences a runner contrast excludes, it uses the block-paired interval. The second
+  is a count, per cell, of the transformer-enabled moves that ended with the MCTS playout counter
+  at the agreement rule's thresholds (100, or 150 in highly complex positions). The tools are merged
+  with the amendment.

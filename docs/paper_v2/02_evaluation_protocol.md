@@ -850,3 +850,52 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     project, so the two judges' lineages are not independent. Agreement between them is read as
     agreement of two related judges, not as two independent confirmations. Only the Stockfish judge
     has the Syzygy tables (15 (a)).
+17. **2026-11-10 — block-level intervals for the runner cells and their contrasts, and the
+    agreement rule's playout counter (post hoc: written after the seven runner cells and the
+    workstation cells had been read, and before either analysis was run on the records).** The
+    pre-submission review of the v2 manuscript (2026-11-08) made two requests that the revision
+    had left open. Both are added as exploratory analyses of cells that have already been read.
+    The oracle study RQ6b-R was still running and unread when this was written, and nothing here
+    concerns it.
+    (a) **Why.** The registered interval of a runner cell treats its game pairs as independent,
+    and the registered contrasts pair the compared cells by opening (15 (b)). Neither includes the
+    variation between runners, which 15 (e) names as a limitation: Cochran's Q over RQ1a-R's ten
+    blocks was 19.07 on 9 degrees of freedom (p = 0.025). The block bootstrap of 15 (c) resamples
+    6 or 10 blocks, and a percentile bootstrap over so few clusters tends to give intervals that
+    are too short. From the manuscript's table of block estimates the review recomputed the two
+    contrasts block by block: about +9.9 ± 19.7 for RQ6d-R minus RQ1a-R (registered: +9.8 ± 14.8)
+    and about +11.0 ± 19.4 for derived minus direct RQ2c-R (registered: +10.7 ± 15.9). Those
+    approximate values were therefore known when this was written. The method below was fixed
+    before the tool computed anything from the game records.
+    (b) **Block-level interval of a cell.** Each of a runner cell's k blocks (10; 6 for RQ5a-R)
+    was played on its own runner, and the blocks of a cell have the same number of pairs. The
+    block-level estimate is the unweighted mean of the k block estimates, each the logistic Elo of
+    the block's mean pair score as in the table of block estimates. Its 95% interval is the
+    Student t interval on k − 1 degrees of freedom: the mean ± t(0.975; k − 1) × s / √k, where s is
+    the standard deviation of the block estimates. If a block has no finite estimate, no
+    block-level interval is given for the cell.
+    (c) **Block-paired contrasts.** Block i of the compared cells played the same openings and was
+    dispatched together (15 (c)). Each registered contrast is formed block by block:
+    Elo_i(RQ6d-R) − Elo_i(RQ1a-R), and Elo_i(RQ2b-R) + Elo_i(RQ2a-R) − Elo_i(RQ2c-R). The contrast
+    is the mean of the k differences with the t interval of (b). The derived RQ2c-R,
+    Elo_i(RQ2b-R) + Elo_i(RQ2a-R), is given the same way.
+    (d) **Status and use.** These are sensitivity analyses: exploratory, like every runner
+    analysis (15 (f)), and post hoc. The registered estimates, intervals and contrasts remain the
+    cells' results and are not replaced. The block bootstrap stays in the tables beside the
+    block-level interval. Where the paper states which differences a runner contrast excludes, it
+    uses the block-paired interval, and it reports the registered interval beside it. If the two
+    intervals of a cell or contrast disagree on whether zero is excluded, both readings are
+    reported.
+    (e) **The agreement rule's playout counter.** The agreement rule can end a move early only
+    once the MCTS search's node counter has reached 100, or 150 in positions the classifier rates
+    as highly complex (`hybrid_search.cpp`, `Stats().total_nodes` against
+    `max(100, min_mcts_nodes)`; `classifier.cpp`). The decision trace records that counter at the
+    end of the move as `MCTSPlayouts`, but not the position's class. For every cell with traced
+    hybrid moves, the tables give how many transformer-enabled moves ended with the counter at
+    least 100, how many with at least 150, and how many the rule ended early (engine log). The
+    share of moves on which the counter reached the rule's threshold lies between the first two.
+    These are descriptive counts with no test.
+    (f) **Tools.** `robustness.py` (`block_t_interval`, `block_paired_contrast`,
+    `playout_counter_shares`) and `make_figures.py` (the runner tables, and `agreement.md` with
+    the final-reading analyses) are merged together with this amendment, and are run on the
+    records only after the merge.
