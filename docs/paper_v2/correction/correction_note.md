@@ -13,7 +13,11 @@ https://doi.org/10.1007/978-3-032-32726-0_39
 > evaluation: the agreement stop's count in the 60 s + 0.6 s cell (`08_evidence_map.md` §F,
 > amendment 17) and the frozen build's inference rates
 > (`results/paper_v2/micro/nn_latency_frozen.json`, `08_evidence_map.md` §B), without the
-> comparison with Lc0's search rate, which the new evaluation withdraws).
+> comparison with Lc0's search rate, which the new evaluation withdraws; on 2026-11-11
+> item 11 was given the frozen engine's search rates
+> (`results/paper_v2/micro/ab_scaling_frozen.json`), item 14 the transformer-enabled share of
+> the complete 30 s + 0.3 s cell, and item 8 the coordinator's polling interval as the
+> source has it).
 > Fields in double braces are filled before filing: `{{PREPRINT}}`
 > (arXiv identifier of the follow-up paper) and `{{ZENODO_DOI}}`. Nothing else in this note
 > depends on pending work; every other number cites an existing artifact (see `error_list.md`).
@@ -120,8 +124,8 @@ concern how its components and its results were characterised.
 8. **Agreement-based early termination** (Algorithm 1, lines 8–9; Sect. 6.1). "If AB and
    MCTS agree on best move for 3+ iterations → Terminate early (10–40% time savings)" and
    "saving 10–40% of allocated time" are unsupported. The stop exists but is gated: clock
-   games only; three consecutive coordinator polls (about 1.5 ms apart, not search
-   iterations); more than a quarter of the budget elapsed; at least 100 MCTS playouts; and
+   games only; three consecutive coordinator polls (0.5 ms apart, about 1.5 ms in all; not
+   search iterations); more than a quarter of the budget elapsed; at least 100 MCTS playouts; and
    alpha-beta depth of at least 10. In the retained July 2026 telemetry (a build later than the
    chapter's) it never fired (0 of 209 hybrid decisions at 20 s + 0.2 s; median 45 MCTS playouts
    per move). In the current engine how often it fires depends on the time control: on 660 of
@@ -160,9 +164,9 @@ concern how its components and its results were characterised.
 11. **M1 Ultra figures and thread scaling** (Sect. 3.1; Sect. 3.2). No measurement record
     exists for "9.8M NPS on M1 Ultra", "near-linear scaling (7.24× on 8 threads)" or
     "∼382 NPS on M1 Ultra's 64 GPU cores"; these figures are withdrawn. On the Apple M2 Max the
-    current release searches 1.53 million nodes/s on one thread, 11.81 million on eight
-    threads (7.7×) and 13.52 million on twelve threads (fixed depth 16, median of five runs,
-    1 GB hash).
+    engine frozen for the new evaluation searches 1.47 million nodes/s on one thread, 12.78
+    million on eight threads (8.7×) and 15.06 million on twelve threads (fixed depth 16, median
+    of five runs, 1 GB hash; 1 November 2026).
 
 12. **Characterisation of related work** (Sect. 1; Sect. 2.4). Baier and Winands [9] did not
     "survey MCTS enhancements including alpha-beta rollouts", and their hybrids do not "use one
@@ -180,7 +184,7 @@ concern how its components and its results were characterised.
     disables its transformer component, and plays the alpha-beta move, whenever the remaining
     clock time or the fixed move time falls below a threshold (5 s in the chapter's engine;
     3 s of remaining time or a move budget below 0.4 s in the current release). At 20 s + 0.2 s
-    the transformer was active on 52% of the hybrid's moves and at 30 s + 0.3 s on about 50%;
+    the transformer was active on 52% of the hybrid's moves and at 30 s + 0.3 s on 53%;
     at 10 s + 0.1 s it is almost never active. Results attributed to the hybrid at short time
     controls therefore reflect the alpha-beta component running inside the hybrid, not the
     transformer; in an exploratory measurement in the new evaluation, at 10 s + 0.1 s on

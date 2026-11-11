@@ -29,7 +29,11 @@ transformer active at 30 s + 0.3 s and on 48.6% at 60 s + 0.6 s); item 9 is unch
 the MCTS move was chosen on 1 of 17,338 disagreements); item 10 gives the frozen build's rates
 and no longer compares MetalFish's evaluation rate with Lc0's search rate, a comparison the new
 evaluation withdraws as not like for like; item 1 calls Lc0's rate on the Apple GPU a search
-rate. Item 14 gained the RQ1c-R result on 2026-11-09.
+rate. Item 14 gained the RQ1c-R result on 2026-11-09. On 2026-11-11 item 11 was given the
+frozen engine's search rates (1.47, 12.78 and 15.06 million nodes/s on 1, 8 and 12 threads) in
+place of the sweep of 13 October, item 14 the transformer-enabled share of the complete
+30 s + 0.3 s cell (53%), and item 8 the coordinator's polling interval as the source has it
+(0.5 ms, so three polls span about 1.5 ms).
 
 ## Files
 
