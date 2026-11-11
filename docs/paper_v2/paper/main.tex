@@ -708,7 +708,7 @@ and the hybrid's network-output cache was capped at 100{,}000 entries after a 10
 \label{app:mcts}
 \begin{table}[ht]
 \centering
-\caption{Settings of \MF{}'s MCTS that differ from Lc0 0.32.1's defaults, by mode, in the frozen source (commit \texttt{365f36a}: \texttt{src/mcts/search\_params.h}, \texttt{src/uci/engine.cpp}, \texttt{src/uci/uci.cpp}) and in Lc0's (tag \texttt{v0.32.1}: \texttt{src/neural/shared\_params.cc}, \texttt{src/search/classic/params.cc}, \texttt{src/search/classic/stoppers/common.cc}). Both use cpuct 1.745 below the root, cpuct base 38{,}739 and factor 3.894, a first-play-urgency reduction of 0.33 and a policy softmax temperature of 1.359 below the root. A dash: the heuristic does not exist in Lc0.}
+\caption{Settings of \MF{}'s MCTS that differ from Lc0 0.32.1's defaults, by mode, in the frozen source (commit \texttt{365f36a}: \texttt{src/mcts/search\_params.h}, \texttt{src/uci/engine.cpp}, \texttt{src/uci/uci.cpp}) and in Lc0's (tag \texttt{v0.32.1}: \texttt{src/neural/shared\_params.cc}, \texttt{src/search/classic/params.cc}, \texttt{src/search/classic/stoppers/common.cc}, \texttt{src/search/classic/stoppers/factory.cc}). Both use cpuct 1.745 below the root, cpuct base 38{,}739 and factor 3.894, a first-play-urgency reduction of 0.33 and a policy softmax temperature of 1.359 below the root. A dash: the heuristic does not exist in Lc0.}
 \label{tab:mcts-departures}
 \footnotesize
 \begin{tabular}{llll}
