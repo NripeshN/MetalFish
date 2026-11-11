@@ -104,7 +104,7 @@ new paper needs roughly 45–55.
 | mpsgraph | Apple, Metal Performance Shaders Graph documentation (compiled executables) | developer.apple.com/documentation/metalperformanceshadersgraph | Backend | web |
 | hendria2026 | Hendria, Non-monotonic latency in Apple MPS decoding: KV cache interactions and execution regimes | arXiv:2605.08913 (v2, 2026-05-14) | Adjacent evidence on MPS latency regimes | do not cite: it does not document fixed launch overhead per evaluation (integrity check 2026-10-27) |
 | mohite2026 | Mohite, FusionML: prefill, not decode — mechanism and boundaries of CPU+GPU co-execution on unified-memory Apple Silicon | arXiv:2607.22785 (2026-07-24) | Adjacent: CPU/GPU co-execution on unified memory | ID verified 2026-10-14 (arXiv); capitalisation override in refs_manual.bib |
-| fernandez2023 | Fernandez, Kahn, Na, Bisk, Strubell, The framework tax: disparities between inference efficiency in NLP research and deployment, EMNLP 2023, 1588–1600 | 10.18653/v1/2023.emnlp-main.98 | Small-batch overhead argument | ID verified 2026-10-27 (Crossref) |
+| fernandez2023 | Fernandez, Kahn, Na, Bisk, Strubell, The framework tax: disparities between inference efficiency in NLP research and deployment, EMNLP 2023, 1588–1600 | 10.18653/v1/2023.emnlp-main.98 | Small-batch overhead argument | ID verified 2026-10-27 (Crossref); capitalisation override in refs_manual.bib |
 | ajayi2025 | Ajayi & Ogundepo, Benchmarking on-device machine learning on Apple Silicon with MLX | arXiv:2510.18921 (2025-10-21) | Adjacent | do not cite: it times CPU and GPU backends separately, not concurrent CPU and GPU work (integrity check 2026-10-27) |
 
 ## E. What the earlier chapter cited (keep/replace)
