@@ -188,3 +188,11 @@ designed so the paper is publishable whichever way the measurements come out.
   the frozen engine's search rates, item 14 the transformer-enabled share of the complete
   30 s + 0.3 s cell, and item 8 the polling interval as the source has it. The Correction
   is a draft and has not been filed.
+- **2026-11-12 (note, before RQ6b-R is read)** — Protocol item 15 (m). On 11 November between
+  20:22 and 20:43 UTC five oracle shard runs failed at GitHub's artifact service. Three (shards
+  101 to 103) failed before any position was judged. Two (shards 94 and 96) had judged their four
+  positions and failed while uploading the output, so nothing of them was stored. The driver ran
+  all five again and each second run succeeded. The 8 positions of shards 94 and 96 were
+  therefore judged twice; the first judgments were stored nowhere and nobody has seen them. No
+  rule changes. When the note was written, 117 of the 150 shards had finished and only health
+  lines and run records had been looked at.
