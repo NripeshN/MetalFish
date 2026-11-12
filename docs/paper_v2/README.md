@@ -177,3 +177,11 @@ designed so the paper is publishable whichever way the measurements come out.
     from the table of block estimates. The amendment already said that both values were known.
   - Both were found on 10 November: the second by the integrity check of the manuscript, the
     first by the audit of the campaign's commands that followed.
+- **2026-11-12 (note, before RQ6b-R is read)** — Protocol item 15 (m). On 11 November between
+  20:22 and 20:43 UTC five oracle shard runs failed at GitHub's artifact service. Three (shards
+  101 to 103) failed before any position was judged. Two (shards 94 and 96) had judged their four
+  positions and failed while uploading the output, so nothing of them was stored. The driver ran
+  all five again and each second run succeeded. The 8 positions of shards 94 and 96 were
+  therefore judged twice; the first judgments were stored nowhere and nobody has seen them. No
+  rule changes. When the note was written, 117 of the 150 shards had finished and only health
+  lines and run records had been looked at.
