@@ -780,6 +780,31 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     found no other read of oracle output. So the reading rules of amendment 16 were written
     after the verdicts on one of the 600 positions had been seen. The row enters no estimate, as
     (a) says of all 74 workstation rows; its position is one of the 74 of the stability check.
+    (m) **Note (2026-11-12, five shard runs that failed at GitHub's artifact service; written
+    before RQ6b-R is read, with 117 of the 150 shards finished).** On 2026-11-11 between 20:22
+    and 20:43 UTC five shard runs failed in steps that use GitHub's artifact service. The
+    driver's status queries were answered with HTTP 502 at 20:31, 20:40 and 20:49. Three of the
+    runs (shards 101, 102 and 103) failed while downloading the judges' build, before any
+    position was judged. The other two (shards 94 and 96) had judged their four positions each,
+    with a health line of 4 of 4 positions and no error, and then failed in the last step, which
+    uploads the shard's output. None of the five left an artifact. The driver dispatched all
+    five again, as (h) says. With no artifact to resume from, each second run judged its four
+    positions from the start, and each ended in success with a health line of 4 of 4 positions
+    and no error. So the 8 positions of shards 94 and 96 were judged twice, and their first
+    judgments are lost. For these 8 of the 600 positions the aim of (h), that no judged position
+    is discarded, was not met. Nothing was chosen. The first judgments were stored nowhere: the
+    job's log prints for each position only that each judge judged it and after how many
+    attempts. Nobody has seen them, and whether they equalled the judgments that are kept cannot
+    be known. The joiner takes each shard's one complete attempt, as (h) says; for these five
+    shards that is the second run. The health line does not show the event: its count of
+    positions judged again is taken from the stored rows (judgments that needed more than one
+    attempt, (i) 2), and the lost runs stored none. No rule changes. A run that fails in the
+    same way before the last shard finishes is handled the same way and is listed with these in
+    08 §F when RQ6b-R is read. When this was written, only the shards' health lines and the run
+    records (conclusions, step names and times, artifact names and sizes) had been looked at.
+    Records: `results/paper_v2/runner_campaign_log.txt` (2026-11-11, 20:16 to 21:48 UTC),
+    `results/paper_v2/runner_readings/oracle_run_failures/run_records.json` and
+    `results/paper_v2/runner_readings/campaign_incidents.txt`.
 16. **2026-11-08 — reading rules for the oracle study, results per source cell, and a pass
     criterion for the judges' stability (written before any oracle shard has been read).** The
     pre-submission review of the v2 manuscript (2026-11-08) asked that how each class of oracle
