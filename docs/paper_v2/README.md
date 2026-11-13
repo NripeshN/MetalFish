@@ -196,3 +196,12 @@ designed so the paper is publishable whichever way the measurements come out.
   therefore judged twice; the first judgments were stored nowhere and nobody has seen them. No
   rule changes. When the note was written, 117 of the 150 shards had finished and only health
   lines and run records had been looked at.
+- **2026-11-13 — RQ6b-R read (protocol note 15 (n)).** The oracle's last shard finished at 21:47
+  UTC; all 150 shards succeeded with clean health lines, and the only oracle runs that did not end
+  in success are the five of 15 (m). First read at 21:50 UTC. Class of outcome under amendment 16:
+  *little to gain*, pooled and on the positions from each source cell, also with the conversion
+  constant halved or doubled; Stockfish 19 fails the judges' stability criterion and Lc0 passes it
+  (08 §F). Two defects of the reading's tools were found at the reading and corrected, with no rule
+  changed (#165: the joiner's test of a complete shard attempt, before any row was read; #166: the
+  results per source cell, computed after the pooled results had been read); protocol note 15 (n)
+  gives the times.
