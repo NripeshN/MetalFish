@@ -1150,13 +1150,20 @@ class RunnerAttemptsTest(unittest.TestCase):
 
         self.cell, self.oracle = fetch_runner_cell, fetch_runner_oracle
 
-    def _row(self, n, verdict="tie", delta=0.0):
+    def _row(self, n, verdict="tie", delta=0.0, lc0=None):
         return {
             "fen": f"f{n}",
             "ab_move": "e2e4",
             "mcts_move": "d2d4",
             "cluster": f"c{n}",
-            "judges": {"sf19": {"verdict": verdict, "delta_cp": delta}},
+            "judges": {
+                "sf19": {"verdict": verdict, "delta_cp": delta, "config": "sf"},
+                "lc0": (
+                    lc0
+                    if lc0 is not None
+                    else {"verdict": verdict, "delta_cp": delta, "config": "blas"}
+                ),
+            },
         }
 
     def _shard(self, root, run, i, rows):
@@ -1202,6 +1209,80 @@ class RunnerAttemptsTest(unittest.TestCase):
                 self.oracle.join_shards(
                     {0: found[0], 1: found[1]}, 3, 7, pathlib.Path(d) / "o3"
                 )
+
+    def test_gpu_era_attempts_are_not_complete(self):
+        # Shards 0-29 of RQ6b-R: an attempt on a runner's GPU left every row with an Lc0 error, a
+        # resumed GPU-era attempt judged nothing and kept them, a GPU-era attempt may hold Lc0
+        # judgments without an error but without a configuration (15 (i) 1), and the attempt that
+        # resumed on the CPU (15 (k)) judged Lc0 again. Only the last is complete.
+        err = {"error": "engine event loop dead", "attempts": 1}
+        old = {"verdict": "tie", "delta_cp": 0.0}  # no configuration recorded
+        with tempfile.TemporaryDirectory() as d:
+            attempts = [
+                self._shard(d, "10", 0, [self._row(0, lc0=err), self._row(1, lc0=err)]),
+                self._shard(d, "11", 0, [self._row(0, lc0=err), self._row(1, lc0=err)]),
+                self._shard(d, "12", 0, [self._row(0, lc0=old), self._row(1, lc0=old)]),
+                self._shard(d, "13", 0, [self._row(0), self._row(1)]),
+            ]
+            found = {
+                0: attempts,
+                1: [self._shard(d, "14", 1, [self._row(2), self._row(3)])],
+            }
+            info = self.oracle.join_shards(found, 2, 4, pathlib.Path(d) / "out")
+            self.assertEqual([s["run"] for s in info["by_shard"]], ["13", "14"])
+            self.assertEqual(info["by_shard"][0]["attempts"], 4)
+            self.assertEqual(info["judge_errors"], 0)
+            rows = self.oracle.rows_of(pathlib.Path(d) / "out" / "oracle.jsonl")
+            self.assertTrue(all(self.oracle.usable(r) for r in rows))
+            # without the resumed CPU attempt the shard has no complete attempt
+            with self.assertRaises(SystemExit):
+                self.oracle.join_shards(
+                    {**found, 0: attempts[:3]}, 2, 4, pathlib.Path(d) / "o2"
+                )
+        row = self._row(0)
+        self.assertTrue(self.oracle.usable(row))
+        del row["judges"]["lc0"]
+        self.assertFalse(self.oracle.usable(row))  # a row lacking a judge
+
+    def test_gh_tries_again(self):
+        import subprocess
+        from unittest import mock
+
+        calls = []
+
+        def fake_run(args, **kw):
+            calls.append(args)
+            ok = len(calls) == 3
+            return subprocess.CompletedProcess(
+                args, 0 if ok else 1, "out" if ok else "", "HTTP 502"
+            )
+
+        with tempfile.TemporaryDirectory() as d:
+            target = pathlib.Path(d) / "run" / "name"
+            target.mkdir(parents=True)
+            (target / "partial").write_text("x")
+            with mock.patch.object(
+                self.cell.subprocess, "run", fake_run
+            ), mock.patch.object(
+                self.cell.time, "sleep", lambda s: None
+            ), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                self.assertEqual(self.cell.gh(["run", "download", "1"], target), "out")
+                self.assertEqual(len(calls), 3)
+                self.assertFalse(
+                    target.exists()
+                )  # each try starts from an empty directory
+                fails = []
+
+                def fake_fail(args, **kw):
+                    fails.append(args)
+                    return subprocess.CompletedProcess(args, 1, "", "HTTP 502")
+
+                with mock.patch.object(self.cell.subprocess, "run", fake_fail):
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        self.cell.gh(["api", "x"])
+        self.assertEqual(len(fails), len(self.cell.PAUSES) + 1)
 
     def test_judge_stability(self):
         runner = [
