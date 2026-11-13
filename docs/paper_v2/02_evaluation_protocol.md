@@ -805,6 +805,35 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     Records: `results/paper_v2/runner_campaign_log.txt` (2026-11-11, 20:16 to 21:48 UTC),
     `results/paper_v2/runner_readings/oracle_run_failures/run_records.json` and
     `results/paper_v2/runner_readings/campaign_incidents.txt`.
+    (n) **Note (2026-11-13, written at the reading of RQ6b-R; two defects of the reading's tools
+    corrected; no rule changes).** The last shard finished on 2026-11-13 at 21:47 UTC and the
+    driver stopped at 21:49 UTC with all 150 shards done. Each shard has one successful run with a
+    health line of 4 of 4 positions and no error, and the only oracle runs that did not end in
+    success are the five of (m). The command that joins the shards was first run at 21:50 UTC,
+    the time of RQ6b-R's first reading. That run stopped at an error of GitHub's API while it was
+    still downloading, before any row was joined or shown. Two defects in the tools of (a) and
+    16 (a) were then found and corrected:
+    1. **The joiner's test of a complete attempt** counted a shard attempt's rows only, a test
+       written before (i). Shards 0 to 29 keep the artifacts of their attempts on the runners'
+       GPU, which hold all their rows but with Lc0 errors or Lc0 judgments that record no
+       configuration, beside the attempt that resumed them on the CPU. The joiner would have
+       found more than one complete attempt for those shards and refused them. An attempt is now
+       complete under the test the shard's own job applies before it succeeds ((i) 2): every
+       position has a usable judgment from both judges, the Lc0 one with its configuration
+       ((i) 1, (k) 2). This was found from the artifact listing (run numbers and dates) and
+       corrected before any row was read (#165, merged at 22:25 UTC). The join then ran again
+       from 22:26 UTC: 600 positions from the 150 shards, with no judge error.
+    2. **The results per source cell of 16 (a)** were empty in the first summary (22:33 UTC). The
+       summary took a judged row's cell from the record's source log, a field the judged rows do
+       not keep. A row's cell is now that of the sample record it judges, matched by the
+       position, both candidates and the game, which names the source log: 358 of the 600
+       positions are from RQ1a's games and 242 from RQ1b's, the sample's own counts (#166, merged
+       at 23:10 UTC). The pooled results, the judges' stability statistics and the pooled class
+       had been read when this was found; the results per source cell were first computed after
+       the correction merged, by the rule of 16 (a), which leaves no choice. The second summary
+       equals the first in every pooled result.
+    Records: `results/paper_v2/runner_readings/RQ6b-R/` (`reading_log.txt`, `completion_check.txt`,
+    the first summary `summary_run1_without_cells.json` and its tables in `tables_run1/`).
 16. **2026-11-08 — reading rules for the oracle study, results per source cell, and a pass
     criterion for the judges' stability (written before any oracle shard has been read).** The
     pre-submission review of the v2 manuscript (2026-11-08) asked that how each class of oracle

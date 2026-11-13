@@ -7,7 +7,18 @@ https://doi.org/10.1007/978-3-032-32726-0_39
 > Status: **draft for an author-initiated Correction** (prepared 2026-10-14, revised 2026-10-27
 > after the manuscript's integrity check: items 8–10; the RQ1a result in item 1 filled on
 > 2026-10-31 from `results/paper_v2/RQ1a/summary.json`, the cell's final reading in
-> `08_evidence_map.md` §E). Fields in double braces are filled before filing: `{{PREPRINT}}`
+> `08_evidence_map.md` §E; the RQ1c-R result in item 14 added on 2026-11-09 from
+> `results/paper_v2/RQ1c-R/summary.json`, the cell's final reading in `08_evidence_map.md` §F;
+> items 8 and 10 and one clause of item 1 revised on 2026-11-10 against the complete
+> evaluation: the agreement stop's count in the 60 s + 0.6 s cell (`08_evidence_map.md` §F,
+> amendment 17) and the frozen build's inference rates
+> (`results/paper_v2/micro/nn_latency_frozen.json`, `08_evidence_map.md` §B), without the
+> comparison with Lc0's search rate, which the new evaluation withdraws; on 2026-11-11
+> item 11 was given the frozen engine's search rates
+> (`results/paper_v2/micro/ab_scaling_frozen.json`), item 14 the transformer-enabled share of
+> the complete 30 s + 0.3 s cell, and item 8 the coordinator's polling interval as the
+> source has it).
+> Fields in double braces are filled before filing: `{{PREPRINT}}`
 > (arXiv identifier of the follow-up paper) and `{{ZENODO_DOI}}`. Nothing else in this note
 > depends on pending work; every other number cites an existing artifact (see `error_list.md`).
 
@@ -29,7 +40,8 @@ concern how its components and its results were characterised.
    five-game match score, with the difference clamped to ±400 for 5–0 scores. The assumed
    ratings of the Stockfish skill-level opponents were never measured, and the CCRL ratings
    used for Berserk, Patricia and Lc0 refer to other hardware and time controls; in particular,
-   Lc0 with the BT4 network on the Apple GPU evaluates roughly 160–700 positions per second,
+   Lc0 with the BT4 network on the Apple GPU searches a few hundred nodes per second (165 to
+   763 in two measurements of October and November 2026),
    far below the hardware behind its CCRL rating. The procedure is not a valid rating estimate
    and no rating for any of the three modes should be inferred from the chapter. The game
    records of the 322-game tournament were not retained, so the win/draw/loss counts in
@@ -112,13 +124,15 @@ concern how its components and its results were characterised.
 8. **Agreement-based early termination** (Algorithm 1, lines 8–9; Sect. 6.1). "If AB and
    MCTS agree on best move for 3+ iterations → Terminate early (10–40% time savings)" and
    "saving 10–40% of allocated time" are unsupported. The stop exists but is gated: clock
-   games only; three consecutive coordinator polls (about 1.5 ms apart, not search
-   iterations); more than a quarter of the budget elapsed; at least 100 MCTS playouts; and
+   games only; three consecutive coordinator polls (0.5 ms apart, about 1.5 ms in all; not
+   search iterations); more than a quarter of the budget elapsed; at least 100 MCTS playouts; and
    alpha-beta depth of at least 10. In the retained July 2026 telemetry (a build later than the
    chapter's) it never fired (0 of 209 hybrid decisions at 20 s + 0.2 s; median 45 MCTS playouts
-   per move); in the current engine it fires rarely (on 660 of the 68,456 moves with the
-   transformer active, 1.0%, in the 2,002 games of a pre-registered 30 s + 0.3 s cell, October
-   2026). No measurement of a time saving exists; the "10–40%" figure is withdrawn.
+   per move). In the current engine how often it fires depends on the time control: on 660 of
+   the 68,456 moves with the transformer active (1.0%) in the 2,002 games of a pre-registered
+   30 s + 0.3 s cell (October 2026), and on 25,774 of 53,020 (48.6%) in the 1,000 games of an
+   exploratory 60 s + 0.6 s cell (November 2026) {{PREPRINT}}. No measurement of a time saving
+   exists; the "10–40%" figure is withdrawn.
 
 9. **Influence of the neural-network component** (Sect. 5.2; Sect. 6.1; Tables 2 and 3).
    "The 95.8% agreement between the hybrid engine and Lc0 suggests the hybrid's
@@ -137,24 +151,22 @@ concern how its components and its results were characterised.
     1.26× higher average throughput, with the largest advantage in middlegame positions (5.5×)"
     and "our throughput is 1.26× higher at 2 threads" are withdrawn. Table 4 rests on four
     positions of 10 s each, and the Lc0 value of 14 nodes per second in the "Complex
-    middlegame" row indicates a harness fault rather than engine behaviour. Measured on an
-    Apple M2 Max with no game running and the same BT4 network (13 October 2026, with the
-    engine's network code as later frozen), MetalFish's Metal inference runs at 135 positions/s
-    at batch size 1 (7.4 ms per evaluation, FP16), the setting it plays with, and at best
-    538 positions/s (batch size 64), whereas a search with the Metal backend of Lc0 0.32.1
-    reaches 165 nodes/s at minibatch 1 and at best 725 nodes/s (minibatch 32). MetalFish's
-    evaluation rate is therefore below Lc0's search rate at batch size 1 and at each program's
-    best batch size (it is above at batch sizes 2 to 8, below at 16 and 32 and about equal at 64);
-    the two tools count different things
-    (network evaluations against search nodes), so the comparison is indicative only. The
+    middlegame" row indicates a harness fault rather than engine behaviour. The two programs'
+    tools also count different things, network evaluations in MetalFish's benchmark and search
+    nodes in Lc0's, so the new evaluation makes no throughput comparison between them
+    {{PREPRINT}}. Measured there on an Apple M2 Max with the frozen engine and no game running
+    (1 November 2026), MetalFish's Metal inference of the BT4 network runs at 139 positions/s
+    at batch size 1 (7.2 ms per evaluation, FP16), the setting it plays with, and at best
+    538 positions/s (batch size 64); a search with the Metal backend of Lc0 0.32.1 on the same
+    network reported 217 nodes/s at minibatch 1 and at best 763 nodes/s (minibatch 32). The
     chapter's throughput advantage is not supported.
 
 11. **M1 Ultra figures and thread scaling** (Sect. 3.1; Sect. 3.2). No measurement record
     exists for "9.8M NPS on M1 Ultra", "near-linear scaling (7.24× on 8 threads)" or
     "∼382 NPS on M1 Ultra's 64 GPU cores"; these figures are withdrawn. On the Apple M2 Max the
-    current release searches 1.53 million nodes/s on one thread, 11.81 million on eight
-    threads (7.7×) and 13.52 million on twelve threads (fixed depth 16, median of five runs,
-    1 GB hash).
+    engine frozen for the new evaluation searches 1.47 million nodes/s on one thread, 12.78
+    million on eight threads (8.7×) and 15.06 million on twelve threads (fixed depth 16, median
+    of five runs, 1 GB hash; 1 November 2026).
 
 12. **Characterisation of related work** (Sect. 1; Sect. 2.4). Baier and Winands [9] did not
     "survey MCTS enhancements including alpha-beta rollouts", and their hybrids do not "use one
@@ -172,9 +184,12 @@ concern how its components and its results were characterised.
     disables its transformer component, and plays the alpha-beta move, whenever the remaining
     clock time or the fixed move time falls below a threshold (5 s in the chapter's engine;
     3 s of remaining time or a move budget below 0.4 s in the current release). At 20 s + 0.2 s
-    the transformer was active on 52% of the hybrid's moves and at 30 s + 0.3 s on about 50%;
+    the transformer was active on 52% of the hybrid's moves and at 30 s + 0.3 s on 53%;
     at 10 s + 0.1 s it is almost never active. Results attributed to the hybrid at short time
-    controls are therefore largely results of the alpha-beta component.
+    controls therefore reflect the alpha-beta component running inside the hybrid, not the
+    transformer; in an exploratory measurement in the new evaluation, at 10 s + 0.1 s on
+    three-core virtual machines, that configuration lost 16.7 Elo to the same alpha-beta search
+    run alone (95% confidence interval 9.0 to 24.4) {{PREPRINT}}.
 
 The parts of the chapter that stand are the existence and architecture of the three modes
 sharing one binary, the use of `os_unfair_lock` for node score updates and of 128-byte-aligned

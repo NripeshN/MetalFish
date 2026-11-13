@@ -1386,3 +1386,178 @@ Stage 2.5, by two independent verifiers):
 - **Hours.** The runner health tables' "Hours of play" were the blocks' fastchess wall times summed
   from the health lines (for example 29.15 h for RQ1a-R); they are now labelled so. The paper's compute
   table gives the sum of the PGN game durations (26.1 h for RQ1a-R).
+
+**Amendment 17: block-level intervals and the agreement rule's playout counter** (2026-11-10; post hoc
+analyses of cells that had already been read, amendment 17 (a) to (g)). PR #162 merged at 15:25:01 UTC
+as main `8bab7da`. The tools were first run on the records after that merge, from 15:25:44 to
+15:30:46 UTC (`make_figures.py --final-analyses`); a script that calls the merged functions then
+printed the intervals at full precision. Nothing of the oracle study was opened. Record in
+`results/paper_v2/runner_readings/amendment17/`: `reading_log.txt`, the tables `runner_analyses.md`,
+`runner_sensitivity.tex`, `runner_contrasts.tex`, `agreement.md` and `agreement.tex`,
+`exact_intervals.py` and `exact_intervals.txt`.
+
+| Cell | Registered estimate (95% CI) | Block bootstrap, 95% interval | Mean of the block estimates, t interval | Blocks |
+| --- | --- | --- | --- | --- |
+| RQ1a-R | −35.9 [−46.2, −25.6] | [−50.0, −23.0] | −36.1 ± 16.7 | 10 |
+| RQ6d-R | −26.1 [−36.0, −16.3] | [−32.4, −20.2] | −26.1 ± 7.6 | 10 |
+| RQ2a-R | −100.3 [−109.4, −91.4] | [−106.8, −93.9] | −100.4 ± 7.9 | 10 |
+| RQ2b-R | −0.7 [−10.9, +9.5] | [−9.0, +7.3] | −0.7 ± 10.1 | 10 |
+| RQ2c-R | −111.8 [−121.0, −102.7] | [−123.4, −99.6] | −112.1 ± 14.7 | 10 |
+| RQ1c-R | −16.7 [−24.4, −9.0] | [−24.5, −7.8] | −16.7 ± 10.3 | 10 |
+| RQ5a-R | +47.2 [+26.0, +68.7] | [+29.0, +64.4] | +47.4 ± 26.0 | 6 |
+
+| Contrast | Registered, over the shared openings | Paired by block, t interval | Blocks |
+| --- | --- | --- | --- |
+| RQ6d-R minus RQ1a-R (hints and verification off) | +9.8 ± 14.8 | +9.9 ± 19.7, that is [−9.7, +29.6] | 10 |
+| RQ2c-R derived (RQ2b-R + RQ2a-R) | −101.0 ± 13.5 | −101.1 ± 10.3 | 10 |
+| Derived minus direct RQ2c-R | +10.7 ± 15.9 | +11.0 ± 19.4, that is [−8.4, +30.4] | 10 |
+
+Reading. These analyses are exploratory and post hoc. The registered estimates, intervals and
+contrasts stay the cells' results (amendment 17 (d)).
+- **Width.** The t interval is wider than the registered interval for RQ1a-R, RQ2c-R, RQ1c-R and
+  RQ5a-R, narrower for RQ6d-R and RQ2a-R, and about the same for RQ2b-R. It is wider than the
+  block-bootstrap interval in every cell.
+- **Zero.** For no cell or contrast do the two intervals disagree on whether zero is excluded, so the
+  last rule of amendment 17 (d) does not apply.
+- **The channel contrast.** The block-paired interval excludes differences above +29.6 or below
+  −9.7 Elo; the registered interval excluded differences above +24.6 or below −5.0. RQ1a-R's deficit is
+  35.9 Elo, so the cell does not rule the hints and the verification out as a main contributor to it.
+  The paper states the exclusion range from the block-paired interval and gives the registered
+  interval beside it (amendment 17 (d)).
+- **Derived against direct RQ2c-R.** No discrepancy was detected under either interval.
+- **The review's values.** The two block-paired contrasts agree with the values the review had
+  computed on 8 November (about +9.9 ± 19.7 and +11.0 ± 19.4). It computed the first from the game
+  records with a script of its own and again from the table of block estimates, and the second
+  from the table. Both were known when the amendment was written (amendment 17 (a), corrected by
+  (g); see the corrections below).
+
+The agreement rule's playout counter (amendment 17 (e); `agreement.md`). Counts are over the
+transformer-enabled moves of the trace; every such record carries the counter.
+
+| Cell | Transformer-enabled moves | Playout counter at least 100 | Playout counter at least 150 | Ended early by the agreement rule |
+| --- | --- | --- | --- | --- |
+| RQ1a | 68,456 | 942 (1.4%) | 32 (0.0%) | 660 (1.0%) |
+| RQ1a pilot | 3,278 | 3 (0.1%) | 1 (0.0%) | 3 (0.1%) |
+| RQ1b | 53,020 | 34,751 (65.5%) | 5,749 (10.8%) | 25,774 (48.6%) |
+| RQ2b | 38,645 | 9,657 (25.0%) | 608 (1.6%) | 6,485 (16.8%) |
+| RQ1a-R | 28,498 | 10 (0.0%) | 4 (0.0%) | 8 (0.0%) |
+| RQ1c-R | 2,085 | 0 | 0 | 0 |
+| RQ2b-R | 29,662 | 7 (0.0%) | 2 (0.0%) | 6 (0.0%) |
+| RQ2c-R | 26,335 | 1 (0.0%) | 0 | 0 |
+| RQ6d-R | 27,875 | 1 (0.0%) | 0 | 1 (0.0%) |
+
+Reading. Descriptive counts with no test.
+- **The threshold.** The rule can end a move only once the counter has reached 100, or 150 in
+  positions the classifier rates as highly complex. The trace does not record that rating, so the
+  share of moves on which the counter reached the rule's threshold lies between the two shares:
+  10.8% to 65.5% in RQ1b, 1.6% to 25.0% in RQ2b and at most 1.4% in RQ1a.
+- **Consistency.** In every cell the moves the rule ended early are no more than the moves whose
+  counter reached 100.
+- **Workstation cells.** The rule ended 48.6% of RQ1b's enabled moves and 16.8% of RQ2b's, against
+  1.0% of RQ1a's; the counter reached 100 on 65.5%, 25.0% and 1.4% of them.
+- **Runner cells.** The counter reached 100 on at most 10 enabled moves of a runner cell, and the
+  rule ended at most 8 moves early, so the rule was all but inactive in the runner cells.
+- **Earlier wording.** The entries of §E that give the rule's condition as "at least 100 MCTS nodes"
+  refer to this counter (the MCTS search's playout count), with the threshold of 150 in highly
+  complex positions added here.
+
+**Corrections to the record** (2026-11-10; protocol items 15 (l) and 17 (g), PR #163, merged
+2026-11-10 19:57 UTC). An integrity
+check of the manuscript on 10 November found a script from the pre-submission review that computes a
+block-paired contrast from two game files. An audit of the commands run during the campaign followed:
+the campaign's command log and those of the review and verification steps, read for what each
+command printed. Record: the review's script and what it printed are in
+`results/paper_v2/runner_readings/amendment17/` (`review_script_blocks.py`,
+`review_computation_2026-11-08.txt`); the stopped run's manifest carries a correction line
+(`results/paper_v2/RQ6b/manifest.txt`); the audit's notes on the command logs are kept privately
+with the review's files. No estimate, interval or reading changes.
+
+| What the record said | What the audit found | Where it is corrected |
+| --- | --- | --- |
+| Amendment 17: neither analysis had been run on the records when it was written; the review had recomputed the two contrasts from the table of block estimates | On 8 November at 20:03 UTC the methodology review ran a script of its own on `RQ1a-R/games.pgn` and `RQ6d-R/games.pgn`: RQ6d-R minus RQ1a-R block by block, +9.9 ± 19.7 (t on 9 degrees of freedom), and a DerSimonian–Laird random-effects estimate for RQ1a-R, −36.1 ± 14.7. At 20:14 it recomputed both contrasts from the table of block estimates, and its report cites the table. The second contrast, the cells' block-level intervals and the playout-counter counts were first computed from the records after the merge | 02 §11, 17 (g) |
+| Amendment 15 and the README: the rows of the workstation's stopped RQ6b run (74 of 600 positions) were unread | On 3 November at 18:36 UTC, nine minutes after the run started, its first row was displayed once to check the output's format. The row holds both judges' scores and verdicts for one position, the first of the sample. Every other access printed line counts, the manifest or the judges' error output | 02 §11, 15 (l) |
+
+What the audit confirmed.
+- **Runner shards.** The only downloads of oracle shard artifacts were those of 6 November for the
+  GPU failure; the commands printed row counts, which judge had an error and the error messages, as
+  the entry "Oracle judge failure on the runners' GPU" says. No shard has been downloaded since.
+- **Review and verification steps.** None of them opened the workstation's or the runners' oracle
+  output.
+- **Runner cells.** No command printed a result of a runner cell before the cell's final reading.
+- **So, for the oracle:** when the reading rules of amendment 16 were written, the verdicts on one of
+  the 600 positions had been seen, and nothing else.
+
+**RQ6b-R final reading: the oracle study on the runners** (2026-11-13; the last shard finished at
+21:47 UTC and the driver stopped at 21:49 UTC; joined and read once, from 21:50 UTC, by amendments
+12 (d), 14, 15 (a) and 16). Until then only the shards' health lines and the run records had been
+looked at, apart from what 15 (l) and 15 (i) list. Every shard has one successful run with a health
+line of 4 of 4 positions, 0 judge errors, 0 rows lacking a judge, 0 Lc0 judgments of an earlier
+configuration, 0 judged again and 0 GPU error lines. The first run of the join command (21:50 UTC)
+stopped at an error of GitHub's API before anything was joined. Two tool defects were found and
+corrected at the reading, and the second summary equals the first in every pooled result (protocol
+note 15 (n); PRs #165 and #166). The shards were joined by `fetch_runner_oracle.py` at main
+`75c3b68` (22:26–22:32 UTC). The summary is `oracle_probe.py --summarise-only` at main `9a13a57`
+(23:11–23:12 UTC) on the sampling frame `docs/paper_v2/data/rq6b_disagreements.jsonl.gz` (SHA-256
+`cf578883…`, 42,476 records) with `--sample 600 --seed 1`. The tables are from
+`make_figures.py --final-analyses` in the manuscript worktree at `ad0a61b` (23:12–23:16 UTC). Record in
+`results/paper_v2/RQ6b-R/` (`oracle.jsonl`, `oracle.jsonl.summary.json`, `stability.json`,
+`shards.json`, `shards/`) and `results/paper_v2/runner_readings/RQ6b-R/` (`reading_log.txt`,
+`completion_check.py` and its output, the join logs, the first summary and its tables); the fill of
+the manuscript's text in `results/paper_v2/runner_readings/oracle_fill/`.
+
+| Quantity | Value | Artifact |
+| --- | --- | --- |
+| Positions; games | 600 of the 600 sampled positions with verdicts from both judges; 534 games (the bootstrap's clusters); 358 positions from RQ1a's games and 242 from RQ1b's | `oracle.jsonl.summary.json` |
+| Judges as recorded | Lc0 0.32.1 on the CPU: `lc0 --backend=blas --weights=networks/BT4-1024x15x32h-swa-6147500.pb SmartPruningFactor=0 nodes=30000` on all 600; Stockfish 19: `stockfish Threads=3 Hash=2048 SyzygyPath=syzygy movetime=60000` on 484, and on 116 judged on 4–6 November before configurations were recorded, kept by 15 (i) 2; 0 errors; 0 judgments that needed a second attempt | `oracle.jsonl.summary.json` (`judges.*.configs`, `errors`, `judged_again`) |
+| Shard attempts | 120 shards with one artifact; shards 0–29 with 2 to 7, their GPU-era attempts beside the attempt that resumed them on the CPU, which the joiner took; for each of the 150 shards the joined run is the run the driver recorded as its successful one | `shards.json`, `runner_campaign_state.json`, `completion_check.txt` |
+| Runs that did not end in success | the five oracle runs of 15 (m) (43018836266 shard 94, 43035451437 shard 96, 43076611832 shard 101, 43088075348 shard 102, 43094933563 shard 103), each run again with success; no other oracle run. Of the game cells, the seven pilot runs cancelled on 6 November (entry "Time forfeits in the runner pilot"). Of the 232 runs the driver recorded, 220 succeeded | `completion_check.txt`, `runner_campaign_state.json` |
+
+Per judge (12 (d)); shares reweighted to all disagreements by stratum, 95% intervals from the
+game-clustered bootstrap within strata (`oracle.md`):
+
+| Judge | n | AB better | MCTS better | Tie | Loss AB − MCTS (ES) | Arbiter bound (ES) | Projected Elo of the bound | Realised accuracy |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| sf19 | 600 | 0.573 [0.534, 0.612] | 0.080 [0.059, 0.102] | 0.347 [0.310, 0.385] | -0.036 [-0.042, -0.030] | 0.003 [0.002, 0.004] | 2.2 [1.6, 2.9] | 0.920 [0.898, 0.941] |
+| lc0 | 600 | 0.508 [0.469, 0.546] | 0.098 [0.075, 0.123] | 0.393 [0.356, 0.432] | -0.029 [-0.035, -0.024] | 0.003 [0.002, 0.004] | 2.2 [1.7, 2.8] | 0.902 [0.877, 0.925] |
+
+Judges' agreement on 600 positions: 0.700 [0.664, 0.736], Cohen's kappa 0.47; consensus AB better 0.422 [0.382, 0.461], MCTS better 0.037 [0.023, 0.052], undecided 0.300 [0.264, 0.336]; bound on agreed positions 0.001 [0.001, 0.001] (projected Elo 0.6).
+
+Cross-judge results (amendment 14; `oracle.md`, `oracle_cross.tex`):
+
+| Selects | Scores | Flagged MCTS better | Share the scorer also rates MCTS better | Scorer's verdicts on them (AB/MCTS/tie) | Picks other than the selection | Cross bound (ES) | Projected Elo of the bound |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| sf19 | lc0 | 48 of 600 | 0.459 [0.320, 0.600] | 11/22/15 | 96 | 0.001 [-0.000, 0.001] | 0.4 [-0.3, 1.0] |
+| lc0 | sf19 | 59 of 600 | 0.373 [0.251, 0.498] | 15/22/22 | 134 | -0.000 [-0.002, 0.001] | -0.3 [-1.2, 0.6] |
+
+Per source cell (16 (a); each reweighted by its own cell's strata; `oracle.md`, `oracle_cells.tex`):
+
+| Cell | Positions | Bound per judge (ES) | Consensus bound (ES) | Cross bounds (ES) |
+| --- | --- | --- | --- | --- |
+| RQ1a | 358 | sf19 0.003 [0.002, 0.004]; lc0 0.002 [0.001, 0.002] | 0.001 [0.000, 0.001] | sf19->lc0 -0.000 [-0.001, 0.000]; lc0->sf19 -0.001 [-0.002, 0.001] |
+| RQ1b | 242 | sf19 0.003 [0.002, 0.005]; lc0 0.005 [0.004, 0.007] | 0.002 [0.001, 0.003] | sf19->lc0 0.002 [-0.000, 0.004]; lc0->sf19 -0.000 [-0.003, 0.002] |
+
+The judges' stability on the 74 positions the workstation had judged (16 (e); `stability.json`,
+`oracle_stability.md`):
+
+| Judge | Positions judged on both machines | Same verdict | Correlation of the candidates' score difference | Passes (16 (e): both at least 0.8) |
+| --- | --- | --- | --- | --- |
+| lc0 | 74 | 85.1% | 0.996 | yes |
+| sf19 | 74 | 68.9% | 0.899 | no |
+
+Reading (amendment 16).
+- **Class: little to gain.** The three bounds that decide the class all lie within the tie band of
+  0.01 expected-score points per disagreement position: the consensus bound 0.001 [0.001, 0.001],
+  0.001 [-0.000, 0.001] when Stockfish selects and Lc0 scores, and -0.000 [-0.002, 0.001] the other
+  way round. The class is the same on the positions from RQ1a's games and from RQ1b's, and with the
+  conversion constant at 125 or 500 cp (tie bands 0.02 and 0.005).
+- **What it means, within its limits:** judged by two related engines, an arbiter choosing between
+  the hybrid's two root candidates could have gained little on these positions. Both judges rate
+  the alpha-beta move better on most disagreement positions (0.573 and 0.508) and the MCTS move on
+  0.080 and 0.098. The projected Elo of each bound is a conversion, not a prediction of game results.
+- **Stability:** Stockfish 19 fails 16 (e)'s criterion (68.9% equal verdicts, below 0.8, with a
+  correlation of 0.899), so its runner verdicts are those of its runner configuration (3 threads,
+  60 s on a runner, against 8 threads on the workstation); Lc0 passes. The class carries that
+  qualification (16 (e)).
+- **Scope:** the positions come from the workstation's RQ1a and RQ1b games; the judging ran on the
+  runners. The 8 positions of shards 94 and 96 hold their second judgments (15 (m)). No result is
+  combined with RQ1a's Elo interval (16 (d)).

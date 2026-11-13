@@ -68,7 +68,10 @@ The rows from `RQ1a` on are the final readings of the paper's cells on the froze
 once after its last block (02 §11 amendment 12 (f)); the rows above them are the gates that led to
 the freeze. The rows marked "runner" are the cells of amendment 15, played on GitHub-hosted M1
 runners with T = 3 and compared only with each other. All seven runner cells have been read, and the
-runner microbenchmarks M1 and M2 are in 08 §F; the oracle study RQ6b-R is added when it completes.
+runner microbenchmarks M1 and M2 are in 08 §F. The oracle study RQ6b-R was read on 2026-11-13 (08 §F;
+it measures no Elo, so it has no row here): class *little to gain* under amendment 16, with a consensus
+bound of 0.001 [0.001, 0.001] expected-score points per disagreement position, Stockfish 19 failing
+the judges' stability criterion and Lc0 passing it.
 
 ## Order of work
 
