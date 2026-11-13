@@ -2165,6 +2165,53 @@ class OracleJudgingTest(unittest.TestCase):
             a["judges"]["sf"]["stats"]["arbiter_upper_bound_es"]["estimate"], 0.05
         )
 
+    def test_cells_of_rows_as_written(self):
+        """The rows the tool writes keep the position, both candidates and the game (`cluster`)
+        but not the source log: each row's cell is that of the sample record it judges.
+        """
+        op = self.op
+        sample, rows = [], []
+        for i, (r, cell) in enumerate(
+            zip(self._rows(), ("RQ1a", "RQ1a", "RQ1b", "RQ1b"))
+        ):
+            rec = {
+                "fen": f"f{i}",
+                "ab_move": "a",
+                "mcts_move": "m",
+                "source": f"results/paper_v2/{cell}/engines.log",
+                "engine": "metalfish",
+                "game": i // 2,
+            }
+            sample.append(rec)
+            written = dict(r, fen=rec["fen"], cluster=op.cluster_key(rec))
+            self.assertNotIn("source", written)
+            rows.append(written)
+        sampling = {
+            "strata_population": {"A": 300, "B": 100},
+            "strata_sample": {"A": 2, "B": 2},
+            "strata_population_by_source": {"RQ1a": {"A": 300}, "RQ1b": {"B": 100}},
+            "strata_sample_by_source": {"RQ1a": {"A": 2}, "RQ1b": {"B": 2}},
+        }
+        s = op.summarise(rows, ["sf", "lc0"], sampling, n_boot=200, seed=1)
+        s = op.with_source_cells(s, rows, sample, ["sf", "lc0"], sampling, 200, 1)
+        self.assertEqual(sorted(s["by_source_cell"]), ["RQ1a", "RQ1b"])
+        self.assertEqual(
+            [s["by_source_cell"][c]["positions"] for c in ("RQ1a", "RQ1b")], [2, 2]
+        )
+        self.assertAlmostEqual(
+            s["by_source_cell"]["RQ1a"]["judges"]["sf"]["stats"][
+                "arbiter_upper_bound_es"
+            ]["estimate"],
+            0.05,
+        )
+        # a row that matches no sample record falls back to its own source field
+        stray = dict(rows[0], fen="other", source="results/paper_v2/RQ1b/engines.log")
+        s2 = op.summarise(rows + [stray], ["sf", "lc0"], sampling, n_boot=50, seed=1)
+        s2 = op.with_source_cells(
+            s2, rows + [stray], sample, ["sf", "lc0"], sampling, 50, 1
+        )
+        self.assertEqual(s2["by_source_cell"]["RQ1b"]["positions"], 3)
+
     def test_conversion_sensitivity_rescores_from_centipawns(self):
         """Amendment 16 (g): the losses are recomputed from each judgment's centipawns with the
         constant halved and doubled, the verdicts kept, and the class reported for each constant
