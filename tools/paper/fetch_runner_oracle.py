@@ -4,11 +4,18 @@
 Shard i of K is one job of .github/workflows/paper-runner-cells.yml (task oracle) and leaves an
 artifact oracle-shard-<i> with shard_<i>.jsonl (one row per judged position, in sample order) and the
 shard's runner record, health samples and filtered stderr. This tool downloads every attempt (the
-artifacts API, any run), takes for each shard its one complete attempt (all of the shard's positions
-judged; a resumed attempt holds the rows of the attempts before it), refuses a missing shard, and
-writes the rows in shard order -- the order of a single run -- to oracle.jsonl, with each shard's
-other files under shards/<i>/. The reading is then one `oracle_probe.py --summarise-only` over
-oracle.jsonl with the registered sample arguments.
+artifacts API, any run), takes for each shard its one complete attempt (amendment 15 (h); a resumed
+attempt holds the rows of the attempts before it), refuses a missing shard, and writes the rows in
+shard order -- the order of a single run -- to oracle.jsonl, with each shard's other files under
+shards/<i>/. The reading is then one `oracle_probe.py --summarise-only` over oracle.jsonl with the
+registered sample arguments.
+
+An attempt is complete when every position of the shard has a usable judgment from both judges:
+the test the shard's own job applies before it succeeds (amendment 15 (i) 2). A row is usable when
+it holds both judges, neither with an error, and an Lc0 judgment that records its configuration,
+so none made on a runner's GPU, all of which are discarded (15 (i) 1, (k) 2). The attempts of
+2026-11-04 to 06 that the GPU failure left with all their rows but Lc0 errors, or Lc0 judgments
+without a configuration, are therefore not complete; the attempt that resumed them is.
 
 With --stability WORKSTATION_ROWS it also writes stability.json: for the positions the workstation
 judged before it was stopped, judge by judge, the share of equal verdicts and the correlation of the
@@ -36,6 +43,8 @@ sys.path.insert(0, str(REPO / "tools" / "paper"))
 import fetch_runner_cell  # noqa: E402
 
 SHARD_DIR = re.compile(r"^oracle-shard-(\d+)$")
+# the oracle's two judges, named as the workflow's oracle job names them
+JUDGES = {"sf19", "lc0"}
 
 
 def shard_size(i: int, k: int, sample: int) -> int:
@@ -46,12 +55,24 @@ def rows_of(path: pathlib.Path) -> List[Dict]:
     return [json.loads(l) for l in open(path) if l.strip()] if path.exists() else []
 
 
+def usable(row: Dict) -> bool:
+    """Both judges, neither with an error, and an Lc0 judgment that records its configuration
+    (the conditions of the oracle job's health step; amendment 15 (i) 1-2, (k) 2)."""
+    judges = row.get("judges", {})
+    return (
+        set(judges) == JUDGES
+        and not any("error" in j for j in judges.values())
+        and "config" in judges["lc0"]
+    )
+
+
 def join_shards(
     found: Dict[int, List[pathlib.Path]], k: int, sample: int, out: pathlib.Path
 ) -> Dict:
     def complete(d: pathlib.Path) -> bool:
         i = int(SHARD_DIR.match(d.name).group(1))
-        return len(rows_of(d / f"shard_{i}.jsonl")) == shard_size(i, k, sample)
+        rows = rows_of(d / f"shard_{i}.jsonl")
+        return len(rows) == shard_size(i, k, sample) and all(usable(r) for r in rows)
 
     missing = [i for i in range(k) if i not in found]
     if missing:
