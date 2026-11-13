@@ -29,9 +29,11 @@ import argparse
 import json
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Dict, List
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -48,39 +50,48 @@ def count_games(pgn: pathlib.Path) -> int:
     return run_cell.count_pgn_games(pgn) if pgn.exists() else 0
 
 
+PAUSES = (10, 30, 90)  # seconds before each further try of a GitHub call that failed
+
+
+def gh(args: List[str], target: pathlib.Path | None = None) -> str:
+    """Run a gh command, trying again after a pause when it fails (GitHub's API and artifact
+    service answer with transient errors, as on 2026-11-11 and 13); a download starts each try in
+    an empty target directory. The last failure is raised."""
+    for pause in PAUSES + (None,):
+        if target is not None and target.exists():
+            shutil.rmtree(target)
+        p = subprocess.run(["gh", *args], capture_output=True, text=True)
+        if p.returncode == 0:
+            return p.stdout
+        if pause is None:
+            raise subprocess.CalledProcessError(
+                p.returncode, ["gh", *args], p.stdout, p.stderr
+            )
+        print(
+            f"gh {' '.join(args[:3])} failed ({p.stderr.strip()[:200]}); again in {pause} s",
+            file=sys.stderr,
+            flush=True,
+        )
+        time.sleep(pause)
+    raise AssertionError("unreachable")
+
+
 def download_artifacts(names: List[str], root: pathlib.Path) -> None:
     """Every unexpired artifact with one of `names`, from any run of the repository, into
     root/<run id>/<name>/ (one run per block or shard, retries included)."""
-    repo = subprocess.run(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
+    repo = gh(
+        ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]
+    ).strip()
     for name in names:
-        listing = subprocess.run(
-            ["gh", "api", f"repos/{repo}/actions/artifacts?name={name}&per_page=100"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
+        listing = gh(
+            ["api", f"repos/{repo}/actions/artifacts?name={name}&per_page=100"]
+        )
         for a in json.loads(listing).get("artifacts", []):
             if a.get("expired"):
                 continue
             run = str(a["workflow_run"]["id"])
-            subprocess.run(
-                [
-                    "gh",
-                    "run",
-                    "download",
-                    run,
-                    "-n",
-                    name,
-                    "-D",
-                    str(root / run / name),
-                ],
-                check=True,
-            )
+            target = root / run / name
+            gh(["run", "download", run, "-n", name, "-D", str(target)], target)
 
 
 def pick_attempt(dirs: List[pathlib.Path], complete, use: str | None = None):
