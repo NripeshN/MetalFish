@@ -736,12 +736,30 @@ def with_source_cells(
     """Amendment 16 (a)-(c), (g): every statistic again for each source cell's positions,
     reweighted by that cell's own stratum population; the class of outcome, pooled and per cell;
     and the class again with the conversion constant halved and doubled, the tie band scaled
-    with it (tie_cp at an even position)."""
+    with it (tie_cp at an even position).
+
+    A judged row's cell is that of the sample record it judges. The rows this tool writes keep
+    the position, both candidates and the game (`cluster`) but not the record's source log, so a
+    row is matched to its record by those four (the game names the source log, so the match is
+    unique); a row with no matching record, or one matching records of two cells, keeps its own
+    source field."""
+
+    def key_of(r: Dict, cluster: Optional[str]) -> tuple:
+        return (r.get("fen"), r.get("ab_move"), r.get("mcts_move"), cluster)
+
+    cell_of: Dict[tuple, Optional[str]] = {}
+    for r in sample:
+        key, cell = key_of(r, cluster_key(r)), source_cell(r)
+        cell_of[key] = cell if cell_of.get(key, cell) == cell else None
+
+    def row_cell(row: Dict) -> str:
+        return cell_of.get(key_of(row, row.get("cluster"))) or source_cell(row)
+
     by_pop = sampling.get("strata_population_by_source")
     if by_pop:
         summary["by_source_cell"] = {}
         for cell in sorted({source_cell(r) for r in sample}):
-            cell_rows = [r for r in rows if source_cell(r) == cell]
+            cell_rows = [r for r in rows if row_cell(r) == cell]
             if not cell_rows:
                 continue
             cell_sampling = dict(
@@ -770,7 +788,7 @@ def with_source_cells(
         groups.append(
             (
                 cell,
-                [r for r in rows if source_cell(r) == cell],
+                [r for r in rows if row_cell(r) == cell],
                 cs["sampling"],
                 cs["outcome"]["sampled"],
             )
