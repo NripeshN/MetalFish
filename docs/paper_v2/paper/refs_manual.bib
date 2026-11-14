@@ -3,7 +3,7 @@
 % merges this file into refs.bib; keys match docs/paper_v2/05_related_work.md).
 
 @misc{stockfish,
-  author = {{Stockfish developers}},
+  author = {{The Stockfish team}},
   title = {Stockfish 18 and {Stockfish} 19 release notes},
   howpublished = {\url{https://stockfishchess.org/blog/2026/stockfish-18/}, \url{https://stockfishchess.org/blog/2026/stockfish-19/}},
   year = {2026},
@@ -12,7 +12,7 @@
 
 @misc{nasu2018,
   author = {Nasu, Yu},
-  title = {{NNUE}: Efficiently updatable neural-network-based evaluation functions for computer shogi},
+  title = {{NNUE}: efficiently updatable neural-network-based evaluation functions for computer shogi},
   howpublished = {The 28th World Computer Shogi Championship appeal document, 28 April 2018, \url{https://www.apply.computer-shogi.org/wcsc28/appeal/the_end_of_genesis_T.N.K.evolution_turbo_type_D/nnue.pdf}},
   year = {2018},
   note = {In Japanese, with English title and abstract; accessed 2026-10-27}
@@ -37,7 +37,7 @@
 % The ICLR 2026 paper supersedes arXiv:2409.12272 (monroe2024), as the Lc0 post above now says.
 @inproceedings{monroe2026,
   author = {Monroe, Daniel and Eilender, George and Chalmers, Philip and Tang, Zhenwei and Anderson, Ashton},
-  title = {Chessformer: A unified architecture for chess modeling},
+  title = {Chessformer: a unified architecture for chess modeling},
   booktitle = {International Conference on Learning Representations (ICLR)},
   year = {2026},
   note = {arXiv:2605.19091}
@@ -47,6 +47,7 @@
   author = {Shawul, Daniel},
   title = {Scorpio chess engine},
   howpublished = {\url{https://github.com/dshawul/Scorpio}; \url{https://www.chessprogramming.org/Scorpio}},
+  year = {2026},
   note = {Software (MCTS with optional alpha-beta rollouts; with networks, network-guided MCTS combined with alpha-beta searches); accessed 2026-10-27}
 }
 
@@ -61,15 +62,16 @@
 @misc{sfmcts2017,
   author = {Nicolet, St{\'e}phane},
   title = {A branch to test the {Monte Carlo} algorithm in {Stockfish}},
-  howpublished = {Code at \url{https://github.com/snicolet/Stockfish/tree/montecarlo} (commit 0269784, 21 December 2017); announced on the FishCooking mailing list, 6 December 2017, \url{https://groups.google.com/g/fishcooking/c/AE4EgWQ20dY} (sign-in may be required)},
+  howpublished = {Code at \url{https://github.com/snicolet/Stockfish/tree/montecarlo} (commit 0269784, 21 December 2017); announced on the FishCooking mailing list, 6 December 2017, \url{https://groups.google.com/g/fishcooking/c/AE4EgWQ20dY} (the list is no longer public; archived copy of 26 January 2021: \url{https://web.archive.org/web/20210126220014/https://groups.google.com/g/fishcooking/c/AE4EgWQ20dY})},
   year = {2017},
-  note = {Accessed 2026-10-27}
+  note = {Accessed 2026-11-10}
 }
 
 @misc{lc0sfhybrid,
   author = {Black, Ben},
   title = {lc0-stockfish-hybrid},
   howpublished = {\url{https://github.com/benblack769/lc0-stockfish-hybrid}},
+  year = {2026},
   note = {Software (Stockfish as a filter in Lc0's selection); accessed 2026-10-14}
 }
 
@@ -77,6 +79,7 @@
   author = {Elliott, David},
   title = {Ceres: an {MCTS} chess engine for research and recreation},
   howpublished = {\url{https://github.com/dje-dev/Ceres}; \url{https://www.chessprogramming.org/Ceres}},
+  year = {2026},
   note = {Software running on {Lc0} network backends; accessed 2026-10-27}
 }
 
@@ -162,6 +165,7 @@
   author = {{CCRL}},
   title = {{CCRL} 40/15: about the rating list},
   howpublished = {\url{https://www.computerchess.org.uk/ccrl/4040/about.html}},
+  year = {2026},
   note = {Accessed 2026-10-14}
 }
 
@@ -264,12 +268,12 @@
   title = {Correction to: Hybrid chess search: combining alpha-beta and {Monte Carlo} tree search on unified memory architectures},
   howpublished = {Author-initiated Correction prepared for Springer Nature},
   year = {2026},
-  note = {Prepared; not filed as of 1 November 2026}
+  note = {Prepared; not filed as of 14 November 2026}
 }
 
 @misc{zenodo,
   author = {Niketan, Nripesh},
-  title = {{MetalFish} evaluation study: protocol, engine freeze, game records, logs and analysis scripts},
+  title = {{MetalFish} evaluation study: protocol, frozen engine, game records, logs and analysis scripts},
   howpublished = {Zenodo},
   year = {2026},
   note = {DOI pending}
@@ -278,7 +282,7 @@
 % Cited instead of the deposit in the double-anonymous variant (build.sh --anon).
 @misc{anonarchive,
   author = {Anonymous},
-  title = {Protocol, engine freeze, game records, logs and analysis scripts for this submission},
+  title = {Protocol, frozen engine, game records, logs and analysis scripts for this submission},
   howpublished = {Anonymised archive; link supplied to the editors},
   year = {2026}
 }
@@ -442,7 +446,7 @@
 
 @inproceedings{liu2020wuuct,
   author = {Liu, Anji and Chen, Jianshu and Yu, Mingze and Zhai, Yu and Zhou, Xuewen and Liu, Ji},
-  title = {Watch the Unobserved: A Simple Approach to Parallelizing {Monte Carlo} Tree Search},
+  title = {Watch the Unobserved: a Simple Approach to Parallelizing {Monte Carlo} Tree Search},
   booktitle = {International Conference on Learning Representations (ICLR 2020)},
   year = {2020},
   note = {arXiv:1810.11755}
@@ -468,13 +472,15 @@
   year = {2013}
 }
 
-@inproceedings{marcolino2014,
+@article{marcolino2014,
   author = {Marcolino, Leandro Soriano and Xu, Haifeng and Jiang, Albert Xin and Tambe, Milind and Bowring, Emma},
   title = {Give a hard problem to a diverse team: exploring large action spaces},
-  booktitle = {Proceedings of the AAAI Conference on Artificial Intelligence},
+  journal = {Proceedings of the AAAI Conference on Artificial Intelligence},
   volume = {28},
   number = {1},
+  pages = {1485--1491},
   year = {2014},
+  month = jun,
   doi = {10.1609/aaai.v28i1.8880}
 }
 
@@ -500,4 +506,168 @@
   howpublished = {Stockfish blog, \url{https://stockfishchess.org/blog/2021/stockfish-14/}},
   year = {2021},
   note = {Training on positions evaluated by Leela Chess Zero; accessed 2026-10-27}
+}
+
+@article{guid2006,
+  author = {Guid, Matej and Bratko, Ivan},
+  title = {Computer analysis of world chess champions},
+  journal = {ICGA Journal},
+  volume = {29},
+  number = {2},
+  pages = {65--73},
+  year = {2006},
+  doi = {10.3233/ICG-2006-29203}
+}
+
+% Stage 4.5 reference check (2026-11-10). The entries below are the Crossref or arXiv records of
+% the identifiers in 05_related_work.md, kept by hand because a field was corrected against the
+% publication itself (pages, names or title as printed) or because the generated title kept
+% ordinary words capitalised in the sentence-case style.
+
+% Names as printed in the NeurIPS 2024 proceedings (Crossref drops "Kevin" and "A.").
+@inproceedings{ruoss2024,
+  author = {Ruoss, Anian and Delétang, Grégoire and Medapati, Sourabh and Grau-Moya, Jordi and Wenliang, Li Kevin and Catt, Elliot and Reid, John and Lewis, Cannada A. and Veness, Joel and Genewein, Tim},
+  title = {Amortized planning with large-scale transformers: a case study on chess},
+  booktitle = {Advances in Neural Information Processing Systems 37},
+  series = {NeurIPS 2024},
+  publisher = {Neural Information Processing Systems Foundation, Inc. (NeurIPS)},
+  pages = {65765--65790},
+  year = {2024},
+  doi = {10.52202/079017-2102}
+}
+
+@inproceedings{rocki2011,
+  author = {Rocki, Kamil and Suda, Reiji},
+  title = {Large-scale parallel {Monte} {Carlo} tree search on {GPU}},
+  booktitle = {2011 IEEE International Symposium on Parallel and Distributed Processing Workshops and Phd Forum},
+  publisher = {IEEE},
+  pages = {2034--2037},
+  year = {2011},
+  month = may,
+  doi = {10.1109/ipdps.2011.370}
+}
+
+% Pages from the journal's record at hrcak.srce.hr/77340 (Crossref has none).
+@article{strnad2011,
+  author = {Strnad, Damjan and Guid, Nikola},
+  title = {Parallel alpha-beta algorithm on the {GPU}},
+  journal = {Journal of Computing and Information Technology},
+  publisher = {Faculty of Electrical Engineering and Computing, Univ. of Zagreb},
+  volume = {19},
+  number = {4},
+  pages = {269--274},
+  year = {2011},
+  doi = {10.2498/cit.1002029}
+}
+
+@misc{mohite2026,
+  author = {Om Mohite},
+  title = {{FusionML}: prefill, not decode - mechanism and boundaries of {CPU+GPU} co-execution on unified-memory {Apple} {Silicon}},
+  year = {2026},
+  eprint = {2607.22785},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.AR},
+  url = {https://arxiv.org/abs/2607.22785}
+}
+
+@article{baier2015,
+  author = {Baier, Hendrik and Winands, Mark H. M.},
+  title = {{MCTS}-minimax hybrids},
+  journal = {IEEE Transactions on Computational Intelligence and AI in Games},
+  publisher = {Institute of Electrical and Electronics Engineers (IEEE)},
+  volume = {7},
+  number = {2},
+  pages = {167--179},
+  year = {2015},
+  month = jun,
+  doi = {10.1109/tciaig.2014.2366555}
+}
+
+@article{baier2018,
+  author = {Baier, Hendrik and Winands, Mark H. M.},
+  title = {{MCTS}-minimax hybrids with state evaluations},
+  journal = {Journal of Artificial Intelligence Research},
+  publisher = {AI Access Foundation},
+  volume = {62},
+  pages = {193--231},
+  year = {2018},
+  month = jun,
+  doi = {10.1613/jair.1.11208}
+}
+
+% Pages as printed in the proceedings (Crossref has none).
+@article{huang2015,
+  author = {Huang, Bojun},
+  title = {Pruning game tree by rollouts},
+  journal = {Proceedings of the AAAI Conference on Artificial Intelligence},
+  publisher = {Association for the Advancement of Artificial Intelligence (AAAI)},
+  volume = {29},
+  number = {1},
+  pages = {1165--1173},
+  year = {2015},
+  month = feb,
+  doi = {10.1609/aaai.v29i1.9371}
+}
+
+@article{ramanujan2010,
+  author = {Ramanujan, Raghuram and Sabharwal, Ashish and Selman, Bart},
+  title = {On adversarial search spaces and sampling-based planning},
+  journal = {Proceedings of the International Conference on Automated Planning and Scheduling},
+  publisher = {Association for the Advancement of Artificial Intelligence (AAAI)},
+  volume = {20},
+  pages = {242--245},
+  year = {2010},
+  month = may,
+  doi = {10.1609/icaps.v20i1.13437}
+}
+
+@article{helfenstein2024,
+  author = {Helfenstein, Felix and Czech, Johannes and Blüml, Jannis and Eisel, Max and Kersting, Kristian},
+  title = {Checkmating one, by using many: combining mixture of experts with {MCTS} to improve in chess},
+  journal = {IEEE Transactions on Games},
+  publisher = {Institute of Electrical and Electronics Engineers (IEEE)},
+  volume = {18},
+  number = {2},
+  pages = {285--294},
+  year = {2026},
+  month = jun,
+  doi = {10.1109/tg.2026.3659995}
+}
+
+% Names as printed in the paper (Crossref drops "W." and "McC.").
+@article{regan2011,
+  author = {Regan, Kenneth W. and Haworth, Guy McC.},
+  title = {Intrinsic chess ratings},
+  journal = {Proceedings of the AAAI Conference on Artificial Intelligence},
+  publisher = {Association for the Advancement of Artificial Intelligence (AAAI)},
+  volume = {25},
+  number = {1},
+  pages = {834--839},
+  year = {2011},
+  month = aug,
+  doi = {10.1609/aaai.v25i1.7951}
+}
+
+% Title as printed in the journal (Crossref has "the Search Depth").
+@article{ferreira2013,
+  author = {Ferreira, Diogo R.},
+  title = {The impact of search depth on chess playing strength},
+  journal = {ICGA Journal},
+  publisher = {SAGE Publications},
+  volume = {36},
+  number = {2},
+  pages = {67--80},
+  year = {2013},
+  month = jun,
+  doi = {10.3233/icg-2013-36202}
+}
+
+@inproceedings{fernandez2023,
+  author = {Fernandez, Jared and Kahn, Jacob and Na, Clara and Bisk, Yonatan and Strubell, Emma},
+  title = {The framework tax: disparities between inference efficiency in {NLP} research and deployment},
+  booktitle = {Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing},
+  publisher = {Association for Computational Linguistics},
+  pages = {1588--1600},
+  year = {2023},
+  doi = {10.18653/v1/2023.emnlp-main.98}
 }
