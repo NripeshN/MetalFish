@@ -2121,6 +2121,19 @@ def write_rq6d_contrast(pairs_by_cell: dict, tdir: pathlib.Path):
     (tdir / "rq6d.md").write_text("\n".join(md) + "\n")
 
 
+# the oracle's judges as the manuscript names them (their identifiers in the summary are sf19, lc0)
+ORACLE_JUDGE_TEX = {"sf19": "Stockfish~19", "lc0": "Lc0"}
+
+
+def oracle_judge_tex(name) -> str:
+    return ORACLE_JUDGE_TEX.get(name, str(name).replace("_", "\\_"))
+
+
+def tex_minus(text: str) -> str:
+    """A minus sign, not a hyphen, before each negative number in a LaTeX table cell."""
+    return re.sub(r"(?<![\w$-])-(?=\d)", "$-$", text)
+
+
 def write_oracle_stability(stab: dict, tdir: pathlib.Path):
     """oracle_stability.md and .tex: each judge's runner verdicts against the workstation's on the
     positions both machines judged; amendment 16 (e): a judge passes with at least 0.8 equal
@@ -2148,7 +2161,7 @@ def write_oracle_stability(stab: dict, tdir: pathlib.Path):
         md.append(
             f"| {name} | {st.get('positions', 0)} | {sv_txt} | {r_txt} | {passes} |"
         )
-        name_tex = str(name).replace("_", "\\_")
+        name_tex = oracle_judge_tex(name)
         sv_tex = sv_txt.replace("%", "\\%")
         tex.append(
             f"{name_tex} & {st.get('positions', 0)} & {sv_tex} & {r_txt} & {passes} \\\\"
@@ -2298,7 +2311,7 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
     if ag:
         rows.append(
             (
-                "both agree",
+                "consensus (both agree)",
                 ag["n"],
                 {
                     "frac_mcts_better": ag["stats"]["frac_consensus_mcts_better"],
@@ -2312,9 +2325,11 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
     for name, n, st, pe in rows:
         pe_ci = pe.get("ci95") or [None, None]
         tex.append(
-            f"{esc(name)} & {n} & {ci(st['frac_mcts_better'])} & {ci(st['frac_ab_better'])} & "
-            f"{ci(st['frac_tie'])} & {ci(st['arbiter_upper_bound_es'])} & "
-            f"{fmt_num(pe['estimate'], 1)} [{fmt_num(pe_ci[0], 1)}, {fmt_num(pe_ci[1], 1)}] \\\\"
+            tex_minus(
+                f"{oracle_judge_tex(name)} & {n} & {ci(st['frac_mcts_better'])} & {ci(st['frac_ab_better'])} & "
+                f"{ci(st['frac_tie'])} & {ci(st['arbiter_upper_bound_es'])} & "
+                f"{fmt_num(pe['estimate'], 1)} [{fmt_num(pe_ci[0], 1)}, {fmt_num(pe_ci[1], 1)}] \\\\"
+            )
         )
     tex += ["\\bottomrule", "\\end{tabular}"]
     (tdir / "oracle.tex").write_text("\n".join(tex) + "\n")
@@ -2329,9 +2344,12 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
             pe = c["projected_elo_of_cross_bound"]
             pe_ci = pe.get("ci95") or [None, None]
             tex.append(
-                f"{esc(c['selector'])} & {esc(c['scorer'])} & {c['confirmation_rate']['sample']['flagged']} & "
-                f"{ci(c['confirmation_rate'])} & {ci(c['stats']['cross_bound_es'])} & "
-                f"{fmt_num(pe['estimate'], 1)} [{fmt_num(pe_ci[0], 1)}, {fmt_num(pe_ci[1], 1)}] \\\\"
+                tex_minus(
+                    f"{oracle_judge_tex(c['selector'])} & {oracle_judge_tex(c['scorer'])} & "
+                    f"{c['confirmation_rate']['sample']['flagged']} & "
+                    f"{ci(c['confirmation_rate'])} & {ci(c['stats']['cross_bound_es'])} & "
+                    f"{fmt_num(pe['estimate'], 1)} [{fmt_num(pe_ci[0], 1)}, {fmt_num(pe_ci[1], 1)}] \\\\"
+                )
             )
         tex += ["\\bottomrule", "\\end{tabular}"]
         (tdir / "oracle_cross.tex").write_text("\n".join(tex) + "\n")
@@ -2355,7 +2373,8 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
             " & ".join(
                 ["Positions from", "$n$", "Consensus bound (ES)"]
                 + [
-                    f"{esc(cross[k]['selector'])} selects, {esc(cross[k]['scorer'])} scores"
+                    f"{oracle_judge_tex(cross[k]['selector'])} selects, "
+                    f"{oracle_judge_tex(cross[k]['scorer'])} scores"
                     for k in keys
                 ]
                 + ["Class"]
@@ -2368,22 +2387,20 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
         for label, g, skey in groups:
             gag = g.get("agreement")
             gcj = g.get("cross_judge") or {}
-            tex.append(
-                " & ".join(
-                    [
-                        esc(label),
-                        str(gag["n"] if gag else g["positions"]),
-                        ci(gag["stats"]["consensus_bound_es"]) if gag else "—",
-                    ]
-                    + [
-                        ci(gcj[k]["stats"]["cross_bound_es"]) if k in gcj else "—"
-                        for k in keys
-                    ]
-                    + [cls(g.get("outcome"))]
-                    + [cls(sens[s].get(skey)) for s in scales]
-                )
-                + " \\\\"
+            cells_row = " & ".join(
+                [
+                    esc(label),
+                    str(gag["n"] if gag else g["positions"]),
+                    ci(gag["stats"]["consensus_bound_es"]) if gag else "—",
+                ]
+                + [
+                    ci(gcj[k]["stats"]["cross_bound_es"]) if k in gcj else "—"
+                    for k in keys
+                ]
+                + [cls(g.get("outcome"))]
+                + [cls(sens[s].get(skey)) for s in scales]
             )
+            tex.append(tex_minus(cells_row) + " \\\\")
         tex += ["\\bottomrule", "\\end{tabular}"]
         (tdir / "oracle_cells.tex").write_text("\n".join(tex) + "\n")
 
