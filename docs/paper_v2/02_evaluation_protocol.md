@@ -834,6 +834,26 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
        equals the first in every pooled result.
     Records: `results/paper_v2/runner_readings/RQ6b-R/` (`reading_log.txt`, `completion_check.txt`,
     the first summary `summary_run1_without_cells.json` and its tables in `tables_run1/`).
+    (o) **Note (2026-11-14, after the reading of RQ6b-R; found by the integrity check of the
+    manuscript; no rule changes).** Decision (i) 1 kept the Stockfish 19 judgments made in the
+    attempts of 4 to 6 November because Stockfish runs on the CPU and had recorded no error. Those
+    judgments, of 116 positions in 29 shards (shards 0 to 29 apart from shard 20), searched far less
+    than the others: a median of 3.4 million nodes in their 60 s and a median depth of 21, against
+    78.6 million nodes and depth 34 for the 484 positions judged later with the recorded
+    configuration. 74 of the 116 stayed below 10 million nodes, which none of the 484 did. In each
+    of those shards the first position was searched normally (a median of 60.2 million nodes) and
+    the next three were not. In the minute samplers of those attempts, the Lc0 process on the GPU
+    reached a median resident peak of 8.4 GB (in units of 2^30 bytes) on runners with 7 GB, and
+    every attempt in which it ran shows swap-outs; no attempt on the CPU swapped. The samplers cannot
+    separate the paging from the CPU time the Lc0 process took. The health line counts no nodes, so
+    this was not seen before the reading. The 74 positions of the stability check (16 (e)) are all
+    among the 116. That check therefore compares Stockfish's judgments made under those conditions
+    with the workstation's, and says nothing about the other 484. In an analysis after the reading,
+    not registered, the class of 16 (b) without the 116 positions is also little to gain (the
+    consensus bound 0.0008 [0.0003, 0.0013]). The judgments stay in the reading as (i) 1 decided;
+    the manuscript and 08 §F say what they are. Records:
+    `results/paper_v2/runner_readings/RQ6b-R/sf_gpu_era_judgments.py` and its output
+    `sf_gpu_era_judgments.txt`.
 16. **2026-11-08 — reading rules for the oracle study, results per source cell, and a pass
     criterion for the judges' stability (written before any oracle shard has been read).** The
     pre-submission review of the v2 manuscript (2026-11-08) asked that how each class of oracle

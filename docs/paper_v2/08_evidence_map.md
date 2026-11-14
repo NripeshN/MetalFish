@@ -1488,7 +1488,7 @@ What the audit confirmed.
   the 600 positions had been seen, and nothing else.
 
 **RQ6b-R final reading: the oracle study on the runners** (2026-11-13; the last shard finished at
-21:47 UTC and the driver stopped at 21:49 UTC; joined and read once, from 21:50 UTC, by amendments
+21:47 UTC and the driver stopped at 21:49 UTC; joined and first read from 21:50 UTC, by amendments
 12 (d), 14, 15 (a) and 16). Until then only the shards' health lines and the run records had been
 looked at, apart from what 15 (l) and 15 (i) list. Every shard has one successful run with a health
 line of 4 of 4 positions, 0 judge errors, 0 rows lacking a judge, 0 Lc0 judgments of an earlier
@@ -1497,9 +1497,9 @@ stopped at an error of GitHub's API before anything was joined. Two tool defects
 corrected at the reading, and the second summary equals the first in every pooled result (protocol
 note 15 (n); PRs #165 and #166). The shards were joined by `fetch_runner_oracle.py` at main
 `75c3b68` (22:26–22:32 UTC). The summary is `oracle_probe.py --summarise-only` at main `9a13a57`
-(23:11–23:12 UTC) on the sampling frame `docs/paper_v2/data/rq6b_disagreements.jsonl.gz` (SHA-256
+(23:10–23:12 UTC) on the sampling frame `docs/paper_v2/data/rq6b_disagreements.jsonl.gz` (SHA-256
 `cf578883…`, 42,476 records) with `--sample 600 --seed 1`. The tables are from
-`make_figures.py --final-analyses` in the manuscript worktree at `ad0a61b` (23:12–23:16 UTC). Record in
+`make_figures.py --final-analyses` in the manuscript worktree at `ad0a61b` (23:12–23:15 UTC). Record in
 `results/paper_v2/RQ6b-R/` (`oracle.jsonl`, `oracle.jsonl.summary.json`, `stability.json`,
 `shards.json`, `shards/`) and `results/paper_v2/runner_readings/RQ6b-R/` (`reading_log.txt`,
 `completion_check.py` and its output, the join logs, the first summary and its tables); the fill of
@@ -1509,6 +1509,7 @@ the manuscript's text in `results/paper_v2/runner_readings/oracle_fill/`.
 | --- | --- | --- |
 | Positions; games | 600 of the 600 sampled positions with verdicts from both judges; 534 games (the bootstrap's clusters); 358 positions from RQ1a's games and 242 from RQ1b's | `oracle.jsonl.summary.json` |
 | Judges as recorded | Lc0 0.32.1 on the CPU: `lc0 --backend=blas --weights=networks/BT4-1024x15x32h-swa-6147500.pb SmartPruningFactor=0 nodes=30000` on all 600; Stockfish 19: `stockfish Threads=3 Hash=2048 SyzygyPath=syzygy movetime=60000` on 484, and on 116 judged on 4–6 November before configurations were recorded, kept by 15 (i) 2; 0 errors; 0 judgments that needed a second attempt | `oracle.jsonl.summary.json` (`judges.*.configs`, `errors`, `judged_again`) |
+| Stockfish's judgments kept from 4–6 November (15 (o); found by the integrity check after the reading) | the 116 searched a median of 3,429,884 nodes in their 60 s (depth 21), the 484 judged later 78,594,271 (depth 34), the workstation's 74 567,711,553 (depth 40); 74 of the 116 below 10 million nodes, none of the 484; in each of their 29 shards the first position was searched normally (median 60,159,181 nodes) and the next three were not. Samplers of those attempts: the GPU Lc0 process at a median resident peak of 8,622 MB (top's units), maximum 9,104, on runners with 7 GB; all 43 attempts with an Lc0 process show swap-outs; none of the 150 CPU-era attempts does. The 74 positions of the stability check are all among the 116. After the reading, not registered: without the 116 the pooled class is also little to gain (consensus bound 0.000781 [0.000339, 0.001315]) | `results/paper_v2/runner_readings/RQ6b-R/sf_gpu_era_judgments.py`, `.txt` |
 | Shard attempts | 120 shards with one artifact; shards 0–29 with 2 to 7, their GPU-era attempts beside the attempt that resumed them on the CPU, which the joiner took; for each of the 150 shards the joined run is the run the driver recorded as its successful one | `shards.json`, `runner_campaign_state.json`, `completion_check.txt` |
 | Runs that did not end in success | the five oracle runs of 15 (m) (43018836266 shard 94, 43035451437 shard 96, 43076611832 shard 101, 43088075348 shard 102, 43094933563 shard 103), each run again with success; no other oracle run. Of the game cells, the seven pilot runs cancelled on 6 November (entry "Time forfeits in the runner pilot"). Of the 232 runs the driver recorded, 220 succeeded | `completion_check.txt`, `runner_campaign_state.json` |
 
@@ -1551,13 +1552,15 @@ Reading (amendment 16).
   way round. The class is the same on the positions from RQ1a's games and from RQ1b's, and with the
   conversion constant at 125 or 500 cp (tie bands 0.02 and 0.005).
 - **What it means, within its limits:** judged by two related engines, an arbiter choosing between
-  the hybrid's two root candidates could have gained little on these positions. Both judges rate
-  the alpha-beta move better on most disagreement positions (0.573 and 0.508) and the MCTS move on
-  0.080 and 0.098. The projected Elo of each bound is a conversion, not a prediction of game results.
+  the hybrid's two root candidates could have gained little on these positions. Stockfish rates
+  the alpha-beta move better on most disagreement positions (0.573) and Lc0 on about half (0.508);
+  they rate the MCTS move better on 0.080 and 0.098. The projected Elo of each bound is a conversion, not a prediction of game results.
 - **Stability:** Stockfish 19 fails 16 (e)'s criterion (68.9% equal verdicts, below 0.8, with a
-  correlation of 0.899), so its runner verdicts are those of its runner configuration (3 threads,
-  60 s on a runner, against 8 threads on the workstation); Lc0 passes. The class carries that
-  qualification (16 (e)).
+  correlation of 0.899); Lc0 passes. The runner judgments of the 74 positions are all among the 116
+  Stockfish judgments kept from the attempts of 4–6 November (15 (o)), which searched a median of
+  3.4 million nodes against 78.6 million for the others while the runner was swapping. So the check
+  compares Stockfish under those conditions with the workstation (8 threads), not the runner's
+  Stockfish judgments as a whole. The class carries the qualification of 16 (e).
 - **Scope:** the positions come from the workstation's RQ1a and RQ1b games; the judging ran on the
   runners. The 8 positions of shards 94 and 96 hold their second judgments (15 (m)). No result is
   combined with RQ1a's Elo interval (16 (d)).
