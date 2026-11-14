@@ -936,7 +936,7 @@ def plot_micro(results: pathlib.Path, out: pathlib.Path):
                 [r["nps_steady_median"] for r in lc],
                 marker="s",
                 ls="--",
-                label="Lc0 Metal search (nodes/s, steady state)",
+                label="Lc0 Metal search (nodes/s, median of the last five samples)",
             )
         for a in (a1, a2):
             a.set_xscale("log", base=2)
@@ -1984,8 +1984,8 @@ def write_runner_micro(results: pathlib.Path, out: pathlib.Path):
     workflow's micro task, whose artifact is downloaded into results/paper_v2/runner_micro/. Writes
     runner_micro.md with both, runner_micro_m1.tex (per batch size: the median latency and evaluations
     per second of MetalFish's MPSGraph backend in FP16 and FP32, the evaluations per second of Lc0's
-    Metal backend from backendbench, and Lc0's steady-state search nodes per second at that
-    minibatch) and runner_micro_m2.tex (per alpha-beta thread count: the median nodes per second over
+    Metal backend from backendbench, and Lc0's search nodes per second at that minibatch, the median
+    of its last five samples) and runner_micro_m2.tex (per alpha-beta thread count: the median nodes per second over
     the usable repeats, its range and the speed-up over the first thread count). A measurement that
     logged a GPU error or reached its time limit is shown as not used.
     """
