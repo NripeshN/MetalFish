@@ -2695,8 +2695,9 @@ class OracleJudgeFailureTest(unittest.TestCase):
 
 class DepositTest(unittest.TestCase):
     """tools/paper/make_deposit.py for the v2 deposit: the runner cells with their health logs, both
-    oracle runs, the runner microbenchmarks, readings, probes and campaign record; the merge
-    watchers and the private directory stay out, and an existing deposit is never mixed in.
+    oracle runs, the runner microbenchmarks, readings, probes and campaign record; a set-aside
+    directory keeps its EXCLUDED.txt; the merge watchers and the private directory stay out, and
+    an existing deposit is never mixed in.
     """
 
     def test_v2_layout(self):
@@ -2710,6 +2711,8 @@ class DepositTest(unittest.TestCase):
                 "RQ1a/summary.json": "{}",
                 "RQ1c-R/summary.json": "{}",
                 "RQ1c-R/vm_sampler.log": "health",
+                "RQ1a_rc1_partial/games.pgn": "pgn",
+                "RQ1a_rc1_partial/EXCLUDED.txt": "set aside",
                 "RQ6b/oracle.jsonl": "{}",
                 "RQ6b-R/oracle.jsonl": "{}",
                 "RQ6b-R/oracle.jsonl.summary.json": "{}",
@@ -2752,6 +2755,9 @@ class DepositTest(unittest.TestCase):
         for rel in (
             "cells/RQ1a/games.pgn.gz",
             "cells/RQ1c-R/vm_sampler.log",
+            # the marker that keeps a set-aside directory out of every table travels with it
+            "cells/RQ1a_rc1_partial/games.pgn.gz",
+            "cells/RQ1a_rc1_partial/EXCLUDED.txt",
             "oracle/RQ6b/oracle.jsonl",
             "oracle/RQ6b-R/oracle.jsonl",
             "oracle/RQ6b-R/oracle.jsonl.summary.json",

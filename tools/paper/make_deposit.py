@@ -4,7 +4,8 @@
 Collects, into <out>/ (default results/paper_v2/deposit/):
   cells/<cell>/      games.pgn, summary.json, manifest.json, moves.jsonl, therm.log,
                      fastchess_config.json, fastchess_cmd.txt, fastchess_report.txt,
-                     engines.log(.gz) compressed to .gz
+                     engines.log(.gz) compressed to .gz; EXCLUDED.txt where a directory is
+                     set aside (make_figures.py reads nothing from a directory that holds it)
   gates/<gate>/      summary.json or partial_stats.json, manifest.json, games.pgn (gzipped)
   micro/             *.json microbenchmark outputs
   oracle/<RQ6b|RQ6b-R>/  the oracle study: the workstation's stopped run (RQ6b) and the runners'
@@ -24,6 +25,12 @@ Collects, into <out>/ (default results/paper_v2/deposit/):
                      fill the arXiv identifier when it exists
 Nothing is uploaded: the author creates the Zenodo record (or supplies a token to a later
 upload step) after reviewing the directory. --dry-run only lists what would be copied.
+
+The analysis scripts read the layout of results/paper_v2, not the deposit's. To regenerate the
+tables from a deposit, restore that layout first: cells/<cell>/ -> <cell>/, gates/<gate>/ ->
+sprt/<gate>/, oracle/<run>/ -> <run>/, micro_runner/ -> runner_micro/, readings/ ->
+runner_readings/, runner/runner_campaign_* -> the top level, and decompress games.pgn.gz,
+moves.jsonl.gz and engines.log.gz. The deposit's FROZEN.md has the same table.
 
 Usage:
     python3 tools/paper/make_deposit.py [--out results/paper_v2/deposit] [--cells RQ1a,RQ2a,...]
@@ -56,6 +63,9 @@ CELL_FILES = [
     "fastchess_report.txt",
     "partial_stats.json",
     "vm_sampler.log",
+    # the marker of a set-aside directory: make_figures.py reads nothing from a directory that
+    # holds it, so without it a regeneration from the deposit would report the set-aside games
+    "EXCLUDED.txt",
 ]
 # the oracle study: the workstation's run (stopped at 74 positions; the stability check) and the
 # runners' run (amendment 15 (a)), with the files fetch_runner_oracle.py and oracle_probe.py write
