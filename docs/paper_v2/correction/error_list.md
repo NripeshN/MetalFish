@@ -91,8 +91,8 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
   Table 1 rows (+7%, +16%, "cache cleanup") are single runs without variance. The hybrid runs one
   MCTS worker by default, so multi-threaded MCTS throughput is not exercised in the evaluated mode.
 - **Evidence**: `src/mcts/node.h` (`os_unfair_lock` use); no binary or benchmark record survives
-  (audit B6, B7); the pre-fix source is at `fe20866` (`src/mcts/node.h`, a `std::mutex` lock) and
-  the fix is `1ecb57a`; hybrid default AB 8 threads + 1 MCTS worker
+  (audit B6, B7); the pre-fix source is the fix's parent, `e4313e1` (`src/mcts/node.h`, a
+  `std::mutex` lock), and the fix is `1ecb57a`; hybrid default AB 8 threads + 1 MCTS worker
   (`../08_evidence_map.md` §A, L5/L9 rows; `../03_codebase_changes.md` §0). Audit B6, B7, C9.
 
 ### E5 — NN cache figures · Wrong / Stale
@@ -142,15 +142,23 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
   `make_final_decision` plays the MCTS move only if it is reliable, more than 200 cp better and
   the position is not rated TACTICAL or HIGHLY_TACTICAL (`src/hybrid/hybrid_search.cpp` 905-909),
   so "in tactical positions, the alpha-beta result is preferred" holds as a gate, while "the MCTS
-  evaluation carries more weight" in quiet positions does not (nothing is weighted); it also
-  sets the agreement stop's `min_mcts_nodes` and alpha-beta depth (688-696). At `365f36a` the
-  decision does not branch on position type (it is only logged); the classifier (i) lengthens
-  the time budget when its multiplier > 1 and (ii) sets the agreement stop's thresholds. Mode selection is by UCI options (`UseHybridSearch`, `UseMCTS`), not by
+  evaluation carries more weight" in quiet positions does not (nothing is weighted). The
+  classifier also raises the agreement stop's playout threshold, `min_mcts_nodes`, from 100 to
+  150 when its complexity rating exceeds 0.7 and to 300 with more than five minutes on the clock
+  (688-689;
+  `src/hybrid/classifier.cpp` 441-443, 460-462); the stop's depth requirement is the 10 plies
+  the hybrid configures (`src/uci/uci.cpp` 1003), above the classifier's `ab_verify_depth` (at
+  most 6). At `365f36a` the decision does not branch on position type (it is only logged); the
+  classifier (i) lengthens the time budget when its multiplier > 1 and (ii) raises the same
+  playout threshold (`src/hybrid/classifier.cpp` 427-429, 446-448), which, when the search has
+  no decision budget (`src/hybrid/hybrid_search.cpp` 532-543), also raises the minima of the
+  arbiter's reliability test (4919-4929). Mode selection is by UCI options (`UseHybridSearch`, `UseMCTS`), not by
   the classifier; Fig. 1's routing arrows are wrong.
 - **Evidence**: `git grep -nE 'mcts_weight|ab_weight|ab_override_threshold' ec1dee5 -- src`
   → hits only in `src/hybrid/classifier.{h,cpp}` (21 + 3) and `tests/test_hybrid.cpp` (2);
   identical result at `365f36a`; `git show ec1dee5:src/hybrid/hybrid_search.cpp` lines 172-174,
-  688-696, 905-909; `src/uci/engine.cpp` mode options. Audit C4 (with its note of 2026-11-14), C12.
+  688-696, 905-909, `src/hybrid/classifier.cpp` 441-443, 460-462 and `src/uci/uci.cpp` 1003;
+  `src/uci/engine.cpp` mode options. Audit C4 (with its note of 2026-11-14), C12.
 
 ### E8 — Agreement-based early termination · Unsupported
 

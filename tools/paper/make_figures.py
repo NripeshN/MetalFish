@@ -58,7 +58,7 @@ def pct(x) -> str:
 # Protocol names of the arms (02 §2) for tables and figures; fastchess labels stay in the PGNs.
 DISPLAY_ARMS = {
     "RQ1a": "Hybrid(8) vs AB(8), 30+0.3",
-    "RQ1a_pilot": "Hybrid(8) vs AB(8), 30+0.3 (pilot, pre-C18 footprint)",
+    "RQ1a_pilot": "Hybrid(8) vs AB(8), 30+0.3 (pilot, before the cache cap)",
     "RQ1b": "Hybrid(8) vs AB(8), 60+0.6",
     "RQ1c": "Hybrid(8) vs AB(8), 10+0.1",
     "RQ2a": "AB(6) vs AB(8), 30+0.3",

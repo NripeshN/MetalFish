@@ -1332,7 +1332,8 @@ Reading:
 - **MetalFish's backend against Lc0's.** Lc0's own backend rate was not recorded in this run. The
   probe's backendbench rates, 24.0 and 31.2 evaluations/s at batch 1 on other runners, are roughly
   half to three-fifths of MetalFish's 52.6 here (and of its 47 and 51 in the probe). In RQ5a-R the
-  engines reported 41 and 16 nodes per second, a difference in the same direction; the cell does not
+  engines reported a median of 41 and 16 nodes per second over the moves that reported a non-zero
+  rate, a difference in the same direction; the cell does not
   separate the searches from their backends' speed, and M1 says the backends differ.
 - **Lc0's search benchmark** had not reached a steady rate in its 15-second searches on the runner,
   so its node rates are not compared with MetalFish's evaluation rates.
