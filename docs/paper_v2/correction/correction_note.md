@@ -118,10 +118,12 @@ concern how its components and its results were characterised.
    the decision. In the chapter's engine its position class gated the decision instead: the
    MCTS move could replace the alpha-beta move only in positions the classifier did not rate
    tactical, which is the one sense in which the alpha-beta result was preferred in tactical
-   positions; it also set the minimum MCTS node count and alpha-beta depth required before the
-   agreement-based stop may fire. In the current release the final-move decision does not
-   depend on the position class; the classifier scales the per-move time budget and sets the
-   agreement stop's thresholds.
+   positions. The classifier also raised the number of MCTS playouts required before the
+   agreement-based stop may fire, from 100 to 150 in positions it rated highly complex and to
+   300 with more than five minutes on the clock; the alpha-beta depth required stayed at the
+   10 plies the hybrid configures. In the current release the final-move decision does not depend on the
+   position class; the classifier lengthens the per-move time budget under a clock and raises
+   the same playout threshold.
    Fig. 1 shows the UCI layer routing positions through the classifier to one of the three
    engines; in fact the engine mode is selected by UCI options (`UseHybridSearch`, `UseMCTS`)
    and the classifier plays no part in routing. The sentence in Sect. 6.4 ("The hybrid
