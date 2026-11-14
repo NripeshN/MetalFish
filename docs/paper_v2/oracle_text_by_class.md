@@ -279,3 +279,23 @@ Corrections from the reference check added nine words to sections 1 to 9 (two ci
 reworded). They now stand at 10,027 words before the fill, and the trial fills with made-up numbers
 give 10,290 to 10,417 words for the five forms without an optional clause and 10,436 for class 2
 with the RQ1a clause. Point 10 is otherwise unchanged.
+
+## Changes after the re-review (2026-11-14, after the reading)
+
+The re-review of the revised manuscript (Stage 3′, decision Major Revision) asked for three changes
+to the oracle text as it was filled from this file. They depart from the rules above and are made
+openly, after the reading:
+
+- The stability clause of rule 5, which this file puts in the abstract and the conclusion, is also
+  added to Contribution 4 and to §1's results paragraph (re-review items R4 and NEW-2: amendment
+  16 (e) has a judge that fails the stability check qualify the class, and the class is stated in
+  those places too).
+- Bounds in expected score are printed with four decimals instead of three, in the text and in the
+  tables (item NEW-1: at three decimals the consensus bound's interval, 0.0005 to 0.0014, printed as
+  "0.001 to 0.001"). Shares, percentages, correlations and Elo keep the precision of clarification 1.
+- §4.4 and the stability table's caption present Stockfish's two statistics as a check of
+  sensitivity to search depth, as amendment 16 (e) does, and say that the runner judgments of the
+  74 positions come from the attempts during the GPU failure, which searched far less (item R11;
+  protocol note 15 (o)).
+
+No class, number or reading of a class changes.
