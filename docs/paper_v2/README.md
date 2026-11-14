@@ -208,7 +208,7 @@ designed so the paper is publishable whichever way the measurements come out.
 - **2026-11-14 (note, after RQ6b-R was read)** — Protocol item 15 (o). The integrity check of the
   manuscript found that the 116 Stockfish judgments kept from the oracle's attempts of 4–6 November
   (15 (i) 1) searched far less than the later ones: a median of 3.4 million nodes in 60 s against
-  78.6 million, while the failing GPU Lc0 process kept the runners swapping. The 74 positions of the
+  78.6 million, in attempts in which the failing GPU Lc0 process kept the runners swapping. The 74 positions of the
   judges' stability check are all among them, so Stockfish's failed stability check measured
   judgments made under those conditions. In an analysis after the reading, not registered, the class
   without those positions is also *little to gain*. No rule changes; the manuscript and 08 §F say what

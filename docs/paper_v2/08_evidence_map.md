@@ -1558,7 +1558,7 @@ Reading (amendment 16).
 - **Stability:** Stockfish 19 fails 16 (e)'s criterion (68.9% equal verdicts, below 0.8, with a
   correlation of 0.899); Lc0 passes. The runner judgments of the 74 positions are all among the 116
   Stockfish judgments kept from the attempts of 4–6 November (15 (o)), which searched a median of
-  3.4 million nodes against 78.6 million for the others while the runner was swapping. So the check
+  3.4 million nodes against 78.6 million for the others, in attempts in which the runner was swapping. So the check
   compares Stockfish under those conditions with the workstation (8 threads), not the runner's
   Stockfish judgments as a whole. The class carries the qualification of 16 (e).
 - **Scope:** the positions come from the workstation's RQ1a and RQ1b games; the judging ran on the
