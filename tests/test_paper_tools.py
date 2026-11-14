@@ -2080,9 +2080,9 @@ class OracleJudgingTest(unittest.TestCase):
         body = [l for l in tex if l.endswith("\\\\") and not l.startswith("Selects")]
         self.assertEqual(len(body), 2)
         self.assertTrue(
-            body[0].startswith("sf & lc0 & 1 & 1.000 [1.000, 1.000] & 0.015 [")
+            body[0].startswith("sf & Lc0 & 1 & 1.000 [1.000, 1.000] & 0.015 [")
         )
-        self.assertTrue(body[1].startswith("lc0 & sf & 2 & 0.500 ["))
+        self.assertTrue(body[1].startswith("Lc0 & sf & 2 & 0.500 ["))
 
     def test_outcome_class_rules(self):
         """Amendment 16 (b), (c): the consensus and both cross-judge bounds decide the class against
@@ -2285,8 +2285,8 @@ class OracleJudgingTest(unittest.TestCase):
         # oracle_cells.tex: all positions, then each cell; no class columns for 16 (g)
         self.assertEqual(
             tex[2],
-            "Positions from & $n$ & Consensus bound (ES) & lc0 selects, sf scores & "
-            "sf selects, lc0 scores & Class \\\\",
+            "Positions from & $n$ & Consensus bound (ES) & Lc0 selects, sf scores & "
+            "sf selects, Lc0 scores & Class \\\\",
         )
         body = [l for l in tex[4:] if l.endswith("\\\\")]
         self.assertEqual(
@@ -2411,10 +2411,38 @@ class OracleJudgingTest(unittest.TestCase):
             tex[4:7],
             [
                 "sf & 74 & 80.0\\% & 0.900 & yes \\\\",
-                "lc0 & 74 & 95.0\\% & 0.790 & no \\\\",
+                "Lc0 & 74 & 95.0\\% & 0.790 & no \\\\",
                 "x\\_y & 0 & — & — & — \\\\",
             ],
         )
+
+    def test_oracle_tables_typography(self):
+        """The LaTeX oracle tables name the judges as the text does and print a minus sign, not a
+        hyphen, before negative numbers; the consensus row is labelled as such."""
+        import make_figures as mf
+
+        self.assertEqual(
+            mf.tex_minus("-0.000 [-0.002, 0.001]"), "$-$0.000 [$-$0.002, 0.001]"
+        )
+        self.assertEqual(
+            mf.tex_minus("RQ6b-R & 2.2 [1.6, 2.9]"), "RQ6b-R & 2.2 [1.6, 2.9]"
+        )
+        self.assertEqual(mf.tex_minus("$-$0.1"), "$-$0.1")
+        self.assertEqual(
+            [mf.oracle_judge_tex(n) for n in ("sf19", "lc0", "x_y")],
+            ["Stockfish~19", "Lc0", "x\\_y"],
+        )
+        sampling = {"strata_population": {"A": 300, "B": 100}}
+        s = self.op.summarise(self._rows(), ["sf", "lc0"], sampling, n_boot=200, seed=1)
+        s["method"]["expected_score"] = "logistic, 250 cp per unit of log-odds"
+        with tempfile.TemporaryDirectory() as d:
+            mf.write_oracle_tables(s, pathlib.Path(d))
+            tex = (pathlib.Path(d) / "oracle.tex").read_text().splitlines()
+        labels = [l.split(" & ")[0] for l in tex if l.endswith("\\\\") and " & " in l][
+            1:
+        ]
+        self.assertEqual(labels, ["sf", "Lc0", "consensus (both agree)"])
+        self.assertFalse(any(re.search(r"(?<![\w$-])-\d", l) for l in tex))
 
     def test_weights_fall_back_to_row_shares(self):
         rows = self._rows()
