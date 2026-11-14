@@ -97,7 +97,7 @@
     {
       "id": "E4",
       "title": "74x improvement unsupported",
-      "note": "Corrected: the 2 NPS baseline was a lock-convoy defect in an unpreserved development build; no measurement record exists; the 74x figure and 'a 74x multi-threaded speedup' are withdrawn. os_unfair_lock remains in use. Other Table 1 rows are single runs without variance. The hybrid runs one MCTS worker by default, so multi-threaded MCTS throughput is not exercised in the evaluated mode.",
+      "note": "Corrected: the 2 NPS baseline was a lock-convoy defect in an unpreserved development build; no binary or measurement log survives (only the fix's commit message, 1ecb57a, states the figures); the 74x figure and 'a 74x multi-threaded speedup' are withdrawn. os_unfair_lock remains in use. Other Table 1 rows are single runs without variance. The hybrid runs one MCTS worker by default, so multi-threaded MCTS throughput is not exercised in the evaluated mode.",
       "anchors": [
         {
           "page": 1,
@@ -158,7 +158,7 @@
     {
       "id": "E7",
       "title": "Classifier does not weight the decision; Fig. 1 routing wrong",
-      "note": "Corrected: the classifier's weighting fields are computed but read by no code outside the classifier and its unit tests (chapter's commit and current release); the final-move decision does not depend on the position class. The classifier only scales the per-move time budget and sets the minimum MCTS node count for the agreement stop. Engine mode is selected by UCI options (UseHybridSearch, UseMCTS), not by the classifier; Fig. 1's routing is wrong.",
+      "note": "Corrected: the classifier's weighting fields are computed but read by no code outside the classifier and its unit tests (chapter's commit and current release); in the chapter's engine its position class blocked MCTS overrides in positions rated tactical (the one sense in which alpha-beta was preferred there) and set the agreement stop's thresholds; in the current release the decision does not depend on the class, and the classifier scales the per-move time budget and sets the agreement stop's thresholds. Engine mode is selected by UCI options (UseHybridSearch, UseMCTS), not by the classifier; Fig. 1's routing is wrong.",
       "anchors": [
         {
           "page": 4,
