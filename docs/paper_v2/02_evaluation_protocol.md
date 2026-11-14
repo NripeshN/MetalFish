@@ -840,11 +840,13 @@ AB(8) at 30+0.3 over 101 games. **Freeze: main 365f36a (2026-10-14)**; the MUST 
     judgments, of 116 positions in 29 shards (shards 0 to 29 apart from shard 20), searched far less
     than the others: a median of 3.4 million nodes in their 60 s and a median depth of 21, against
     78.6 million nodes and depth 34 for the 484 positions judged later with the recorded
-    configuration. 74 of the 116 stayed below 10 million nodes, which none of the 484 did. In each
-    of those shards the first position was searched normally (a median of 60.2 million nodes) and
-    the next three were not. In the minute samplers of those attempts, the Lc0 process on the GPU
+    configuration. 74 of the 116 stayed below 10 million nodes, which none of the 484 did. In 21 of
+    the 29 shards the first position was searched normally and the next three stayed below 10
+    million nodes; over all 29, the first positions had a median of 60.2 million nodes and the 87
+    later ones a median of 0.82 million. In the minute samplers of those attempts, the Lc0 process on the GPU
     reached a median resident peak of 8.4 GB (in units of 2^30 bytes) on runners with 7 GB, and
-    every attempt in which it ran shows swap-outs; no attempt on the CPU swapped. The samplers cannot
+    every attempt in which it ran shows swap-outs; none of the 150 attempts on the CPU that have a
+    sampler swapped (the five failed runs of (m) left none). The samplers cannot
     separate the paging from the CPU time the Lc0 process took. The health line counts no nodes, so
     this was not seen before the reading. The 74 positions of the stability check (16 (e)) are all
     among the 116. That check therefore compares Stockfish's judgments made under those conditions
