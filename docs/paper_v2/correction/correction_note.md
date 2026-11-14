@@ -82,7 +82,8 @@ concern how its components and its results were characterised.
 4. **The 74× throughput improvement** (Abstract; Sect. 1, contribution 2; Table 1; Sect. 4.1;
    Sect. 7). The measurement "2 NPS → 148 NPS, 74×" cannot be reproduced: the 2 NPS baseline
    was a lock-convoy defect in a development build that was not preserved, not a
-   representative implementation, and no measurement record exists. The figure "74×" and the
+   representative implementation; no binary or measurement log survives, and only the fix's commit message
+   (1ecb57a, 17 March 2026) states the figures. The figure "74×" and the
    phrase "a 74× multi-threaded speedup" are withdrawn; `os_unfair_lock` remains in use for
    per-node score updates. The remaining rows of Table 1 are single-run measurements without
    repetition or variance and should be read as engineering notes, not results. In the
@@ -111,11 +112,16 @@ concern how its components and its results were characterised.
 7. **Position classifier and Fig. 1** (Sect. 3.3; Algorithm 1, line 2; Fig. 1; Sect. 6.4).
    "The position classifier analyzes tactical features (checks, captures, piece tension) to
    adjust the decision weighting. In tactical positions, the alpha-beta result is preferred;
-   in quiet strategic positions, the MCTS evaluation carries more weight" is incorrect. The
-   classifier computes weighting fields, but no code outside the classifier and its unit tests
-   reads them, in the chapter's engine or in the current release, and the final-move decision
-   does not depend on the position class. The classifier only scales the per-move time budget
-   and sets the minimum MCTS node count required before the agreement-based stop may fire.
+   in quiet strategic positions, the MCTS evaluation carries more weight" is partly incorrect.
+   The classifier computes weighting fields, but no code outside the classifier and its unit
+   tests reads them, in the chapter's engine or in the current release, so it does not weight
+   the decision. In the chapter's engine its position class gated the decision instead: the
+   MCTS move could replace the alpha-beta move only in positions the classifier did not rate
+   tactical, which is the one sense in which the alpha-beta result was preferred in tactical
+   positions; it also set the minimum MCTS node count and alpha-beta depth required before the
+   agreement-based stop may fire. In the current release the final-move decision does not
+   depend on the position class; the classifier scales the per-move time budget and sets the
+   agreement stop's thresholds.
    Fig. 1 shows the UCI layer routing positions through the classifier to one of the three
    engines; in fact the engine mode is selected by UCI options (`UseHybridSearch`, `UseMCTS`)
    and the classifier plays no part in routing. The sentence in Sect. 6.4 ("The hybrid
