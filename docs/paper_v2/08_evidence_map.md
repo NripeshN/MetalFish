@@ -174,6 +174,20 @@ when the block's last game is unpaired, which is then replayed); `penta_stats.py
 games first (falling back to round/opening keys for interleaved games). Recomputed statistics of every
 cell and gate are unchanged.
 
+Correction (2026-11-14; found by the final integrity check of the version-2 manuscript): the entry above
+names the wrong interruption. In `RQ1a/games.pgn` one opening has a single game: game 589 (16 October,
+18:46:42 to 18:48:22 local). The host rebooted at 18:49 after the third kernel panic; the watchdog's stop
+request of 18:47:21 was still pending, and no stop is logged. On resuming, the runner counted the block's
+88 games as 44 complete pairs, although it held 43 pairs and two unpaired games (514, from that morning's
+reboots, and 589), and so started one opening further on. The pair that the watchdog stop at 616 games
+split (17 October, 01:31:44) had its opening replayed as games 617 and 618; the watchdog's parity was off
+there because the cell then held three unpaired games (283, 514 and 589). So block 1's three unpaired games
+at the time of the fix were 514 (host reboot, opening replayed as games 515 and 516), 589 (host reboot,
+opening skipped) and 616 (watchdog stop, opening replayed). The fix, the counts and every statistic stand:
+RQ1a has 999 pairs and four unpaired games (283, 514, 589 and 616), one pair fewer than planned. The
+version-2 manuscript's Appendix E says that the skipped opening belonged to a pair split by a host
+reboot.
+
 Resumption and forfeits, 2026-10-26: the queue had not run since the host reboot of 2026-10-20 18:48
 BST (no one resumed it; further reboots 2026-10-20 18:55, 2026-10-22 07:20 and a clean restart
 2026-10-26 10:51 GMT); RQ1a then stood at 834 games. It was resumed at 11:41 GMT, and a login agent
@@ -1113,7 +1127,7 @@ Reading. Runner cells are exploratory and carry no alpha of their own (amendment
     increment of 0.3 s (`timing.txt`).
 - **What the cell does not separate:**
   - The engines reported a median of 41 (MetalFish) and 16 (Lc0) nodes per second, at median depths 6
-    and 3. So the cell measures each search together with its backend's speed on the runner's GPU, not
+    and 3 (the rates over the moves that reported a non-zero rate; noted 2026-11-14). So the cell measures each search together with its backend's speed on the runner's GPU, not
     the search alone. M1, from the micro task (still to run), measures both backends on a runner.
   - Lc0 at minibatch 1 is not Lc0 as users run it; its Metal backend defaults to minibatch 256
     (amendment 15 (k) 1). RQ5b, Lc0 at its defaults, is a COULD cell and is not played.
