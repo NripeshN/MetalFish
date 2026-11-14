@@ -2073,14 +2073,14 @@ class OracleJudgingTest(unittest.TestCase):
             tex = (pathlib.Path(d) / "oracle_cross.tex").read_text().splitlines()
             self.assertTrue((pathlib.Path(d) / "oracle.tex").exists())
         self.assertIn(
-            "| sf | lc0 | 1 of 4 | 1.000 [1.000, 1.000] | 0/1/0 | 1 | 0.015 [", md
+            "| sf | lc0 | 1 of 4 | 1.000 [1.000, 1.000] | 0/1/0 | 1 | 0.0150 [", md
         )
         self.assertIn("| lc0 | sf | 2 of 4 | 0.500 [", md)
         self.assertIn("not a prediction of game results", md)
         body = [l for l in tex if l.endswith("\\\\") and not l.startswith("Selects")]
         self.assertEqual(len(body), 2)
         self.assertTrue(
-            body[0].startswith("sf & Lc0 & 1 & 1.000 [1.000, 1.000] & 0.015 [")
+            body[0].startswith("sf & Lc0 & 1 & 1.000 [1.000, 1.000] & 0.0150 [")
         )
         self.assertTrue(body[1].startswith("Lc0 & sf & 2 & 0.500 ["))
 

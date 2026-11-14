@@ -6,7 +6,7 @@ Systems and Applications. IntelliSys 2026*, Lecture Notes in Networks and System
 Springer, Cham, pp. 653–664, DOI [10.1007/978-3-032-32726-0_39](https://doi.org/10.1007/978-3-032-32726-0_39)
 (published online 2026-08-14; print year 2027). Basis: `../01_published_paper_audit.md`.
 
-**Status (2026-11-01): draft, not filed.** Filing is outward-facing and is the author's action;
+**Status (2026-11-14): draft, not filed.** Filing is outward-facing and is the author's action;
 see `support_ticket.md` for the exact steps. Before filing, fill the two remaining fields in
 `correction_note.md`:
 
