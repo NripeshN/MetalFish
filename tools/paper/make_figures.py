@@ -2177,15 +2177,20 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
     protocol amendment 14 (one judge selects, the other scores)."""
     esc = lambda t: str(t).replace("_", "\\_").replace("%", "\\%")  # noqa: E731
 
-    def ci(st):
+    def ci(st, nd=3):
         if st.get("estimate") is None:
             return "—"
         lo, hi = st.get("ci95") or (None, None)
         return (
-            f"{st['estimate']:.3f} [{lo:.3f}, {hi:.3f}]"
+            f"{st['estimate']:.{nd}f} [{lo:.{nd}f}, {hi:.{nd}f}]"
             if lo is not None
-            else f"{st['estimate']:.3f}"
+            else f"{st['estimate']:.{nd}f}"
         )
+
+    def bound(st):
+        """Bounds in expected score, four decimals: at three, an interval as narrow as the
+        consensus bound's (0.0005 to 0.0014) would print as 0.001 to 0.001."""
+        return ci(st, 4)
 
     md = [
         f"Positions: {o['positions']} from {o['games']} games ({o['cluster_unit']} clusters); "
@@ -2200,7 +2205,7 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
         pe_ci = pe.get("ci95") or [None, None]
         md.append(
             f"| {name} | {j['n']} | {ci(st['frac_ab_better'])} | {ci(st['frac_mcts_better'])} | {ci(st['frac_tie'])} | "
-            f"{ci(st['loss_es_ab_minus_mcts'])} | {ci(st['arbiter_upper_bound_es'])} | "
+            f"{ci(st['loss_es_ab_minus_mcts'])} | {bound(st['arbiter_upper_bound_es'])} | "
             f"{(pe['estimate'] or 0):.1f} [{(pe_ci[0] or 0):.1f}, {(pe_ci[1] or 0):.1f}] | {ci(st['realised_accuracy'])} |"
         )
     ag = o.get("agreement")
@@ -2211,7 +2216,7 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
             f"Judges' agreement on {ag['n']} positions: {ci(st['frac_judges_agree'])}, Cohen's kappa "
             f"{fmt_num(ag.get('cohen_kappa_sample'), 2)}; consensus AB better {ci(st['frac_consensus_ab_better'])}, MCTS better "
             f"{ci(st['frac_consensus_mcts_better'])}, undecided {ci(st['frac_undecided'])}; bound on agreed positions "
-            f"{ci(st['consensus_bound_es'])} (projected Elo {fmt_num(ag['projected_elo_of_consensus_bound']['estimate'], 1)}).",
+            f"{bound(st['consensus_bound_es'])} (projected Elo {fmt_num(ag['projected_elo_of_consensus_bound']['estimate'], 1)}).",
         ]
     cross = o.get("cross_judge") or {}
     if cross:
@@ -2231,7 +2236,7 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
             pe_ci = pe.get("ci95") or [None, None]
             md.append(
                 f"| {c['selector']} | {c['scorer']} | {cr['sample']['flagged']} of {c['n']} | {ci(cr)} | "
-                f"{v['ab']}/{v['mcts']}/{v['tie']} | {c['picks_not_selected']} | {ci(c['stats']['cross_bound_es'])} | "
+                f"{v['ab']}/{v['mcts']}/{v['tie']} | {c['picks_not_selected']} | {bound(c['stats']['cross_bound_es'])} | "
                 f"{fmt_num(pe['estimate'], 1)} [{fmt_num(pe_ci[0], 1)}, {fmt_num(pe_ci[1], 1)}] |"
             )
         md += [
@@ -2284,14 +2289,14 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
         ]
         for cell, c in cells.items():
             per = "; ".join(
-                f"{n} {ci(j['stats']['arbiter_upper_bound_es'])}"
+                f"{n} {bound(j['stats']['arbiter_upper_bound_es'])}"
                 for n, j in c["judges"].items()
             )
             cag = c.get("agreement")
-            cons = ci(cag["stats"]["consensus_bound_es"]) if cag else "—"
+            cons = bound(cag["stats"]["consensus_bound_es"]) if cag else "—"
             crs = (
                 "; ".join(
-                    f"{k} {ci(v['stats']['cross_bound_es'])}"
+                    f"{k} {bound(v['stats']['cross_bound_es'])}"
                     for k, v in (c.get("cross_judge") or {}).items()
                 )
                 or "—"
@@ -2327,7 +2332,7 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
         tex.append(
             tex_minus(
                 f"{oracle_judge_tex(name)} & {n} & {ci(st['frac_mcts_better'])} & {ci(st['frac_ab_better'])} & "
-                f"{ci(st['frac_tie'])} & {ci(st['arbiter_upper_bound_es'])} & "
+                f"{ci(st['frac_tie'])} & {bound(st['arbiter_upper_bound_es'])} & "
                 f"{fmt_num(pe['estimate'], 1)} [{fmt_num(pe_ci[0], 1)}, {fmt_num(pe_ci[1], 1)}] \\\\"
             )
         )
@@ -2347,7 +2352,7 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
                 tex_minus(
                     f"{oracle_judge_tex(c['selector'])} & {oracle_judge_tex(c['scorer'])} & "
                     f"{c['confirmation_rate']['sample']['flagged']} & "
-                    f"{ci(c['confirmation_rate'])} & {ci(c['stats']['cross_bound_es'])} & "
+                    f"{ci(c['confirmation_rate'])} & {bound(c['stats']['cross_bound_es'])} & "
                     f"{fmt_num(pe['estimate'], 1)} [{fmt_num(pe_ci[0], 1)}, {fmt_num(pe_ci[1], 1)}] \\\\"
                 )
             )
@@ -2391,10 +2396,10 @@ def write_oracle_tables(o: dict, tdir: pathlib.Path):
                 [
                     esc(label),
                     str(gag["n"] if gag else g["positions"]),
-                    ci(gag["stats"]["consensus_bound_es"]) if gag else "—",
+                    bound(gag["stats"]["consensus_bound_es"]) if gag else "—",
                 ]
                 + [
-                    ci(gcj[k]["stats"]["cross_bound_es"]) if k in gcj else "—"
+                    bound(gcj[k]["stats"]["cross_bound_es"]) if k in gcj else "—"
                     for k in keys
                 ]
                 + [cls(g.get("outcome"))]
