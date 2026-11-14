@@ -117,7 +117,8 @@ designed so the paper is publishable whichever way the measurements come out.
   0.32.1 at the same settings with the same network (600 games). The cell is time-sensitive. Lc0
   overran its clock in 54 games, late in long games when it was down to the 0.3 s increment;
   MetalFish never did. Without the 1 s margin those games are Lc0's losses, and the cell is +76.5
-  [+53.5, +100.2]. Three things limit the reading. The engines reported 41 and 16 nodes per second,
+  [+53.5, +100.2]. Three things limit the reading. The engines reported a median of 41 and 16 nodes per second over the moves that reported a
+  non-zero rate,
   so the cell does not separate the searches from their backends' speed. Lc0 at minibatch 1 is not
   Lc0 at its defaults. And with both engines holding the network, the 7 GB runner swapped in every
   block. There were no time forfeits and no GPU errors.
