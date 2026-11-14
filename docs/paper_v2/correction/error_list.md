@@ -85,12 +85,14 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
   74× improvement"; Table 1 row "os_unfair_lock in Node · 2 NPS · 148 NPS · 74× (2T)"; "for a
   74× multi-threaded speedup".
 - **Corrected**: the 2 NPS baseline was a lock-convoy defect in an unpreserved development
-  build; no record of the measurement exists; the 74× figure and the "speedup" phrasing are
+  build; no binary or measurement log survives, and only the fix's commit message (`1ecb57a`,
+  17 March 2026: "2T: 2 -> 148 NPS") states the figures; the 74× figure and the "speedup" phrasing are
   withdrawn. `os_unfair_lock` is still used for `FinalizeScoreUpdate`/`MakeTerminal`. Other
   Table 1 rows (+7%, +16%, "cache cleanup") are single runs without variance. The hybrid runs one
   MCTS worker by default, so multi-threaded MCTS throughput is not exercised in the evaluated mode.
-- **Evidence**: `src/mcts/node.h` (`os_unfair_lock` use); absence of the "before" code and of
-  any benchmark record (audit B6, B7); hybrid default AB 8 threads + 1 MCTS worker
+- **Evidence**: `src/mcts/node.h` (`os_unfair_lock` use); no binary or benchmark record survives
+  (audit B6, B7); the pre-fix source is at `fe20866` (`src/mcts/node.h`, a `std::mutex` lock) and
+  the fix is `1ecb57a`; hybrid default AB 8 threads + 1 MCTS worker
   (`../08_evidence_map.md` §A, L5/L9 rows; `../03_codebase_changes.md` §0). Audit B6, B7, C9.
 
 ### E5 — NN cache figures · Wrong / Stale
@@ -123,7 +125,7 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
   `ec1dee5:src/eval/evaluate.h` lines 25–26; `ec1dee5:src/eval/nnue/nnue_architecture.h`
   lines 28–29; file sizes `ls -l networks/`; `365f36a:src/eval/evaluate.h` line 25. Audit C2, C3.
 
-### E7 — Position classifier and Fig. 1 · Wrong
+### E7 — Position classifier and Fig. 1 · Wrong (weighting, routing)
 
 - **Where**: Sect. 3.3 (p. 5); Algorithm 1 line 2 (p. 5); Fig. 1 and caption (p. 4); Sect. 6.4
   (p. 11).
@@ -135,13 +137,20 @@ measurement cannot be reproduced), **Misleading** (true words, wrong inference),
   position classifier".
 - **Corrected**: `mcts_weight`, `ab_weight`, `ab_override_threshold` are computed in
   `src/hybrid/classifier.{h,cpp}` and read nowhere else in `src/` (only in `tests/`), at
-  `ec1dee5` and at `365f36a`; the decision does not branch on position type. The classifier
-  only (i) lengthens the time budget when its multiplier > 1 and (ii) sets `min_mcts_nodes` for
-  the agreement stop. Mode selection is by UCI options (`UseHybridSearch`, `UseMCTS`), not by
+  `ec1dee5` and at `365f36a`, so the classifier does not weight the decision. At `ec1dee5`
+  (classifier on by default, `src/uci/uci.cpp` 1009) its position type gates the decision:
+  `make_final_decision` plays the MCTS move only if it is reliable, more than 200 cp better and
+  the position is not rated TACTICAL or HIGHLY_TACTICAL (`src/hybrid/hybrid_search.cpp` 905-909),
+  so "in tactical positions, the alpha-beta result is preferred" holds as a gate, while "the MCTS
+  evaluation carries more weight" in quiet positions does not (nothing is weighted); it also
+  sets the agreement stop's `min_mcts_nodes` and alpha-beta depth (688-696). At `365f36a` the
+  decision does not branch on position type (it is only logged); the classifier (i) lengthens
+  the time budget when its multiplier > 1 and (ii) sets the agreement stop's thresholds. Mode selection is by UCI options (`UseHybridSearch`, `UseMCTS`), not by
   the classifier; Fig. 1's routing arrows are wrong.
 - **Evidence**: `git grep -nE 'mcts_weight|ab_weight|ab_override_threshold' ec1dee5 -- src`
   → hits only in `src/hybrid/classifier.{h,cpp}` (21 + 3) and `tests/test_hybrid.cpp` (2);
-  identical result at `365f36a`; `src/uci/engine.cpp` mode options. Audit C4, C12.
+  identical result at `365f36a`; `git show ec1dee5:src/hybrid/hybrid_search.cpp` lines 172-174,
+  688-696, 905-909; `src/uci/engine.cpp` mode options. Audit C4 (with its note of 2026-11-14), C12.
 
 ### E8 — Agreement-based early termination · Unsupported
 

@@ -68,8 +68,9 @@ text; the attached Correction note lists all fourteen items. In summary:
 5. The neural-network cache figures (3.5 GB → 38 MB, 92×) are wrong (≈0.41 GB, ≈9×).
 6. The transposition-table default (16 MB, not 512 MB) and the NNUE network sizes and feature
    set (108.9 MB and 3.5 MB; FullThreats + HalfKAv2_hm) were misstated.
-7. The position classifier does not adjust the decision weighting, and Fig. 1's routing through
-   the classifier is wrong (mode selection is by UCI option).
+7. The position classifier does not adjust the decision weighting (in the chapter's engine it
+   blocked MCTS overrides in positions it rated tactical), and Fig. 1's routing through the
+   classifier is wrong (mode selection is by UCI option).
 8. The agreement-based early stop never fired in the retained July 2026 telemetry (0 of 209
    decisions); in the current engine it fired on 1.0% of the moves with the transformer
    active at 30 s + 0.3 s and on 48.6% at 60 s + 0.6 s; the "10–40% time savings" figure is
