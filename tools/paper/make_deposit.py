@@ -14,9 +14,12 @@ Collects, into <out>/ (default results/paper_v2/deposit/):
   readings/          the runner cells' reading folders (results/paper_v2/runner_readings)
   runner_probe/      the runner probes the paper cites (results/paper_v2/runner_probe)
   runner/            the campaign log and state, the runner workflow and the dispatch driver
-  plan/              docs/paper_v2 (protocol, audit, blueprint, evidence map, correction package,
-                     manuscript source) without build products
-  tools/             tools/paper/*.py and README
+  plan/              docs/paper_v2 as git tracks it (protocol, audit, blueprint, evidence map,
+                     correction package, manuscript source), with the generated tables/ and
+                     figures/ and paper/main.pdf. A local file that git does not track stays
+                     out, and so do the publisher's copy of the chapter, its annotated copy,
+                     the anonymised manuscript and the arXiv source package
+  tools/             tools/paper/*.py and README, as git tracks them
   bin/MAIN_READY     frozen-binary hash record; FROZEN.md if present; queue log; hostload.log
   scripts/           the queue, load-gate, oracle and logger scripts (results/paper_v2/*.sh; the
                      merge watchers are left out)
@@ -82,7 +85,15 @@ ORACLE_FILES = (
 RUNNER_FILES = ("runner_campaign_log.txt", "runner_campaign_state.json")
 SCRIPT_SKIP = ("automerge", "rerun_then_automerge")
 COMPRESS = {"engines.log", "games.pgn", "moves.jsonl"}
-PLAN_SKIP = {".bibcache", "__pycache__"}
+# "arxiv": the arXiv source package that make_arxiv_source.py writes under paper/ (a build product)
+PLAN_SKIP = {".bibcache", "__pycache__", "arxiv"}
+# Local files under docs/paper_v2 that never enter a deposit: the publisher's copy of the chapter
+# and its annotated copy (the chapter is not the author's to relicense under the deposit's licence),
+# and the anonymised variant of the manuscript, which exists for double-anonymous review.
+PLAN_SKIP_NAMES = {"chapter_camera_ready.pdf", "chapter_annotated.pdf", "main_anon.pdf"}
+# Build products the paper shows; the deposit keeps them although git does not track them.
+PLAN_GENERATED_DIRS = {"tables", "figures"}
+PLAN_GENERATED_FILES = {"paper/main.pdf"}
 PLAN_SKIP_SUFFIX = {
     ".aux",
     ".bbl",
@@ -101,6 +112,20 @@ def sha256(path: pathlib.Path) -> str:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def tracked_files(*subdirs: str):
+    """The files under the given repository folders that git tracks, or None outside a git
+    checkout. A file that lies in the plan or tools folder but that git does not track is a local
+    file, and a deposit must not publish it unasked."""
+    r = subprocess.run(
+        ["git", "-C", str(REPO), "ls-files", "-z", "--", *subdirs],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        return None
+    return {(REPO / p).resolve() for p in r.stdout.split("\0") if p}
 
 
 def put(src: pathlib.Path, dst: pathlib.Path, plan: list, dry: bool) -> None:
@@ -222,11 +247,20 @@ def main(argv=None) -> int:
     for src in sorted(RESULTS.glob("*.sh")):
         if not src.name.startswith(SCRIPT_SKIP):
             put(src, out / "scripts" / src.name, plan, args.dry_run)
-    for src in sorted((REPO / "docs" / "paper_v2").rglob("*")):
+    tracked = tracked_files("docs/paper_v2", "tools/paper")
+    plan_root = REPO / "docs" / "paper_v2"
+    for src in sorted(plan_root.rglob("*")):
+        rel = src.relative_to(plan_root)
+        generated = (
+            rel.parts[0] in PLAN_GENERATED_DIRS
+            or rel.as_posix() in PLAN_GENERATED_FILES
+        )
         if (
             src.is_file()
-            and not (PLAN_SKIP & set(src.parts))
+            and not (PLAN_SKIP & set(rel.parts))
             and src.suffix not in PLAN_SKIP_SUFFIX
+            and src.name not in PLAN_SKIP_NAMES
+            and (tracked is None or generated or src.resolve() in tracked)
         ):
             put(
                 src,
@@ -235,7 +269,7 @@ def main(argv=None) -> int:
                 args.dry_run,
             )
     for src in sorted((REPO / "tools" / "paper").glob("*")):
-        if src.is_file():
+        if src.is_file() and (tracked is None or src.resolve() in tracked):
             put(src, out / "tools" / src.name, plan, args.dry_run)
 
     git = subprocess.run(

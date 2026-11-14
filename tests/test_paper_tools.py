@@ -9,6 +9,8 @@ import json
 import math
 import pathlib
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -2735,6 +2737,13 @@ class DepositTest(unittest.TestCase):
                 ".github/workflows/paper-runner-cells.yml",
                 "results/ars_pipeline/tools/runner_driver.py",
                 "docs/paper_v2/README.md",
+                "docs/paper_v2/tables/cells.tex",
+                "docs/paper_v2/paper/main.pdf",
+                "docs/paper_v2/paper/main_anon.pdf",
+                "docs/paper_v2/paper/arxiv/src/main.tex",
+                "docs/paper_v2/correction/correction_note.md",
+                "docs/paper_v2/correction/chapter_camera_ready.pdf",
+                "docs/paper_v2/correction/chapter_annotated.pdf",
                 "tools/paper/x.py",
             ):
                 (root / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -2771,13 +2780,83 @@ class DepositTest(unittest.TestCase):
             "runner/runner_driver.py",
             "scripts/loadgate.sh",
             "plan/README.md",
+            "plan/tables/cells.tex",
+            "plan/paper/main.pdf",
+            "plan/correction/correction_note.md",
             "tools/x.py",
             "zenodo.json",
             "CHECKSUMS.sha256",
         ):
             self.assertIn(rel, got)
-        for part in ("automerge", "__pycache__", "private", "old.txt", "cells/RQ6b"):
+        # the publisher's copy of the chapter, its annotated copy, the anonymised manuscript and the
+        # arXiv source package are local files that a deposit never takes
+        for part in (
+            "automerge",
+            "__pycache__",
+            "private",
+            "old.txt",
+            "cells/RQ6b",
+            "chapter_camera_ready",
+            "chapter_annotated",
+            "main_anon",
+            "paper/arxiv",
+        ):
             self.assertFalse(any(part in g for g in got), part)
+
+    def test_untracked_plan_and_tool_files_stay_out(self):
+        """In a git checkout the plan and tools folders are deposited as git tracks them; the
+        generated tables and figures and the built manuscript are the only untracked files kept.
+        """
+        import make_deposit as md
+
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed")
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            tracked = (
+                "docs/paper_v2/README.md",
+                "docs/paper_v2/paper/main.tex",
+                "tools/paper/x.py",
+            )
+            untracked = (
+                "docs/paper_v2/notes_local.md",
+                "docs/paper_v2/paper/draft_local.tex",
+                "docs/paper_v2/tables/cells.tex",
+                "docs/paper_v2/figures/forest.pdf",
+                "docs/paper_v2/paper/main.pdf",
+                "tools/paper/local_tool.py",
+                "results/paper_v2/RQ1a/games.pgn",
+            )
+            for rel in tracked + untracked:
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text("x")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "add", "--", *tracked], check=True)
+            saved = md.REPO, md.RESULTS
+            md.REPO, md.RESULTS = root, root / "results" / "paper_v2"
+            try:
+                out = root / "out"
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(md.main(["--out", str(out)]), 0)
+            finally:
+                md.REPO, md.RESULTS = saved
+            got = {str(p.relative_to(out)) for p in out.rglob("*") if p.is_file()}
+        for rel in (
+            "plan/README.md",
+            "plan/paper/main.tex",
+            "plan/tables/cells.tex",
+            "plan/figures/forest.pdf",
+            "plan/paper/main.pdf",
+            "tools/x.py",
+            "cells/RQ1a/games.pgn.gz",
+        ):
+            self.assertIn(rel, got)
+        for rel in (
+            "plan/notes_local.md",
+            "plan/paper/draft_local.tex",
+            "tools/local_tool.py",
+        ):
+            self.assertNotIn(rel, got)
 
 
 if __name__ == "__main__":
